@@ -1,4 +1,5 @@
 <?php
+
 require '../vendor/autoload.php';
 
 use Infocyph\DBLayer\DB;
@@ -14,7 +15,7 @@ DB::addConnection([
 // Complex WHERE clauses
 $users = DB::table('users')
     ->where('active', true)
-    ->where(function($query) {
+    ->where(function ($query) {
         $query->where('age', '>', 18)
               ->orWhere('verified', true);
     })
@@ -37,7 +38,7 @@ $paginatedUsers = DB::table('users')
     ->get();
 
 // Chunking for large datasets
-DB::table('users')->chunk(100, function($users) {
+DB::table('users')->chunk(100, function ($users) {
     foreach ($users as $user) {
         // Process each user
         echo "Processing: {$user['name']}\n";
@@ -53,7 +54,7 @@ foreach (DB::table('logs')->cursor() as $log) {
 // Conditional queries
 $status = 'active';
 $users = DB::table('users')
-    ->when($status, function($query, $status) {
+    ->when($status, function ($query, $status) {
         return $query->where('status', $status);
     })
     ->get();

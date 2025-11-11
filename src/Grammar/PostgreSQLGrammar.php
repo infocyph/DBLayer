@@ -4,421 +4,129 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Grammar;
 
+use Infocyph\DBLayer\Query\QueryBuilder;
+
 /**
- * PostgreSQL Grammar Implementation
- * 
- * Compiles query builder components into PostgreSQL-specific SQL syntax.
- * Handles PostgreSQL-specific features like RETURNING clauses, array operations,
- * and PostgreSQL's advanced data types.
- * 
- * @package DBLayer\Grammar
+ * PostgreSQL Grammar
+ *
+ * PostgreSQL-specific SQL compilation with support for:
+ * - Double-quote identifier quoting
+ * - RETURNING clause
+ * - PostgreSQL-specific functions
+ * - Array operations
+ * - JSON/JSONB operations
+ *
+ * @package Infocyph\DBLayer\Grammar
  * @author Hasan
  */
 class PostgreSQLGrammar extends Grammar
 {
     /**
-     * The grammar specific operators
+     * Compile a delete statement with RETURNING
      */
-    protected array $operators = [
-        '=', '<', '>', '<=', '>=', '<>', '!=',
-        'like', 'not like', 'ilike', 'not ilike',
-        '~', '~*', '!~', '!~*',
-        'similar to', 'not similar to',
-        '&&', '||', '@>', '<@', '?', '?|', '?&',
-    ];
+    public function compileDeleteReturning(QueryBuilder $query, array $returning = ['*']): string
+    {
+        $delete = $this->compileDelete($query);
+        $columns = $this->columnize($returning);
+
+        return "{$delete} returning {$columns}";
+    }
 
     /**
-     * Compile the lock into SQL
+     * Compile an insert statement with RETURNING
      */
-    protected function compileLock(array $query, bool|string $value): string
+    public function compileInsertGetId(QueryBuilder $query, array $values, ?string $sequence = null): string
     {
-        if (is_string($value)) {
-            return $value;
+        $insert = $this->compileInsert($query, $values);
+
+        return $insert . ' returning ' . ($sequence ?? 'id');
+    }
+
+    /**
+     * Compile a truncate table statement (PostgreSQL-specific)
+     */
+    public function compileTruncate(QueryBuilder $query): string
+    {
+        $table = $this->wrapTable($query->getComponents()['from']);
+
+        return "truncate table {$table} restart identity cascade";
+    }
+
+    /**
+     * Compile an update statement with RETURNING
+     */
+    public function compileUpdateReturning(QueryBuilder $query, array $values, array $returning = ['*']): string
+    {
+        $update = $this->compileUpdate($query, $values);
+        $columns = $this->columnize($returning);
+
+        return "{$update} returning {$columns}";
+    }
+
+    /**
+     * Compile an insert statement with ON CONFLICT (UPSERT)
+     */
+    public function compileUpsert(QueryBuilder $query, array $values, array $uniqueBy, ?array $update = null): string
+    {
+        $insert = $this->compileInsert($query, $values);
+
+        $conflict = $this->columnize($uniqueBy);
+
+        if ($update === null) {
+            return "{$insert} on conflict ({$conflict}) do nothing";
         }
 
-        return $value ? 'FOR UPDATE' : 'FOR SHARE';
+        $updateColumns = implode(', ', array_map(function ($key) {
+            return $this->wrap($key) . ' = excluded.' . $this->wrap($key);
+        }, array_keys($update)));
+
+        return "{$insert} on conflict ({$conflict}) do update set {$updateColumns}";
     }
 
     /**
-     * Compile an insert and get ID statement into SQL
+     * Get the format for database stored dates
      */
-    public function compileInsertGetId(array $query, array $values, string $sequence = null): string
+    public function getDateFormat(): string
     {
-        $sql = $this->compileInsert($query, $values);
-
-        if ($sequence === null) {
-            $sequence = 'id';
-        }
-
-        return $sql . ' RETURNING ' . $this->wrap($sequence);
+        return 'Y-m-d H:i:s.uP';
     }
 
     /**
-     * Compile a truncate table statement into SQL
+     * Compile the "limit" portion
      */
-    public function compileTruncate(array $query): array
+    protected function compileLimit(QueryBuilder $query, int $limit): string
     {
-        return ['TRUNCATE TABLE ' . $this->wrapTable($query['from']) . ' RESTART IDENTITY CASCADE' => []];
+        return "limit {$limit}";
     }
 
     /**
-     * Compile a create table command
+     * Compile the lock into SQL (PostgreSQL-specific)
      */
-    public function compileCreate(Blueprint $blueprint): string
+    protected function compileLock(QueryBuilder $query, string $lock): string
     {
-        $columns = $blueprint->getColumns();
-        $table = $this->wrapTable($blueprint->getTable());
-        
-        $columnDefinitions = [];
-        foreach ($columns as $column) {
-            $columnDefinitions[] = $this->compileColumn($column->toArray());
-        }
-        
-        $sql = 'CREATE TABLE ' . $table . ' (';
-        $sql .= implode(', ', $columnDefinitions);
-        $sql .= ')';
-
-        return $sql;
-    }
-
-    /**
-     * Compile the SQL statement to define a table
-     */
-    public function compileCreateTable(string $table, array $columns, array $options = []): string
-    {
-        $sql = 'CREATE TABLE ' . $this->wrapTable($table) . ' (';
-        
-        $columnDefinitions = [];
-        foreach ($columns as $column) {
-            $columnDefinitions[] = $this->compileColumn($column);
-        }
-        
-        $sql .= implode(', ', $columnDefinitions);
-        $sql .= ')';
-
-        return $sql;
-    }
-
-    /**
-     * Compile a column definition
-     */
-    protected function compileColumn(array $column): string
-    {
-        $sql = $this->wrap($column['name']) . ' ' . $this->getType($column);
-
-        // Add modifiers
-        $sql .= $this->modifyDefault($column);
-        $sql .= $this->modifyNullable($column);
-        $sql .= $this->modifyIncrement($column);
-
-        return $sql;
-    }
-
-    /**
-     * Get the SQL for the column data type
-     */
-    protected function getType(array $column): string
-    {
-        return match ($column['type']) {
-            'char' => 'CHAR(' . ($column['length'] ?? 255) . ')',
-            'string' => 'VARCHAR(' . ($column['length'] ?? 255) . ')',
-            'text' => 'TEXT',
-            'mediumText' => 'TEXT',
-            'longText' => 'TEXT',
-            'integer' => 'INTEGER',
-            'tinyInteger' => 'SMALLINT',
-            'smallInteger' => 'SMALLINT',
-            'mediumInteger' => 'INTEGER',
-            'bigInteger' => 'BIGINT',
-            'float' => 'REAL',
-            'double' => 'DOUBLE PRECISION',
-            'decimal' => 'DECIMAL(' . ($column['precision'] ?? 8) . ',' . ($column['scale'] ?? 2) . ')',
-            'boolean' => 'BOOLEAN',
-            'enum' => 'VARCHAR(255)',
-            'json' => 'JSON',
-            'jsonb' => 'JSONB',
-            'date' => 'DATE',
-            'datetime' => 'TIMESTAMP(0) WITHOUT TIME ZONE',
-            'datetimeTz' => 'TIMESTAMP(0) WITH TIME ZONE',
-            'time' => 'TIME(0) WITHOUT TIME ZONE',
-            'timeTz' => 'TIME(0) WITH TIME ZONE',
-            'timestamp' => 'TIMESTAMP(0) WITHOUT TIME ZONE',
-            'timestampTz' => 'TIMESTAMP(0) WITH TIME ZONE',
-            'year' => 'INTEGER',
-            'binary' => 'BYTEA',
-            'uuid' => 'UUID',
-            'ipAddress' => 'INET',
-            'macAddress' => 'MACADDR',
-            'geometry' => 'GEOMETRY',
-            'point' => 'POINT',
-            'lineString' => 'LINESTRING',
-            'polygon' => 'POLYGON',
-            default => strtoupper($column['type']),
+        return match ($lock) {
+            'update' => 'for update',
+            'shared' => 'for share',
+            default => '',
         };
     }
 
     /**
-     * Get the SQL for a nullable column modifier
+     * Compile the "offset" portion
      */
-    protected function modifyNullable(array $column): string
+    protected function compileOffset(QueryBuilder $query, int $offset): string
     {
-        if (isset($column['nullable']) && $column['nullable'] === true) {
-            return ' NULL';
+        return "offset {$offset}";
+    }
+    /**
+     * Wrap a single string in keyword identifiers
+     */
+    protected function wrapValue(string $value): string
+    {
+        if ($value === '*') {
+            return $value;
         }
 
-        return ' NOT NULL';
-    }
-
-    /**
-     * Get the SQL for a default column modifier
-     */
-    protected function modifyDefault(array $column): string
-    {
-        if (isset($column['default'])) {
-            if ($column['default'] === null) {
-                return ' DEFAULT NULL';
-            }
-
-            if (is_bool($column['default'])) {
-                return ' DEFAULT ' . ($column['default'] ? 'TRUE' : 'FALSE');
-            }
-
-            if (is_string($column['default'])) {
-                return " DEFAULT '" . addslashes($column['default']) . "'";
-            }
-
-            return ' DEFAULT ' . $column['default'];
-        }
-
-        return '';
-    }
-
-    /**
-     * Get the SQL for an auto increment column modifier
-     */
-    protected function modifyIncrement(array $column): string
-    {
-        if (isset($column['autoIncrement']) && $column['autoIncrement'] === true) {
-            return ' PRIMARY KEY GENERATED ALWAYS AS IDENTITY';
-        }
-
-        if (isset($column['primary']) && $column['primary'] === true) {
-            return ' PRIMARY KEY';
-        }
-
-        if (isset($column['unique']) && $column['unique'] === true) {
-            return ' UNIQUE';
-        }
-
-        return '';
-    }
-
-    /**
-     * Compile a rename table command
-     */
-    public function compileRenameTable(string $from, string $to): string
-    {
-        return 'ALTER TABLE ' . $this->wrapTable($from) . ' RENAME TO ' . $this->wrapTable($to);
-    }
-
-    /**
-     * Compile an add column command
-     */
-    public function compileAddColumn(string $table, array $column): string
-    {
-        return 'ALTER TABLE ' . $this->wrapTable($table) . ' ADD COLUMN ' . $this->compileColumn($column);
-    }
-
-    /**
-     * Compile a drop column command
-     */
-    public function compileDropColumn(string $table, string $column): string
-    {
-        return 'ALTER TABLE ' . $this->wrapTable($table) . ' DROP COLUMN ' . $this->wrap($column);
-    }
-
-    /**
-     * Compile a rename column command
-     */
-    public function compileRenameColumn(string $table, string $from, string $to): string
-    {
-        return 'ALTER TABLE ' . $this->wrapTable($table) . ' RENAME COLUMN ' . 
-               $this->wrap($from) . ' TO ' . $this->wrap($to);
-    }
-
-    /**
-     * Compile a modify column command
-     */
-    public function compileModifyColumn(string $table, array $column): string
-    {
-        $changes = [];
-
-        // Change type
-        $changes[] = 'ALTER TABLE ' . $this->wrapTable($table) . ' ALTER COLUMN ' . 
-                     $this->wrap($column['name']) . ' TYPE ' . $this->getType($column);
-
-        // Change default
-        if (isset($column['default'])) {
-            $default = $this->modifyDefault($column);
-            $changes[] = 'ALTER TABLE ' . $this->wrapTable($table) . ' ALTER COLUMN ' . 
-                         $this->wrap($column['name']) . ' SET' . $default;
-        }
-
-        // Change nullable
-        $nullable = isset($column['nullable']) && $column['nullable'] ? 'DROP NOT NULL' : 'SET NOT NULL';
-        $changes[] = 'ALTER TABLE ' . $this->wrapTable($table) . ' ALTER COLUMN ' . 
-                     $this->wrap($column['name']) . ' ' . $nullable;
-
-        return implode('; ', $changes);
-    }
-
-    /**
-     * Compile an add primary key command
-     */
-    public function compileAddPrimary(string $table, array $columns, string $name = null): string
-    {
-        $constraintName = $name ?: $table . '_pkey';
-        return 'ALTER TABLE ' . $this->wrapTable($table) . ' ADD CONSTRAINT ' . 
-               $this->wrap($constraintName) . ' PRIMARY KEY (' . $this->columnize($columns) . ')';
-    }
-
-    /**
-     * Compile a drop primary key command
-     */
-    public function compileDropPrimary(string $table, string $name = null): string
-    {
-        $constraintName = $name ?: $table . '_pkey';
-        return 'ALTER TABLE ' . $this->wrapTable($table) . ' DROP CONSTRAINT ' . $this->wrap($constraintName);
-    }
-
-    /**
-     * Compile an add unique key command
-     */
-    public function compileAddUnique(string $table, string $name, array $columns): string
-    {
-        return 'ALTER TABLE ' . $this->wrapTable($table) . ' ADD CONSTRAINT ' . 
-               $this->wrap($name) . ' UNIQUE (' . $this->columnize($columns) . ')';
-    }
-
-    /**
-     * Compile a drop unique key command
-     */
-    public function compileDropUnique(string $table, string $name): string
-    {
-        return 'ALTER TABLE ' . $this->wrapTable($table) . ' DROP CONSTRAINT ' . $this->wrap($name);
-    }
-
-    /**
-     * Compile an add index command
-     */
-    public function compileAddIndex(string $table, string $name, array $columns, string $type = 'btree'): string
-    {
-        return 'CREATE INDEX ' . $this->wrap($name) . ' ON ' . $this->wrapTable($table) . 
-               ' USING ' . $type . ' (' . $this->columnize($columns) . ')';
-    }
-
-    /**
-     * Compile a drop index command
-     */
-    public function compileDropIndex(string $table, string $name): string
-    {
-        return 'DROP INDEX ' . $this->wrap($name);
-    }
-
-    /**
-     * Compile an add foreign key command
-     */
-    public function compileAddForeign(string $table, string $name, array $columns, string $references, string $on, string $onDelete = null, string $onUpdate = null): string
-    {
-        $sql = 'ALTER TABLE ' . $this->wrapTable($table) . ' ADD CONSTRAINT ' . $this->wrap($name);
-        $sql .= ' FOREIGN KEY (' . $this->columnize($columns) . ')';
-        $sql .= ' REFERENCES ' . $this->wrapTable($references) . ' (' . $on . ')';
-
-        if ($onDelete) {
-            $sql .= ' ON DELETE ' . strtoupper($onDelete);
-        }
-
-        if ($onUpdate) {
-            $sql .= ' ON UPDATE ' . strtoupper($onUpdate);
-        }
-
-        return $sql;
-    }
-
-    /**
-     * Compile a drop foreign key command
-     */
-    public function compileDropForeign(string $table, string $name): string
-    {
-        return 'ALTER TABLE ' . $this->wrapTable($table) . ' DROP CONSTRAINT ' . $this->wrap($name);
-    }
-
-    /**
-     * Compile an add foreign key command from Blueprint
-     */
-    public function compileForeign(Blueprint $blueprint, array $command): string
-    {
-        $sql = 'ALTER TABLE ' . $this->wrapTable($blueprint->getTable());
-        $sql .= ' ADD CONSTRAINT ' . $this->wrap($command['name']);
-        $sql .= ' FOREIGN KEY (' . $this->columnize($command['columns']) . ')';
-        $sql .= ' REFERENCES ' . $this->wrapTable($command['on']) . ' (' . $command['references'] . ')';
-
-        if (isset($command['onDelete'])) {
-            $sql .= ' ON DELETE ' . strtoupper($command['onDelete']);
-        }
-
-        if (isset($command['onUpdate'])) {
-            $sql .= ' ON UPDATE ' . strtoupper($command['onUpdate']);
-        }
-
-        return $sql;
-    }
-
-    /**
-     * Compile an enable foreign key constraints statement
-     */
-    public function compileEnableForeignKeyConstraints(): string
-    {
-        return 'SET CONSTRAINTS ALL IMMEDIATE';
-    }
-
-    /**
-     * Compile a disable foreign key constraints statement
-     */
-    public function compileDisableForeignKeyConstraints(): string
-    {
-        return 'SET CONSTRAINTS ALL DEFERRED';
-    }
-
-    /**
-     * Compile an exists statement into SQL
-     */
-    public function compileTableExists(): string
-    {
-        return "SELECT * FROM information_schema.tables WHERE table_schema = ? AND table_name = ? AND table_type = 'BASE TABLE'";
-    }
-
-    /**
-     * Compile a column listing query
-     */
-    public function compileColumnListing(string $table): string
-    {
-        return 'SELECT column_name FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position';
-    }
-
-    /**
-     * Compile the SQL needed to retrieve all table names
-     */
-    public function compileGetAllTables(): string
-    {
-        return "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public'";
-    }
-
-    /**
-     * Compile the SQL needed to retrieve all view names
-     */
-    public function compileGetAllViews(): string
-    {
-        return "SELECT viewname FROM pg_catalog.pg_views WHERE schemaname = 'public'";
+        return '"' . str_replace('"', '""', $value) . '"';
     }
 }

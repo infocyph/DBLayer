@@ -4,127 +4,48 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Schema;
 
-use Infocyph\DBLayer\Connection;
-use Infocyph\DBLayer\Grammar\Grammar;
+use Closure;
+use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Exceptions\SchemaException;
 
 /**
  * Schema Builder
- * 
- * Provides a fluent interface for creating and modifying database schemas.
- * Supports multiple database drivers and provides a unified API for
- * schema operations across MySQL, PostgreSQL, and SQLite.
- * 
- * @package DBLayer\Schema
+ *
+ * Provides a fluent interface for database schema operations:
+ * - Create, modify, drop tables
+ * - Add, modify, drop columns
+ * - Manage indexes and foreign keys
+ * - Database-agnostic schema definitions
+ *
+ * @package Infocyph\DBLayer\Schema
  * @author Hasan
  */
 class Schema
 {
     /**
-     * The database connection instance
+     * Schema builder for the specific driver
      */
-    protected Connection $connection;
+    private SchemaBuilder $builder;
+    /**
+     * Database connection
+     */
+    private Connection $connection;
 
     /**
-     * The schema grammar instance
-     */
-    protected Grammar $grammar;
-
-    /**
-     * The default string length for migrations
-     */
-    public static int $defaultStringLength = 255;
-
-    /**
-     * Create a new schema builder instance
+     * Create a new schema instance
      */
     public function __construct(Connection $connection)
     {
         $this->connection = $connection;
-        $this->grammar = $connection->getGrammar();
+        $this->builder = $this->resolveSchemaBuilder();
     }
 
     /**
-     * Determine if the given table exists
+     * Create a new table
      */
-    public function hasTable(string $table): bool
+    public function create(string $table, Closure $callback): void
     {
-        $table = $this->connection->getTablePrefix() . $table;
-        
-        $sql = $this->grammar->compileTableExists();
-        
-        $database = $this->connection->getDatabaseName();
-        
-        $result = $this->connection->select($sql, [$database, $table]);
-        
-        return count($result) > 0;
-    }
-
-    /**
-     * Determine if the given table has a given column
-     */
-    public function hasColumn(string $table, string $column): bool
-    {
-        return in_array(
-            strtolower($column),
-            array_map('strtolower', $this->getColumnListing($table))
-        );
-    }
-
-    /**
-     * Determine if the given table has given columns
-     */
-    public function hasColumns(string $table, array $columns): bool
-    {
-        $tableColumns = array_map('strtolower', $this->getColumnListing($table));
-
-        foreach ($columns as $column) {
-            if (!in_array(strtolower($column), $tableColumns)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Get the column listing for a given table
-     */
-    public function getColumnListing(string $table): array
-    {
-        $table = $this->connection->getTablePrefix() . $table;
-        
-        $results = $this->connection->select(
-            $this->grammar->compileColumnListing($table),
-            [$this->connection->getDatabaseName(), $table]
-        );
-
-        return array_map(function ($result) {
-            return $result['column_name'] ?? $result['name'] ?? current($result);
-        }, $results);
-    }
-
-    /**
-     * Get the data type for the given column name
-     */
-    public function getColumnType(string $table, string $column): string
-    {
-        $table = $this->connection->getTablePrefix() . $table;
-
-        $columns = $this->connection->select(
-            "SELECT data_type FROM information_schema.columns WHERE table_name = ? AND column_name = ?",
-            [$table, $column]
-        );
-
-        return $columns[0]['data_type'] ?? 'string';
-    }
-
-    /**
-     * Create a new table on the schema
-     */
-    public function create(string $table, \Closure $callback): void
-    {
-        $blueprint = $this->createBlueprint($table);
-
+        $blueprint = new Blueprint($table);
         $blueprint->create();
 
         $callback($blueprint);
@@ -133,123 +54,57 @@ class Schema
     }
 
     /**
-     * Create a new table on the schema if it doesn't exist
+     * Disable foreign key constraints
      */
-    public function createIfNotExists(string $table, \Closure $callback): void
+    public function disableForeignKeyConstraints(): void
     {
-        if (!$this->hasTable($table)) {
-            $this->create($table, $callback);
-        }
+        $this->builder->disableForeignKeyConstraints();
     }
 
     /**
-     * Modify a table on the schema
+     * Drop a table
      */
-    public function table(string $table, \Closure $callback): void
+    public function drop(string $table): void
     {
-        $blueprint = $this->createBlueprint($table);
-
-        $callback($blueprint);
+        $blueprint = new Blueprint($table);
+        $blueprint->drop();
 
         $this->build($blueprint);
     }
 
     /**
-     * Rename a table on the schema
-     */
-    public function rename(string $from, string $to): void
-    {
-        $sql = $this->grammar->compileRenameTable($from, $to);
-
-        $this->connection->statement($sql);
-    }
-
-    /**
-     * Drop a table from the schema
-     */
-    public function drop(string $table): void
-    {
-        $sql = $this->grammar->compileDropTable($table);
-
-        $this->connection->statement($sql);
-    }
-
-    /**
-     * Drop a table from the schema if it exists
-     */
-    public function dropIfExists(string $table): void
-    {
-        $sql = $this->grammar->compileDropTableIfExists($table);
-
-        $this->connection->statement($sql);
-    }
-
-    /**
-     * Drop all tables from the database
+     * Drop all tables
      */
     public function dropAllTables(): void
     {
-        $tables = $this->getAllTables();
-
-        if (empty($tables)) {
-            return;
-        }
-
-        $this->disableForeignKeyConstraints();
+        $tables = $this->builder->getAllTables();
 
         foreach ($tables as $table) {
             $this->drop($table);
         }
-
-        $this->enableForeignKeyConstraints();
     }
 
     /**
-     * Drop all views from the database
+     * Drop all views
      */
     public function dropAllViews(): void
     {
-        $views = $this->getAllViews();
-
-        if (empty($views)) {
-            return;
-        }
+        $views = $this->builder->getAllViews();
 
         foreach ($views as $view) {
-            $this->connection->statement("DROP VIEW {$view}");
+            $this->builder->dropView($view);
         }
     }
 
     /**
-     * Get all of the table names for the database
+     * Drop a table if it exists
      */
-    public function getAllTables(): array
+    public function dropIfExists(string $table): void
     {
-        if (method_exists($this->grammar, 'compileGetAllTables')) {
-            $results = $this->connection->select($this->grammar->compileGetAllTables());
-            
-            return array_map(function ($result) {
-                return current($result);
-            }, $results);
-        }
+        $blueprint = new Blueprint($table);
+        $blueprint->dropIfExists();
 
-        return [];
-    }
-
-    /**
-     * Get all of the view names for the database
-     */
-    public function getAllViews(): array
-    {
-        if (method_exists($this->grammar, 'compileGetAllViews')) {
-            $results = $this->connection->select($this->grammar->compileGetAllViews());
-            
-            return array_map(function ($result) {
-                return current($result);
-            }, $results);
-        }
-
-        return [];
+        $this->build($blueprint);
     }
 
     /**
@@ -257,43 +112,43 @@ class Schema
      */
     public function enableForeignKeyConstraints(): void
     {
-        if (method_exists($this->grammar, 'compileEnableForeignKeyConstraints')) {
-            $this->connection->statement(
-                $this->grammar->compileEnableForeignKeyConstraints()
-            );
-        }
+        $this->builder->enableForeignKeyConstraints();
     }
 
     /**
-     * Disable foreign key constraints
+     * Get all tables
      */
-    public function disableForeignKeyConstraints(): void
+    public function getAllTables(): array
     {
-        if (method_exists($this->grammar, 'compileDisableForeignKeyConstraints')) {
-            $this->connection->statement(
-                $this->grammar->compileDisableForeignKeyConstraints()
-            );
-        }
+        return $this->builder->getAllTables();
     }
 
     /**
-     * Execute the blueprint to build / modify the table
+     * Get all views
      */
-    protected function build(Blueprint $blueprint): void
+    public function getAllViews(): array
     {
-        $blueprint->build($this->connection, $this->grammar);
+        return $this->builder->getAllViews();
     }
 
     /**
-     * Create a new command set with a Closure
+     * Get column listing for a table
      */
-    protected function createBlueprint(string $table, ?\Closure $callback = null): Blueprint
+    public function getColumnListing(string $table): array
     {
-        return new Blueprint($table, $callback);
+        return $this->builder->getColumnListing($table);
     }
 
     /**
-     * Get the database connection instance
+     * Get column type
+     */
+    public function getColumnType(string $table, string $column): string
+    {
+        return $this->builder->getColumnType($table, $column);
+    }
+
+    /**
+     * Get the connection
      */
     public function getConnection(): Connection
     {
@@ -301,18 +156,85 @@ class Schema
     }
 
     /**
-     * Set the default string length for migrations
+     * Check if a column exists
      */
-    public static function defaultStringLength(int $length): void
+    public function hasColumn(string $table, string $column): bool
     {
-        static::$defaultStringLength = $length;
+        return $this->builder->hasColumn($table, $column);
     }
 
     /**
-     * Get the default string length for migrations
+     * Check if columns exist
      */
-    public static function getDefaultStringLength(): int
+    public function hasColumns(string $table, array $columns): bool
     {
-        return static::$defaultStringLength;
+        return array_all($columns, fn ($column) => $this->hasColumn($table, $column));
+    }
+
+    /**
+     * Check if a table exists
+     */
+    public function hasTable(string $table): bool
+    {
+        return $this->builder->hasTable($table);
+    }
+
+    /**
+     * Rename a table
+     */
+    public function rename(string $from, string $to): void
+    {
+        $blueprint = new Blueprint($from);
+        $blueprint->rename($to);
+
+        $this->build($blueprint);
+    }
+
+    /**
+     * Set the connection
+     */
+    public function setConnection(Connection $connection): void
+    {
+        $this->connection = $connection;
+        $this->builder = $this->resolveSchemaBuilder();
+    }
+
+    /**
+     * Modify an existing table
+     */
+    public function table(string $table, Closure $callback): void
+    {
+        $blueprint = new Blueprint($table);
+
+        $callback($blueprint);
+
+        $this->build($blueprint);
+    }
+
+    /**
+     * Execute the blueprint to build / modify the table
+     */
+    protected function build(Blueprint $blueprint): void
+    {
+        $statements = $this->builder->compile($blueprint);
+
+        foreach ($statements as $statement) {
+            $this->connection->execute($statement);
+        }
+    }
+
+    /**
+     * Resolve the schema builder for the connection driver
+     */
+    private function resolveSchemaBuilder(): SchemaBuilder
+    {
+        $driver = $this->connection->getDriverName();
+
+        return match ($driver) {
+            'mysql' => new MySQLSchemaBuilder($this->connection),
+            'pgsql' => new PostgreSQLSchemaBuilder($this->connection),
+            'sqlite' => new SQLiteSchemaBuilder($this->connection),
+            default => throw SchemaException::unsupportedDriver($driver),
+        };
     }
 }

@@ -6,157 +6,67 @@ namespace Infocyph\DBLayer\Exceptions;
 
 /**
  * Query Exception
- * 
- * Thrown when query execution errors occur.
- * Includes SQL query context for debugging.
- * 
+ *
+ * Exception for query building and execution errors.
+ *
  * @package Infocyph\DBLayer\Exceptions
  * @author Hasan
  */
-class QueryException extends DBLayerException
+class QueryException extends DBException
 {
     /**
-     * The SQL query that caused the exception
+     * Create exception for execution failure
      */
-    protected string $sql = '';
-
-    /**
-     * The query bindings
-     */
-    protected array $bindings = [];
-
-    /**
-     * Create a new query exception
-     */
-    public function __construct(
-        string $message,
-        string $sql = '',
-        array $bindings = [],
-        int $code = 0,
-        ?\Throwable $previous = null
-    ) {
-        $this->sql = $sql;
-        $this->bindings = $bindings;
-
-        $context = [
-            'sql' => $sql,
-            'bindings' => $bindings,
-        ];
-
-        parent::__construct($message, $code, $previous, $context);
+    public static function executionFailed(string $sql, string $reason): self
+    {
+        return new self("Query execution failed: {$reason}\nSQL: {$sql}");
     }
 
     /**
-     * Get the SQL query
+     * Create exception for invalid binding
      */
-    public function getSql(): string
+    public static function invalidBinding(string $reason): self
     {
-        return $this->sql;
+        return new self("Invalid query binding: {$reason}");
     }
 
     /**
-     * Get the query bindings
+     * Create exception for invalid limit
      */
-    public function getBindings(): array
+    public static function invalidLimit(int $limit): self
     {
-        return $this->bindings;
+        return new self("Invalid limit: {$limit}. Must be a positive integer");
     }
 
     /**
-     * Create exception for syntax error
+     * Create exception for invalid offset
      */
-    public static function syntaxError(string $sql, string $error, ?\Throwable $previous = null): static
+    public static function invalidOffset(int $offset): self
     {
-        return new static(
-            "SQL syntax error: {$error}",
-            $sql,
-            [],
-            2001,
-            $previous
-        );
+        return new self("Invalid offset: {$offset}. Must be a non-negative integer");
     }
 
     /**
-     * Create exception for execution error
+     * Create exception for invalid order direction
      */
-    public static function executionFailed(string $sql, array $bindings, string $error, ?\Throwable $previous = null): static
+    public static function invalidOrderDirection(string $direction): self
     {
-        return new static(
-            "Query execution failed: {$error}",
-            $sql,
-            $bindings,
-            2002,
-            $previous
-        );
+        return new self("Invalid order direction: {$direction}. Must be 'asc' or 'desc'");
+    }
+
+    /**
+     * Create exception for invalid query
+     */
+    public static function invalidQuery(string $reason): self
+    {
+        return new self("Invalid query: {$reason}");
     }
 
     /**
      * Create exception for missing table
      */
-    public static function tableNotFound(string $table, string $sql): static
+    public static function missingTable(): self
     {
-        return new static(
-            "Table '{$table}' not found",
-            $sql,
-            [],
-            2003
-        );
-    }
-
-    /**
-     * Create exception for missing column
-     */
-    public static function columnNotFound(string $column, string $table, string $sql): static
-    {
-        return new static(
-            "Column '{$column}' not found in table '{$table}'",
-            $sql,
-            [],
-            2004
-        );
-    }
-
-    /**
-     * Create exception for duplicate entry
-     */
-    public static function duplicateEntry(string $key, string $value, string $sql): static
-    {
-        return new static(
-            "Duplicate entry '{$value}' for key '{$key}'",
-            $sql,
-            [],
-            2005
-        );
-    }
-
-    /**
-     * Create exception for constraint violation
-     */
-    public static function constraintViolation(string $constraint, string $sql): static
-    {
-        return new static(
-            "Constraint violation: {$constraint}",
-            $sql,
-            [],
-            2006
-        );
-    }
-
-    /**
-     * Get formatted exception message with SQL
-     */
-    public function getFullMessage(): string
-    {
-        $message = $this->getMessage();
-        
-        if (!empty($this->sql)) {
-            $message .= "\nSQL: {$this->sql}";
-        }
-
-        if (!empty($this->bindings)) {
-            $message .= "\nBindings: " . json_encode($this->bindings);
-        }
-
-        return $message;
+        return new self('No table specified for query');
     }
 }

@@ -1,4 +1,5 @@
 <?php
+
 require '../vendor/autoload.php';
 
 use Infocyph\DBLayer\DB;
@@ -13,7 +14,7 @@ DB::addConnection([
 
 // Automatic transaction
 try {
-    DB::transaction(function() {
+    DB::transaction(function () {
         DB::table('accounts')->where('id', 1)->decrement('balance', 100);
         DB::table('accounts')->where('id', 2)->increment('balance', 100);
         DB::table('transactions')->insert([
@@ -41,6 +42,6 @@ try {
 }
 
 // Transaction with retry on deadlock
-DB::transaction(function() {
+DB::transaction(function () {
     // ... operations
 }, $attempts = 3);

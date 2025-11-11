@@ -9,28 +9,42 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
 
 /**
  * Amp Adapter
- * 
+ *
  * Async database adapter for Amp framework.
  * Provides non-blocking MySQL operations using amphp/mysql.
- * 
+ *
  * @package Infocyph\DBLayer\Async\Adapters
  * @author Hasan
  */
 class AmpAdapter implements AdapterInterface
 {
-    /**
-     * Amp MySQL connection
-     */
+    protected bool $connected = false;
     protected $connection = null;
 
-    /**
-     * Connection state
-     */
-    protected bool $connected = false;
+    public function beginTransaction(): Promise
+    {
+        return new Promise(function ($resolve, $reject) {
+            if (!$this->connected || !$this->connection) {
+                $reject(ConnectionException::lostConnection());
+                return;
+            }
 
-    /**
-     * Connect to the database
-     */
+            \Amp\async(function () use ($resolve, $reject) {
+                try {
+                    $transaction = $this->connection->beginTransaction();
+                    $resolve($transaction);
+                } catch (\Throwable $e) {
+                    $reject(new \RuntimeException($e->getMessage()));
+                }
+            });
+        });
+    }
+
+    public function commit(): Promise
+    {
+        return $this->query('COMMIT');
+    }
+
     public function connect(array $config): Promise
     {
         return new Promise(function ($resolve, $reject) use ($config) {
@@ -64,9 +78,35 @@ class AmpAdapter implements AdapterInterface
         });
     }
 
-    /**
-     * Execute a query
-     */
+    public function disconnect(): Promise
+    {
+        return new Promise(function ($resolve, $reject) {
+            if ($this->connection) {
+                \Amp\async(function () use ($resolve) {
+                    try {
+                        $this->connection->close();
+                    } catch (\Throwable $e) {
+                        // Ignore close errors
+                    }
+                    $this->connected = false;
+                    $resolve(true);
+                });
+            } else {
+                $resolve(true);
+            }
+        });
+    }
+
+    public function getName(): string
+    {
+        return 'amp';
+    }
+
+    public function isConnected(): bool
+    {
+        return $this->connected && $this->connection !== null;
+    }
+
     public function query(string $sql, array $bindings = []): Promise
     {
         return new Promise(function ($resolve, $reject) use ($sql, $bindings) {
@@ -97,89 +137,8 @@ class AmpAdapter implements AdapterInterface
         });
     }
 
-    /**
-     * Begin a transaction
-     */
-    public function beginTransaction(): Promise
-    {
-        return new Promise(function ($resolve, $reject) {
-            if (!$this->connected || !$this->connection) {
-                $reject(ConnectionException::lostConnection());
-                return;
-            }
-
-            \Amp\async(function () use ($resolve, $reject) {
-                try {
-                    $transaction = $this->connection->beginTransaction();
-                    $resolve($transaction);
-                } catch (\Throwable $e) {
-                    $reject(new \RuntimeException($e->getMessage()));
-                }
-            });
-        });
-    }
-
-    /**
-     * Commit a transaction
-     */
-    public function commit(): Promise
-    {
-        return $this->query('COMMIT');
-    }
-
-    /**
-     * Rollback a transaction
-     */
     public function rollBack(): Promise
     {
         return $this->query('ROLLBACK');
-    }
-
-    /**
-     * Disconnect from the database
-     */
-    public function disconnect(): Promise
-    {
-        return new Promise(function ($resolve, $reject) {
-            if ($this->connection) {
-                \Amp\async(function () use ($resolve) {
-                    try {
-                        $this->connection->close();
-                    } catch (\Throwable $e) {
-                        // Ignore close errors
-                    }
-                    
-                    $this->connection = null;
-                    $this->connected = false;
-                    $resolve(true);
-                });
-            } else {
-                $resolve(true);
-            }
-        });
-    }
-
-    /**
-     * Check if connected
-     */
-    public function isConnected(): bool
-    {
-        return $this->connected && $this->connection !== null;
-    }
-
-    /**
-     * Get adapter name
-     */
-    public function getName(): string
-    {
-        return 'amp';
-    }
-
-    /**
-     * Get Amp MySQL connection
-     */
-    public function getConnection()
-    {
-        return $this->connection;
     }
 }

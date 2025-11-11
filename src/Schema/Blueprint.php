@@ -4,537 +4,88 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Schema;
 
-use Infocyph\DBLayer\Connection;
-use Infocyph\DBLayer\Grammar\Grammar;
-
 /**
- * Schema Blueprint
- * 
- * Provides a fluent interface for defining table structures.
- * Tracks all columns, indexes, and foreign keys to be added to a table.
- * 
- * @package DBLayer\Schema
+ * Table Blueprint
+ *
+ * Defines table structure with fluent column and index methods:
+ * - Column definitions (string, integer, text, etc.)
+ * - Indexes (primary, unique, index, foreign)
+ * - Table operations (create, drop, rename)
+ * - Modifiers (nullable, default, unsigned, etc.)
+ *
+ * @package Infocyph\DBLayer\Schema
  * @author Hasan
  */
 class Blueprint
 {
     /**
-     * The table the blueprint describes
+     * The table charset
      */
-    protected string $table;
+    private ?string $charset = null;
 
     /**
-     * The columns that should be added
+     * The table collation
      */
-    protected array $columns = [];
+    private ?string $collation = null;
 
     /**
-     * The commands that should be run
+     * The columns to add
      */
-    protected array $commands = [];
+    private array $columns = [];
 
     /**
-     * Whether to make the table temporary
+     * The commands to execute
      */
-    public bool $temporary = false;
+    private array $commands = [];
 
     /**
-     * The storage engine that should be used
+     * The table engine
      */
-    public ?string $engine = null;
+    private ?string $engine = null;
 
     /**
-     * The default character set
+     * Whether to add soft deletes
      */
-    public ?string $charset = null;
+    private bool $softDeletes = false;
+    /**
+     * The table name
+     */
+    private string $table;
 
     /**
-     * The collation that should be used
+     * Whether to add timestamps
      */
-    public ?string $collation = null;
+    private bool $timestamps = false;
 
     /**
-     * Create a new schema blueprint
+     * Create a new blueprint instance
      */
-    public function __construct(string $table, ?\Closure $callback = null)
+    public function __construct(string $table)
     {
         $this->table = $table;
-
-        if (!is_null($callback)) {
-            $callback($this);
-        }
     }
 
     /**
-     * Execute the blueprint against the database
+     * Add an auto-incrementing big integer column
      */
-    public function build(Connection $connection, Grammar $grammar): void
+    public function bigIncrements(string $column): Column
     {
-        foreach ($this->toSql($connection, $grammar) as $statement) {
-            $connection->statement($statement);
-        }
+        $col = $this->addColumn('bigIncrements', $column);
+        $col->autoIncrement()->unsigned();
+        $this->primary($column);
+        return $col;
     }
 
     /**
-     * Get the raw SQL statements for the blueprint
+     * Add a big integer column
      */
-    public function toSql(Connection $connection, Grammar $grammar): array
+    public function bigInteger(string $column): Column
     {
-        $statements = [];
-
-        foreach ($this->commands as $command) {
-            $method = 'compile' . ucfirst($command['name']);
-
-            if (method_exists($grammar, $method)) {
-                if (!is_null($sql = $grammar->$method($this, $command))) {
-                    $statements = array_merge($statements, (array) $sql);
-                }
-            }
-        }
-
-        return $statements;
+        return $this->addColumn('bigInteger', $column);
     }
 
     /**
-     * Indicate that the table needs to be created
-     */
-    public function create(): void
-    {
-        $this->addCommand('create');
-    }
-
-    /**
-     * Indicate that the table needs to be temporary
-     */
-    public function temporary(): void
-    {
-        $this->temporary = true;
-    }
-
-    /**
-     * Indicate that the table should be dropped
-     */
-    public function drop(): void
-    {
-        $this->addCommand('drop');
-    }
-
-    /**
-     * Indicate that the table should be dropped if it exists
-     */
-    public function dropIfExists(): void
-    {
-        $this->addCommand('dropIfExists');
-    }
-
-    /**
-     * Indicate that the given columns should be dropped
-     */
-    public function dropColumn(string|array $columns): void
-    {
-        $columns = is_array($columns) ? $columns : func_get_args();
-
-        foreach ($columns as $column) {
-            $this->addCommand('dropColumn', ['column' => $column]);
-        }
-    }
-
-    /**
-     * Indicate that the given columns should be renamed
-     */
-    public function renameColumn(string $from, string $to): void
-    {
-        $this->addCommand('renameColumn', compact('from', 'to'));
-    }
-
-    /**
-     * Indicate that the given primary key should be dropped
-     */
-    public function dropPrimary(string|array $index = null): void
-    {
-        $this->addCommand('dropPrimary', ['index' => $index]);
-    }
-
-    /**
-     * Indicate that the given unique key should be dropped
-     */
-    public function dropUnique(string|array $index): void
-    {
-        $this->addCommand('dropUnique', ['index' => $this->createIndexName('unique', (array) $index)]);
-    }
-
-    /**
-     * Indicate that the given index should be dropped
-     */
-    public function dropIndex(string|array $index): void
-    {
-        $this->addCommand('dropIndex', ['index' => $this->createIndexName('index', (array) $index)]);
-    }
-
-    /**
-     * Indicate that the given foreign key should be dropped
-     */
-    public function dropForeign(string|array $index): void
-    {
-        $this->addCommand('dropForeign', ['index' => $this->createIndexName('foreign', (array) $index)]);
-    }
-
-    /**
-     * Indicate that the timestamp columns should be dropped
-     */
-    public function dropTimestamps(): void
-    {
-        $this->dropColumn('created_at', 'updated_at');
-    }
-
-    /**
-     * Indicate that the soft delete column should be dropped
-     */
-    public function dropSoftDeletes(string $column = 'deleted_at'): void
-    {
-        $this->dropColumn($column);
-    }
-
-    /**
-     * Rename the table to a given name
-     */
-    public function rename(string $to): void
-    {
-        $this->addCommand('rename', compact('to'));
-    }
-
-    /**
-     * Specify the primary key(s) for the table
-     */
-    public function primary(string|array $columns, ?string $name = null): void
-    {
-        $this->addCommand('primary', [
-            'columns' => (array) $columns,
-            'index' => $name,
-        ]);
-    }
-
-    /**
-     * Specify a unique index for the table
-     */
-    public function unique(string|array $columns, ?string $name = null): void
-    {
-        $this->addCommand('unique', [
-            'columns' => (array) $columns,
-            'index' => $name ?? $this->createIndexName('unique', (array) $columns),
-        ]);
-    }
-
-    /**
-     * Specify an index for the table
-     */
-    public function index(string|array $columns, ?string $name = null, ?string $type = null): void
-    {
-        $this->addCommand('index', [
-            'columns' => (array) $columns,
-            'index' => $name ?? $this->createIndexName('index', (array) $columns),
-            'type' => $type,
-        ]);
-    }
-
-    /**
-     * Specify a foreign key for the table
-     */
-    public function foreign(string|array $columns, ?string $name = null): ForeignKey
-    {
-        $name = $name ?? $this->createIndexName('foreign', (array) $columns);
-
-        return new ForeignKey($this, (array) $columns, $name);
-    }
-
-    /**
-     * Create a new auto-incrementing big integer column
-     */
-    public function id(string $column = 'id'): Column
-    {
-        return $this->bigInteger($column)->autoIncrement()->primary();
-    }
-
-    /**
-     * Create a new char column
-     */
-    public function char(string $column, ?int $length = null): Column
-    {
-        $length = $length ?: Schema::$defaultStringLength;
-
-        return $this->addColumn('char', $column, compact('length'));
-    }
-
-    /**
-     * Create a new string column
-     */
-    public function string(string $column, ?int $length = null): Column
-    {
-        $length = $length ?: Schema::$defaultStringLength;
-
-        return $this->addColumn('string', $column, compact('length'));
-    }
-
-    /**
-     * Create a new text column
-     */
-    public function text(string $column): Column
-    {
-        return $this->addColumn('text', $column);
-    }
-
-    /**
-     * Create a new medium text column
-     */
-    public function mediumText(string $column): Column
-    {
-        return $this->addColumn('mediumText', $column);
-    }
-
-    /**
-     * Create a new long text column
-     */
-    public function longText(string $column): Column
-    {
-        return $this->addColumn('longText', $column);
-    }
-
-    /**
-     * Create a new integer column
-     */
-    public function integer(string $column, bool $autoIncrement = false, bool $unsigned = false): Column
-    {
-        return $this->addColumn('integer', $column, compact('autoIncrement', 'unsigned'));
-    }
-
-    /**
-     * Create a new tiny integer column
-     */
-    public function tinyInteger(string $column, bool $autoIncrement = false, bool $unsigned = false): Column
-    {
-        return $this->addColumn('tinyInteger', $column, compact('autoIncrement', 'unsigned'));
-    }
-
-    /**
-     * Create a new small integer column
-     */
-    public function smallInteger(string $column, bool $autoIncrement = false, bool $unsigned = false): Column
-    {
-        return $this->addColumn('smallInteger', $column, compact('autoIncrement', 'unsigned'));
-    }
-
-    /**
-     * Create a new medium integer column
-     */
-    public function mediumInteger(string $column, bool $autoIncrement = false, bool $unsigned = false): Column
-    {
-        return $this->addColumn('mediumInteger', $column, compact('autoIncrement', 'unsigned'));
-    }
-
-    /**
-     * Create a new big integer column
-     */
-    public function bigInteger(string $column, bool $autoIncrement = false, bool $unsigned = false): Column
-    {
-        return $this->addColumn('bigInteger', $column, compact('autoIncrement', 'unsigned'));
-    }
-
-    /**
-     * Create a new unsigned integer column
-     */
-    public function unsignedInteger(string $column, bool $autoIncrement = false): Column
-    {
-        return $this->integer($column, $autoIncrement, true);
-    }
-
-    /**
-     * Create a new unsigned tiny integer column
-     */
-    public function unsignedTinyInteger(string $column, bool $autoIncrement = false): Column
-    {
-        return $this->tinyInteger($column, $autoIncrement, true);
-    }
-
-    /**
-     * Create a new unsigned small integer column
-     */
-    public function unsignedSmallInteger(string $column, bool $autoIncrement = false): Column
-    {
-        return $this->smallInteger($column, $autoIncrement, true);
-    }
-
-    /**
-     * Create a new unsigned medium integer column
-     */
-    public function unsignedMediumInteger(string $column, bool $autoIncrement = false): Column
-    {
-        return $this->mediumInteger($column, $autoIncrement, true);
-    }
-
-    /**
-     * Create a new unsigned big integer column
-     */
-    public function unsignedBigInteger(string $column, bool $autoIncrement = false): Column
-    {
-        return $this->bigInteger($column, $autoIncrement, true);
-    }
-
-    /**
-     * Create a new float column
-     */
-    public function float(string $column, int $precision = 53): Column
-    {
-        return $this->addColumn('float', $column, compact('precision'));
-    }
-
-    /**
-     * Create a new double column
-     */
-    public function double(string $column): Column
-    {
-        return $this->addColumn('double', $column);
-    }
-
-    /**
-     * Create a new decimal column
-     */
-    public function decimal(string $column, int $precision = 8, int $scale = 2): Column
-    {
-        return $this->addColumn('decimal', $column, compact('precision', 'scale'));
-    }
-
-    /**
-     * Create a new boolean column
-     */
-    public function boolean(string $column): Column
-    {
-        return $this->addColumn('boolean', $column);
-    }
-
-    /**
-     * Create a new enum column
-     */
-    public function enum(string $column, array $allowed): Column
-    {
-        return $this->addColumn('enum', $column, compact('allowed'));
-    }
-
-    /**
-     * Create a new json column
-     */
-    public function json(string $column): Column
-    {
-        return $this->addColumn('json', $column);
-    }
-
-    /**
-     * Create a new jsonb column
-     */
-    public function jsonb(string $column): Column
-    {
-        return $this->addColumn('jsonb', $column);
-    }
-
-    /**
-     * Create a new date column
-     */
-    public function date(string $column): Column
-    {
-        return $this->addColumn('date', $column);
-    }
-
-    /**
-     * Create a new date-time column
-     */
-    public function dateTime(string $column, int $precision = 0): Column
-    {
-        return $this->addColumn('datetime', $column, compact('precision'));
-    }
-
-    /**
-     * Create a new date-time column with timezone
-     */
-    public function dateTimeTz(string $column, int $precision = 0): Column
-    {
-        return $this->addColumn('datetimeTz', $column, compact('precision'));
-    }
-
-    /**
-     * Create a new time column
-     */
-    public function time(string $column, int $precision = 0): Column
-    {
-        return $this->addColumn('time', $column, compact('precision'));
-    }
-
-    /**
-     * Create a new time column with timezone
-     */
-    public function timeTz(string $column, int $precision = 0): Column
-    {
-        return $this->addColumn('timeTz', $column, compact('precision'));
-    }
-
-    /**
-     * Create a new timestamp column
-     */
-    public function timestamp(string $column, int $precision = 0): Column
-    {
-        return $this->addColumn('timestamp', $column, compact('precision'));
-    }
-
-    /**
-     * Create a new timestamp column with timezone
-     */
-    public function timestampTz(string $column, int $precision = 0): Column
-    {
-        return $this->addColumn('timestampTz', $column, compact('precision'));
-    }
-
-    /**
-     * Add nullable creation and update timestamps
-     */
-    public function timestamps(int $precision = 0): void
-    {
-        $this->timestamp('created_at', $precision)->nullable();
-        $this->timestamp('updated_at', $precision)->nullable();
-    }
-
-    /**
-     * Add nullable creation and update timestamps with timezone
-     */
-    public function timestampsTz(int $precision = 0): void
-    {
-        $this->timestampTz('created_at', $precision)->nullable();
-        $this->timestampTz('updated_at', $precision)->nullable();
-    }
-
-    /**
-     * Add a "deleted at" timestamp for soft deletes
-     */
-    public function softDeletes(string $column = 'deleted_at', int $precision = 0): Column
-    {
-        return $this->timestamp($column, $precision)->nullable();
-    }
-
-    /**
-     * Add a "deleted at" timestamp with timezone for soft deletes
-     */
-    public function softDeletesTz(string $column = 'deleted_at', int $precision = 0): Column
-    {
-        return $this->timestampTz($column, $precision)->nullable();
-    }
-
-    /**
-     * Create a new year column
-     */
-    public function year(string $column): Column
-    {
-        return $this->addColumn('year', $column);
-    }
-
-    /**
-     * Create a new binary column
+     * Add a binary column
      */
     public function binary(string $column): Column
     {
@@ -542,101 +93,227 @@ class Blueprint
     }
 
     /**
-     * Create a new uuid column
+     * Add a boolean column
      */
-    public function uuid(string $column): Column
+    public function boolean(string $column): Column
     {
-        return $this->addColumn('uuid', $column);
+        return $this->addColumn('boolean', $column);
     }
 
     /**
-     * Create a new IP address column
+     * Add a char column
      */
-    public function ipAddress(string $column): Column
+    public function char(string $column, int $length = 255): Column
     {
-        return $this->addColumn('ipAddress', $column);
+        return $this->addColumn('char', $column, ['length' => $length]);
     }
 
     /**
-     * Create a new MAC address column
+     * Set table charset
      */
-    public function macAddress(string $column): Column
+    public function charset(string $charset): void
     {
-        return $this->addColumn('macAddress', $column);
+        $this->charset = $charset;
     }
 
     /**
-     * Create a new geometry column
+     * Set table collation
      */
-    public function geometry(string $column): Column
+    public function collation(string $collation): void
     {
-        return $this->addColumn('geometry', $column);
+        $this->collation = $collation;
     }
 
     /**
-     * Create a new point column
+     * Create the table
      */
-    public function point(string $column): Column
+    public function create(): void
     {
-        return $this->addColumn('point', $column);
+        $this->addCommand('create');
     }
 
     /**
-     * Create a new linestring column
+     * Add a date column
      */
-    public function lineString(string $column): Column
+    public function date(string $column): Column
     {
-        return $this->addColumn('lineString', $column);
+        return $this->addColumn('date', $column);
     }
 
     /**
-     * Create a new polygon column
+     * Add a datetime column
      */
-    public function polygon(string $column): Column
+    public function dateTime(string $column, int $precision = 0): Column
     {
-        return $this->addColumn('polygon', $column);
+        return $this->addColumn('dateTime', $column, ['precision' => $precision]);
     }
 
     /**
-     * Add a new column to the blueprint
+     * Add a decimal column
      */
-    protected function addColumn(string $type, string $name, array $parameters = []): Column
+    public function decimal(string $column, int $precision = 10, int $scale = 2): Column
     {
-        $column = new Column(array_merge(compact('type', 'name'), $parameters));
-
-        $this->columns[] = $column;
-
-        return $column;
+        return $this->addColumn('decimal', $column, ['precision' => $precision, 'scale' => $scale]);
     }
 
     /**
-     * Add a new command to the blueprint
+     * Add a double column
      */
-    public function addCommand(string $name, array $parameters = []): void
+    public function double(string $column, int $precision = 15, int $scale = 8): Column
     {
-        $this->commands[] = array_merge(compact('name'), $parameters);
+        return $this->addColumn('double', $column, ['precision' => $precision, 'scale' => $scale]);
     }
 
     /**
-     * Create a default index name for the table
+     * Drop the table
      */
-    protected function createIndexName(string $type, array $columns): string
+    public function drop(): void
     {
-        $index = strtolower($this->table . '_' . implode('_', $columns) . '_' . $type);
-
-        return str_replace(['-', '.'], '_', $index);
+        $this->addCommand('drop');
     }
 
     /**
-     * Get the table the blueprint describes
+     * Drop a column
      */
-    public function getTable(): string
+    public function dropColumn(string|array $columns): void
     {
-        return $this->table;
+        $this->addCommand('dropColumn', [
+            'columns' => (array) $columns,
+        ]);
     }
 
     /**
-     * Get the columns on the blueprint
+     * Drop a foreign key
+     */
+    public function dropForeign(string|array $columns): void
+    {
+        $this->addCommand('dropForeign', [
+            'columns' => (array) $columns,
+        ]);
+    }
+
+    /**
+     * Drop the table if it exists
+     */
+    public function dropIfExists(): void
+    {
+        $this->addCommand('dropIfExists');
+    }
+
+    /**
+     * Drop an index
+     */
+    public function dropIndex(string|array $columns): void
+    {
+        $this->addCommand('dropIndex', [
+            'columns' => (array) $columns,
+        ]);
+    }
+
+    /**
+     * Drop a primary key
+     */
+    public function dropPrimary(?string $name = null): void
+    {
+        $this->addCommand('dropPrimary', ['name' => $name]);
+    }
+
+    /**
+     * Drop a unique index
+     */
+    public function dropUnique(string|array $columns): void
+    {
+        $this->addCommand('dropUnique', [
+            'columns' => (array) $columns,
+        ]);
+    }
+
+    /**
+     * Set table engine
+     */
+    public function engine(string $engine): void
+    {
+        $this->engine = $engine;
+    }
+
+    /**
+     * Add an enum column
+     */
+    public function enum(string $column, array $allowed): Column
+    {
+        return $this->addColumn('enum', $column, ['allowed' => $allowed]);
+    }
+
+    /**
+     * Add a float column
+     */
+    public function float(string $column, int $precision = 8, int $scale = 2): Column
+    {
+        return $this->addColumn('float', $column, ['precision' => $precision, 'scale' => $scale]);
+    }
+
+    /**
+     * Add a foreign key
+     */
+    public function foreign(string|array $columns, ?string $name = null): ForeignKey
+    {
+        $foreignKey = new ForeignKey((array) $columns, $name);
+
+        $this->addCommand('foreign', [
+            'foreignKey' => $foreignKey,
+        ]);
+
+        return $foreignKey;
+    }
+
+    /**
+     * Add a foreign key column
+     */
+    public function foreignId(string $column): Column
+    {
+        return $this->unsignedBigInteger($column);
+    }
+
+    /**
+     * Add a foreign key with constrained relationship
+     */
+    public function foreignIdFor(string $model, ?string $column = null): ForeignKey
+    {
+        $column = $column ?? strtolower(class_basename($model)) . '_id';
+        $this->unsignedBigInteger($column);
+
+        return $this->foreign($column);
+    }
+
+    /**
+     * Add a fulltext index
+     */
+    public function fulltext(string|array $columns, ?string $name = null): void
+    {
+        $this->addCommand('fulltext', [
+            'columns' => (array) $columns,
+            'name' => $name,
+        ]);
+    }
+
+    /**
+     * Get table charset
+     */
+    public function getCharset(): ?string
+    {
+        return $this->charset;
+    }
+
+    /**
+     * Get table collation
+     */
+    public function getCollation(): ?string
+    {
+        return $this->collation;
+    }
+
+    /**
+     * Get all columns
      */
     public function getColumns(): array
     {
@@ -644,10 +321,324 @@ class Blueprint
     }
 
     /**
-     * Get the commands on the blueprint
+     * Get all commands
      */
     public function getCommands(): array
     {
         return $this->commands;
+    }
+
+    /**
+     * Get table engine
+     */
+    public function getEngine(): ?string
+    {
+        return $this->engine;
+    }
+
+    /**
+     * Get table name
+     */
+    public function getTable(): string
+    {
+        return $this->table;
+    }
+
+    /**
+     * Check if using soft deletes
+     */
+    public function hasSoftDeletes(): bool
+    {
+        return $this->softDeletes;
+    }
+
+    /**
+     * Check if using timestamps
+     */
+    public function hasTimestamps(): bool
+    {
+        return $this->timestamps;
+    }
+
+    /**
+     * Add an incrementing ID column
+     */
+    public function id(string $column = 'id'): Column
+    {
+        return $this->bigIncrements($column);
+    }
+
+    /**
+     * Add an auto-incrementing integer column
+     */
+    public function increments(string $column): Column
+    {
+        $col = $this->addColumn('increments', $column);
+        $col->autoIncrement()->unsigned();
+        $this->primary($column);
+        return $col;
+    }
+
+    /**
+     * Add an index
+     */
+    public function index(string|array $columns, ?string $name = null): void
+    {
+        $this->addCommand('index', [
+            'columns' => (array) $columns,
+            'name' => $name,
+        ]);
+    }
+
+    /**
+     * Add an integer column
+     */
+    public function integer(string $column): Column
+    {
+        return $this->addColumn('integer', $column);
+    }
+
+    /**
+     * Add an IP address column
+     */
+    public function ipAddress(string $column): Column
+    {
+        return $this->string($column, 45);
+    }
+
+    /**
+     * Add a JSON column
+     */
+    public function json(string $column): Column
+    {
+        return $this->addColumn('json', $column);
+    }
+
+    /**
+     * Add a JSONB column (PostgreSQL)
+     */
+    public function jsonb(string $column): Column
+    {
+        return $this->addColumn('jsonb', $column);
+    }
+
+    /**
+     * Add a long text column
+     */
+    public function longText(string $column): Column
+    {
+        return $this->addColumn('longText', $column);
+    }
+
+    /**
+     * Add a MAC address column
+     */
+    public function macAddress(string $column): Column
+    {
+        return $this->string($column, 17);
+    }
+
+    /**
+     * Add a medium integer column
+     */
+    public function mediumInteger(string $column): Column
+    {
+        return $this->addColumn('mediumInteger', $column);
+    }
+
+    /**
+     * Add a medium text column
+     */
+    public function mediumText(string $column): Column
+    {
+        return $this->addColumn('mediumText', $column);
+    }
+
+    /**
+     * Add a primary key
+     */
+    public function primary(string|array $columns, ?string $name = null): void
+    {
+        $this->addCommand('primary', [
+            'columns' => (array) $columns,
+            'name' => $name,
+        ]);
+    }
+
+    /**
+     * Add remember_token column
+     */
+    public function rememberToken(): Column
+    {
+        return $this->string('remember_token', 100)->nullable();
+    }
+
+    /**
+     * Rename the table
+     */
+    public function rename(string $to): void
+    {
+        $this->addCommand('rename', ['to' => $to]);
+    }
+
+    /**
+     * Rename a column
+     */
+    public function renameColumn(string $from, string $to): void
+    {
+        $this->addCommand('renameColumn', [
+            'from' => $from,
+            'to' => $to,
+        ]);
+    }
+
+    /**
+     * Add a small auto-incrementing integer column
+     */
+    public function smallIncrements(string $column): Column
+    {
+        $col = $this->addColumn('smallIncrements', $column);
+        $col->autoIncrement()->unsigned();
+        $this->primary($column);
+        return $col;
+    }
+
+    /**
+     * Add a small integer column
+     */
+    public function smallInteger(string $column): Column
+    {
+        return $this->addColumn('smallInteger', $column);
+    }
+
+    /**
+     * Add a deleted_at column for soft deletes
+     */
+    public function softDeletes(string $column = 'deleted_at', int $precision = 0): Column
+    {
+        $this->softDeletes = true;
+        return $this->timestamp($column, $precision)->nullable();
+    }
+
+    /**
+     * Add a string column
+     */
+    public function string(string $column, int $length = 255): Column
+    {
+        return $this->addColumn('string', $column, ['length' => $length]);
+    }
+
+    /**
+     * Add a text column
+     */
+    public function text(string $column): Column
+    {
+        return $this->addColumn('text', $column);
+    }
+
+    /**
+     * Add a time column
+     */
+    public function time(string $column, int $precision = 0): Column
+    {
+        return $this->addColumn('time', $column, ['precision' => $precision]);
+    }
+
+    /**
+     * Add a timestamp column
+     */
+    public function timestamp(string $column, int $precision = 0): Column
+    {
+        return $this->addColumn('timestamp', $column, ['precision' => $precision]);
+    }
+
+    /**
+     * Add created_at and updated_at columns
+     */
+    public function timestamps(int $precision = 0): void
+    {
+        $this->timestamp('created_at', $precision)->nullable();
+        $this->timestamp('updated_at', $precision)->nullable();
+        $this->timestamps = true;
+    }
+
+    /**
+     * Add a tiny integer column
+     */
+    public function tinyInteger(string $column): Column
+    {
+        return $this->addColumn('tinyInteger', $column);
+    }
+
+    /**
+     * Add a unique index
+     */
+    public function unique(string|array $columns, ?string $name = null): void
+    {
+        $this->addCommand('unique', [
+            'columns' => (array) $columns,
+            'name' => $name,
+        ]);
+    }
+
+    /**
+     * Add an unsigned big integer column
+     */
+    public function unsignedBigInteger(string $column): Column
+    {
+        return $this->bigInteger($column)->unsigned();
+    }
+
+    /**
+     * Add an unsigned integer column
+     */
+    public function unsignedInteger(string $column): Column
+    {
+        return $this->integer($column)->unsigned();
+    }
+
+    /**
+     * Add a UUID column
+     */
+    public function uuid(string $column = 'id'): Column
+    {
+        $col = $this->addColumn('uuid', $column);
+        $col->primary();
+        return $col;
+    }
+
+    /**
+     * Add a UUID column (binary or string based on driver)
+     */
+    public function uuidColumn(string $column): Column
+    {
+        return $this->addColumn('uuid', $column);
+    }
+
+    /**
+     * Add a year column
+     */
+    public function year(string $column): Column
+    {
+        return $this->addColumn('year', $column);
+    }
+
+    /**
+     * Add a new column
+     */
+    private function addColumn(string $type, string $name, array $parameters = []): Column
+    {
+        $column = new Column($type, $name, $parameters);
+        $this->columns[] = $column;
+
+        return $column;
+    }
+
+    /**
+     * Add a command
+     */
+    private function addCommand(string $name, array $parameters = []): void
+    {
+        $this->commands[] = array_merge(['name' => $name], $parameters);
     }
 }

@@ -8,30 +8,47 @@ use Infocyph\DBLayer\Async\Adapters\AdapterInterface;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 
 /**
- * Async Connection
- * 
- * Manages asynchronous database connections.
- * Provides non-blocking database operations.
- * 
+ * Async Connection Manager
+ *
+ * Manages asynchronous database connections with:
+ * - Non-blocking query execution
+ * - Multiple async runtime support
+ * - Connection pooling
+ * - Transaction management
+ *
  * @package Infocyph\DBLayer\Async
  * @author Hasan
  */
 class AsyncConnection
 {
     /**
-     * The async adapter
+     * Async adapter
      */
-    protected AdapterInterface $adapter;
+    private AdapterInterface $adapter;
 
     /**
      * Connection configuration
      */
-    protected array $config;
+    private array $config;
 
     /**
-     * Whether connection is established
+     * Connection state
      */
-    protected bool $connected = false;
+    private bool $connected = false;
+
+    /**
+     * Query statistics
+     */
+    private array $stats = [
+        'queries' => 0,
+        'errors' => 0,
+        'avg_time' => 0,
+    ];
+
+    /**
+     * Active transactions
+     */
+    private int $transactionLevel = 0;
 
     /**
      * Create a new async connection
@@ -43,109 +60,72 @@ class AsyncConnection
     }
 
     /**
-     * Connect to the database
-     */
-    public function connect(): Promise
-    {
-        return $this->adapter->connect($this->config)->then(function () {
-            $this->connected = true;
-            return $this;
-        });
-    }
-
-    /**
-     * Execute a query asynchronously
-     */
-    public function query(string $sql, array $bindings = []): Promise
-    {
-        if (!$this->connected) {
-            return Promise::reject(
-                ConnectionException::lostConnection()
-            );
-        }
-
-        return $this->adapter->query($sql, $bindings);
-    }
-
-    /**
-     * Execute multiple queries in parallel
-     */
-    public function parallel(array $queries): Promise
-    {
-        $promises = [];
-
-        foreach ($queries as $key => $query) {
-            $sql = is_array($query) ? $query[0] : $query;
-            $bindings = is_array($query) && isset($query[1]) ? $query[1] : [];
-            
-            $promises[$key] = $this->query($sql, $bindings);
-        }
-
-        return Promise::all($promises);
-    }
-
-    /**
-     * Begin transaction asynchronously
+     * Begin a transaction
      */
     public function beginTransaction(): Promise
     {
-        return $this->adapter->beginTransaction();
-    }
+        if (!$this->connected) {
+            return Promise::reject(ConnectionException::lostConnection());
+        }
 
-    /**
-     * Commit transaction asynchronously
-     */
-    public function commit(): Promise
-    {
-        return $this->adapter->commit();
-    }
-
-    /**
-     * Rollback transaction asynchronously
-     */
-    public function rollBack(): Promise
-    {
-        return $this->adapter->rollBack();
-    }
-
-    /**
-     * Execute callback within transaction
-     */
-    public function transaction(callable $callback): Promise
-    {
-        return $this->beginTransaction()
-            ->then(fn() => $callback($this))
+        return $this->adapter->beginTransaction()
             ->then(function ($result) {
-                return $this->commit()->then(fn() => $result);
-            })
-            ->catch(function ($error) {
-                return $this->rollBack()->then(function () use ($error) {
-                    throw $error;
-                });
+                $this->transactionLevel++;
+                return $result;
             });
     }
 
     /**
-     * Close the connection
+     * Commit a transaction
+     */
+    public function commit(): Promise
+    {
+        if ($this->transactionLevel === 0) {
+            return Promise::reject(new \RuntimeException('No active transaction'));
+        }
+
+        return $this->adapter->commit()
+            ->then(function ($result) {
+                $this->transactionLevel--;
+                return $result;
+            });
+    }
+
+    /**
+     * Connect to database
+     */
+    public function connect(): Promise
+    {
+        if ($this->connected) {
+            return Promise::resolve(true);
+        }
+
+        return $this->adapter->connect($this->config)
+            ->then(function ($result) {
+                $this->connected = true;
+                return $result;
+            });
+    }
+
+    /**
+     * Disconnect from database
      */
     public function disconnect(): Promise
     {
-        return $this->adapter->disconnect()->then(function () {
-            $this->connected = false;
-            return true;
-        });
+        if (!$this->connected) {
+            return Promise::resolve(true);
+        }
+
+        return $this->adapter->disconnect()
+            ->then(function ($result) {
+                $this->connected = false;
+                $this->transactionLevel = 0;
+                return $result;
+            });
     }
 
     /**
-     * Check if connected
-     */
-    public function isConnected(): bool
-    {
-        return $this->connected;
-    }
-
-    /**
-     * Get the adapter
+     * Get adapter
      */
     public function getAdapter(): AdapterInterface
     {
@@ -161,10 +141,111 @@ class AsyncConnection
     }
 
     /**
-     * Ping the connection
+     * Get statistics
      */
-    public function ping(): Promise
+    public function getStats(): array
     {
-        return $this->query('SELECT 1')->then(fn() => true);
+        return $this->stats;
+    }
+
+    /**
+     * Get transaction level
+     */
+    public function getTransactionLevel(): int
+    {
+        return $this->transactionLevel;
+    }
+
+    /**
+     * Check if in transaction
+     */
+    public function inTransaction(): bool
+    {
+        return $this->transactionLevel > 0;
+    }
+
+    /**
+     * Check if connected
+     */
+    public function isConnected(): bool
+    {
+        return $this->connected && $this->adapter->isConnected();
+    }
+
+    /**
+     * Execute a query
+     */
+    public function query(string $sql, array $bindings = []): Promise
+    {
+        if (!$this->connected) {
+            return Promise::reject(ConnectionException::lostConnection());
+        }
+
+        $startTime = microtime(true);
+        $this->stats['queries']++;
+
+        return $this->adapter->query($sql, $bindings)
+            ->then(function ($result) use ($startTime) {
+                $this->updateStats(microtime(true) - $startTime);
+                return $result;
+            })
+            ->catch(function ($error) {
+                $this->stats['errors']++;
+                throw $error;
+            });
+    }
+
+    /**
+     * Reset statistics
+     */
+    public function resetStats(): void
+    {
+        $this->stats = [
+            'queries' => 0,
+            'errors' => 0,
+            'avg_time' => 0,
+        ];
+    }
+
+    /**
+     * Rollback a transaction
+     */
+    public function rollBack(): Promise
+    {
+        if ($this->transactionLevel === 0) {
+            return Promise::reject(new \RuntimeException('No active transaction'));
+        }
+
+        return $this->adapter->rollBack()
+            ->then(function ($result) {
+                $this->transactionLevel--;
+                return $result;
+            });
+    }
+
+    /**
+     * Execute in transaction
+     */
+    public function transaction(callable $callback): Promise
+    {
+        return $this->beginTransaction()
+            ->then(fn () => $callback($this))
+            ->then(function ($result) {
+                return $this->commit()->then(fn () => $result);
+            })
+            ->catch(function ($error) {
+                return $this->rollBack()->then(fn () => throw $error);
+            });
+    }
+
+    /**
+     * Update query statistics
+     */
+    private function updateStats(float $time): void
+    {
+        $count = $this->stats['queries'];
+        $currentAvg = $this->stats['avg_time'];
+
+        $this->stats['avg_time'] = (($currentAvg * ($count - 1)) + $time) / $count;
     }
 }

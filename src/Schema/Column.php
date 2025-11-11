@@ -6,228 +6,129 @@ namespace Infocyph\DBLayer\Schema;
 
 /**
  * Column Definition
- * 
- * Represents a single column in a database table with all its properties
- * and modifiers. Provides a fluent interface for configuring column attributes.
- * 
- * @package DBLayer\Schema
+ *
+ * Represents a single column with all its attributes:
+ * - Type and name
+ * - Modifiers (nullable, default, unsigned, etc.)
+ * - Constraints
+ * - Comments
+ *
+ * @package Infocyph\DBLayer\Schema
  * @author Hasan
  */
 class Column
 {
     /**
-     * The column attributes
+     * Column attributes
      */
-    protected array $attributes = [];
+    private array $attributes = [];
+
+    /**
+     * Column name
+     */
+    private string $name;
+
+    /**
+     * Column parameters
+     */
+    private array $parameters;
+    /**
+     * Column type
+     */
+    private string $type;
 
     /**
      * Create a new column instance
      */
-    public function __construct(array $attributes = [])
+    public function __construct(string $type, string $name, array $parameters = [])
     {
-        $this->attributes = $attributes;
+        $this->type = $type;
+        $this->name = $name;
+        $this->parameters = $parameters;
     }
 
     /**
-     * Allow NULL values to be inserted into the column
+     * Place column after another column
      */
-    public function nullable(bool $value = true): static
-    {
-        $this->attributes['nullable'] = $value;
-
-        return $this;
-    }
-
-    /**
-     * Specify a default value for the column
-     */
-    public function default(mixed $value): static
-    {
-        $this->attributes['default'] = $value;
-
-        return $this;
-    }
-
-    /**
-     * Set INTEGER column as auto-increment
-     */
-    public function autoIncrement(): static
-    {
-        $this->attributes['autoIncrement'] = true;
-
-        return $this;
-    }
-
-    /**
-     * Set the column as unsigned (MySQL)
-     */
-    public function unsigned(): static
-    {
-        $this->attributes['unsigned'] = true;
-
-        return $this;
-    }
-
-    /**
-     * Add a comment to the column
-     */
-    public function comment(string $comment): static
-    {
-        $this->attributes['comment'] = $comment;
-
-        return $this;
-    }
-
-    /**
-     * Specify the character set for the column (MySQL)
-     */
-    public function charset(string $charset): static
-    {
-        $this->attributes['charset'] = $charset;
-
-        return $this;
-    }
-
-    /**
-     * Specify the collation for the column
-     */
-    public function collation(string $collation): static
-    {
-        $this->attributes['collation'] = $collation;
-
-        return $this;
-    }
-
-    /**
-     * Set the column as primary key
-     */
-    public function primary(): static
-    {
-        $this->attributes['primary'] = true;
-
-        return $this;
-    }
-
-    /**
-     * Set the column as unique
-     */
-    public function unique(): static
-    {
-        $this->attributes['unique'] = true;
-
-        return $this;
-    }
-
-    /**
-     * Set the column as an index
-     */
-    public function index(): static
-    {
-        $this->attributes['index'] = true;
-
-        return $this;
-    }
-
-    /**
-     * Place the column "first" in the table (MySQL)
-     */
-    public function first(): static
-    {
-        $this->attributes['first'] = true;
-
-        return $this;
-    }
-
-    /**
-     * Place the column "after" another column (MySQL)
-     */
-    public function after(string $column): static
+    public function after(string $column): self
     {
         $this->attributes['after'] = $column;
-
         return $this;
     }
 
     /**
-     * Set the column as STORED GENERATED
+     * Mark column as auto-increment
      */
-    public function storedAs(string $expression): static
+    public function autoIncrement(): self
     {
-        $this->attributes['storedAs'] = $expression;
-
-        return $this;
-    }
-
-    /**
-     * Set the column as VIRTUAL GENERATED
-     */
-    public function virtualAs(string $expression): static
-    {
-        $this->attributes['virtualAs'] = $expression;
-
-        return $this;
-    }
-
-    /**
-     * Set the column to use current timestamp as default
-     */
-    public function useCurrent(): static
-    {
-        $this->attributes['useCurrent'] = true;
-
-        return $this;
-    }
-
-    /**
-     * Set the column to use current timestamp on update
-     */
-    public function useCurrentOnUpdate(): static
-    {
-        $this->attributes['useCurrentOnUpdate'] = true;
-
-        return $this;
-    }
-
-    /**
-     * Specify that the column should be invisible (MySQL 8.0.23+)
-     */
-    public function invisible(): static
-    {
-        $this->attributes['invisible'] = true;
-
+        $this->attributes['autoIncrement'] = true;
         return $this;
     }
 
     /**
      * Change the column definition
      */
-    public function change(): static
+    public function change(): self
     {
         $this->attributes['change'] = true;
-
         return $this;
     }
 
     /**
-     * Get an attribute from the column definition
+     * Set the character set
      */
-    public function get(string $key, mixed $default = null): mixed
+    public function charset(string $charset): self
+    {
+        $this->attributes['charset'] = $charset;
+        return $this;
+    }
+
+    /**
+     * Set the collation
+     */
+    public function collation(string $collation): self
+    {
+        $this->attributes['collation'] = $collation;
+        return $this;
+    }
+
+    /**
+     * Add a comment to the column
+     */
+    public function comment(string $comment): self
+    {
+        $this->attributes['comment'] = $comment;
+        return $this;
+    }
+
+    /**
+     * Set the default value
+     */
+    public function default(mixed $value): self
+    {
+        $this->attributes['default'] = $value;
+        return $this;
+    }
+
+    /**
+     * Place column first
+     */
+    public function first(): self
+    {
+        $this->attributes['first'] = true;
+        return $this;
+    }
+
+    /**
+     * Get a specific attribute
+     */
+    public function getAttribute(string $key, mixed $default = null): mixed
     {
         return $this->attributes[$key] ?? $default;
     }
 
     /**
-     * Set an attribute on the column definition
-     */
-    public function set(string $key, mixed $value): static
-    {
-        $this->attributes[$key] = $value;
-
-        return $this;
-    }
-
-    /**
-     * Get all of the column attributes
+     * Get column attributes
      */
     public function getAttributes(): array
     {
@@ -235,146 +136,155 @@ class Column
     }
 
     /**
-     * Get the column type
-     */
-    public function getType(): string
-    {
-        return $this->attributes['type'] ?? 'string';
-    }
-
-    /**
-     * Get the column name
-     */
-    public function getName(): string
-    {
-        return $this->attributes['name'] ?? '';
-    }
-
-    /**
-     * Determine if the column is nullable
-     */
-    public function isNullable(): bool
-    {
-        return $this->attributes['nullable'] ?? false;
-    }
-
-    /**
-     * Determine if the column has a default value
-     */
-    public function hasDefault(): bool
-    {
-        return array_key_exists('default', $this->attributes);
-    }
-
-    /**
      * Get the default value
      */
     public function getDefault(): mixed
     {
-        return $this->attributes['default'] ?? null;
+        return $this->getAttribute('default');
     }
 
     /**
-     * Determine if the column is auto-incrementing
+     * Get column name
+     */
+    public function getName(): string
+    {
+        return $this->name;
+    }
+
+    /**
+     * Get column parameters
+     */
+    public function getParameters(): array
+    {
+        return $this->parameters;
+    }
+
+    /**
+     * Get column type
+     */
+    public function getType(): string
+    {
+        return $this->type;
+    }
+
+    /**
+     * Check if attribute exists
+     */
+    public function hasAttribute(string $key): bool
+    {
+        return isset($this->attributes[$key]);
+    }
+
+    /**
+     * Check if column has default value
+     */
+    public function hasDefault(): bool
+    {
+        return $this->hasAttribute('default');
+    }
+
+    /**
+     * Add an index to the column
+     */
+    public function index(): self
+    {
+        $this->attributes['index'] = true;
+        return $this;
+    }
+
+    /**
+     * Check if column is auto-increment
      */
     public function isAutoIncrement(): bool
     {
-        return $this->attributes['autoIncrement'] ?? false;
+        return $this->getAttribute('autoIncrement', false);
     }
 
     /**
-     * Determine if the column is unsigned
+     * Check if column is nullable
+     */
+    public function isNullable(): bool
+    {
+        return $this->getAttribute('nullable', false);
+    }
+
+    /**
+     * Check if column is unsigned
      */
     public function isUnsigned(): bool
     {
-        return $this->attributes['unsigned'] ?? false;
+        return $this->getAttribute('unsigned', false);
     }
 
     /**
-     * Determine if the column is a primary key
+     * Make the column nullable
      */
-    public function isPrimary(): bool
+    public function nullable(bool $value = true): self
     {
-        return $this->attributes['primary'] ?? false;
+        $this->attributes['nullable'] = $value;
+        return $this;
     }
 
     /**
-     * Determine if the column is unique
+     * Mark column as primary key
      */
-    public function isUnique(): bool
+    public function primary(): self
     {
-        return $this->attributes['unique'] ?? false;
+        $this->attributes['primary'] = true;
+        return $this;
     }
 
     /**
-     * Determine if the column is an index
+     * Mark column as stored generated
      */
-    public function isIndex(): bool
+    public function storedAs(string $expression): self
     {
-        return $this->attributes['index'] ?? false;
+        $this->attributes['storedAs'] = $expression;
+        return $this;
     }
 
     /**
-     * Get the column length
+     * Mark column as unique
      */
-    public function getLength(): ?int
+    public function unique(): self
     {
-        return $this->attributes['length'] ?? null;
+        $this->attributes['unique'] = true;
+        return $this;
     }
 
     /**
-     * Get the column precision
+     * Mark column as unsigned
      */
-    public function getPrecision(): ?int
+    public function unsigned(): self
     {
-        return $this->attributes['precision'] ?? null;
+        $this->attributes['unsigned'] = true;
+        return $this;
     }
 
     /**
-     * Get the column scale
+     * Mark column as CURRENT_TIMESTAMP default
      */
-    public function getScale(): ?int
+    public function useCurrent(): self
     {
-        return $this->attributes['scale'] ?? null;
+        $this->attributes['useCurrent'] = true;
+        return $this;
     }
 
     /**
-     * Convert the column to an array
+     * Mark column as CURRENT_TIMESTAMP on update
      */
-    public function toArray(): array
+    public function useCurrentOnUpdate(): self
     {
-        return $this->attributes;
+        $this->attributes['useCurrentOnUpdate'] = true;
+        return $this;
     }
 
     /**
-     * Convert the column definition to a string
+     * Mark column as virtual generated
      */
-    public function __toString(): string
+    public function virtualAs(string $expression): self
     {
-        return $this->getName();
-    }
-
-    /**
-     * Dynamically retrieve attributes on the column
-     */
-    public function __get(string $key): mixed
-    {
-        return $this->get($key);
-    }
-
-    /**
-     * Dynamically set attributes on the column
-     */
-    public function __set(string $key, mixed $value): void
-    {
-        $this->set($key, $value);
-    }
-
-    /**
-     * Dynamically check if an attribute is set
-     */
-    public function __isset(string $key): bool
-    {
-        return isset($this->attributes[$key]);
+        $this->attributes['virtualAs'] = $expression;
+        return $this;
     }
 }

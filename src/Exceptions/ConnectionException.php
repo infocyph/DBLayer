@@ -6,86 +6,82 @@ namespace Infocyph\DBLayer\Exceptions;
 
 /**
  * Connection Exception
- * 
- * Thrown when database connection errors occur.
- * Includes connection-specific error handling.
- * 
+ *
+ * Exception for database connection errors.
+ *
  * @package Infocyph\DBLayer\Exceptions
  * @author Hasan
  */
-class ConnectionException extends DBLayerException
+class ConnectionException extends DBException
 {
+    /**
+     * Create exception for config not found
+     */
+    public static function configNotFound(string $name): self
+    {
+        return new self("Connection configuration not found: {$name}");
+    }
     /**
      * Create exception for connection failure
      */
-    public static function connectionFailed(string $driver, string $reason, ?\Throwable $previous = null): static
+    public static function connectionFailed(string $driver, string $reason): self
     {
-        return new static(
-            "Failed to connect to {$driver} database: {$reason}",
-            1001,
-            $previous,
-            ['driver' => $driver, 'reason' => $reason]
-        );
-    }
-
-    /**
-     * Create exception for invalid DSN
-     */
-    public static function invalidDsn(string $dsn): static
-    {
-        return new static(
-            "Invalid DSN format: {$dsn}",
-            1002,
-            null,
-            ['dsn' => $dsn]
-        );
-    }
-
-    /**
-     * Create exception for missing extension
-     */
-    public static function missingExtension(string $extension): static
-    {
-        return new static(
-            "Required PHP extension not loaded: {$extension}",
-            1003,
-            null,
-            ['extension' => $extension]
-        );
-    }
-
-    /**
-     * Create exception for connection timeout
-     */
-    public static function timeout(int $seconds): static
-    {
-        return new static(
-            "Database connection timeout after {$seconds} seconds",
-            1004,
-            null,
-            ['timeout' => $seconds]
-        );
+        return new self("Failed to connect to {$driver} database: {$reason}");
     }
 
     /**
      * Create exception for lost connection
      */
-    public static function lostConnection(): static
+    public static function lostConnection(): self
     {
-        return new static(
-            'Database connection was lost',
-            1005
-        );
+        return new self('Database connection lost');
     }
 
     /**
-     * Create exception for too many connections
+     * Create exception for max reconnect attempts
      */
-    public static function tooManyConnections(): static
+    public static function maxReconnectAttemptsReached(): self
     {
-        return new static(
-            'Too many database connections',
-            1006
-        );
+        return new self('Maximum reconnection attempts reached');
+    }
+
+    /**
+     * Create exception for missing config key
+     */
+    public static function missingConfigKey(string $key): self
+    {
+        return new self("Missing required configuration key: {$key}");
+    }
+
+    /**
+     * Create exception for missing extension
+     */
+    public static function missingExtension(string $extension): self
+    {
+        return new self("Required PHP extension not found: {$extension}");
+    }
+
+    /**
+     * Create exception for pool exhausted
+     */
+    public static function poolExhausted(int $maxConnections): self
+    {
+        return new self("Connection pool exhausted (max: {$maxConnections})");
+    }
+
+    /**
+     * Create exception for query failed
+     */
+    public static function queryFailed(string $sql, string $reason): self
+    {
+        return new self("Query execution failed: {$reason}\nSQL: {$sql}");
+    }
+
+    /**
+     * Create exception for unsupported driver
+     */
+    public static function unsupportedDriver(string $driver): self
+    {
+        return new self("Unsupported database driver: {$driver}");
     }
 }

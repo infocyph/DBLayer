@@ -1,4 +1,5 @@
 <?php
+
 require '../vendor/autoload.php';
 
 use Infocyph\DBLayer\DB;

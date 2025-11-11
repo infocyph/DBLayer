@@ -9,41 +9,29 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
 
 /**
  * ReactPHP Adapter
- * 
- * Async database adapter for ReactPHP event loop.
+ *
+ * Async database adapter for ReactPHP.
  * Provides non-blocking MySQL operations using react/mysql.
- * 
+ *
  * @package Infocyph\DBLayer\Async\Adapters
  * @author Hasan
  */
 class ReactPHPAdapter implements AdapterInterface
 {
-    /**
-     * ReactPHP MySQL connection
-     */
-    protected $connection = null;
-
-    /**
-     * Connection state
-     */
     protected bool $connected = false;
-
-    /**
-     * Event loop
-     */
+    protected $connection = null;
     protected $loop = null;
 
-    /**
-     * Create adapter with event loop
-     */
-    public function __construct($loop = null)
+    public function beginTransaction(): Promise
     {
-        $this->loop = $loop;
+        return $this->query('START TRANSACTION');
     }
 
-    /**
-     * Connect to the database
-     */
+    public function commit(): Promise
+    {
+        return $this->query('COMMIT');
+    }
+
     public function connect(array $config): Promise
     {
         return new Promise(function ($resolve, $reject) use ($config) {
@@ -53,9 +41,10 @@ class ReactPHPAdapter implements AdapterInterface
             }
 
             try {
+                $this->loop = \React\EventLoop\Loop::get();
                 $factory = new \React\MySQL\Factory($this->loop);
 
-                $dsn = sprintf(
+                $uri = sprintf(
                     '%s:%s@%s:%d/%s',
                     $config['username'] ?? 'root',
                     $config['password'] ?? '',
@@ -64,7 +53,7 @@ class ReactPHPAdapter implements AdapterInterface
                     $config['database'] ?? ''
                 );
 
-                $factory->createConnection($dsn)->then(
+                $factory->createConnection($uri)->then(
                     function ($conn) use ($resolve) {
                         $this->connection = $conn;
                         $this->connected = true;
@@ -80,9 +69,27 @@ class ReactPHPAdapter implements AdapterInterface
         });
     }
 
-    /**
-     * Execute a query
-     */
+    public function disconnect(): Promise
+    {
+        return new Promise(function ($resolve) {
+            if ($this->connection) {
+                $this->connection->quit();
+            }
+            $this->connected = false;
+            $resolve(true);
+        });
+    }
+
+    public function getName(): string
+    {
+        return 'reactphp';
+    }
+
+    public function isConnected(): bool
+    {
+        return $this->connected && $this->connection !== null;
+    }
+
     public function query(string $sql, array $bindings = []): Promise
     {
         return new Promise(function ($resolve, $reject) use ($sql, $bindings) {
@@ -91,9 +98,15 @@ class ReactPHPAdapter implements AdapterInterface
                 return;
             }
 
-            $this->connection->query($sql, $bindings)->then(
-                function ($result) use ($resolve) {
-                    $resolve($result);
+            $query = $this->connection->query($sql);
+
+            $query->then(
+                function ($command) use ($resolve) {
+                    if ($command->resultRows) {
+                        $resolve($command->resultRows);
+                    } else {
+                        $resolve([]);
+                    }
                 },
                 function ($error) use ($reject) {
                     $reject(new \RuntimeException($error->getMessage()));
@@ -102,85 +115,8 @@ class ReactPHPAdapter implements AdapterInterface
         });
     }
 
-    /**
-     * Begin a transaction
-     */
-    public function beginTransaction(): Promise
-    {
-        return $this->query('BEGIN');
-    }
-
-    /**
-     * Commit a transaction
-     */
-    public function commit(): Promise
-    {
-        return $this->query('COMMIT');
-    }
-
-    /**
-     * Rollback a transaction
-     */
     public function rollBack(): Promise
     {
         return $this->query('ROLLBACK');
-    }
-
-    /**
-     * Disconnect from the database
-     */
-    public function disconnect(): Promise
-    {
-        return new Promise(function ($resolve, $reject) {
-            if ($this->connection) {
-                $this->connection->quit()->then(
-                    function () use ($resolve) {
-                        $this->connection = null;
-                        $this->connected = false;
-                        $resolve(true);
-                    },
-                    function ($error) use ($resolve) {
-                        // Still mark as disconnected even on error
-                        $this->connection = null;
-                        $this->connected = false;
-                        $resolve(true);
-                    }
-                );
-            } else {
-                $resolve(true);
-            }
-        });
-    }
-
-    /**
-     * Check if connected
-     */
-    public function isConnected(): bool
-    {
-        return $this->connected && $this->connection !== null;
-    }
-
-    /**
-     * Get adapter name
-     */
-    public function getName(): string
-    {
-        return 'reactphp';
-    }
-
-    /**
-     * Get ReactPHP MySQL connection
-     */
-    public function getConnection()
-    {
-        return $this->connection;
-    }
-
-    /**
-     * Get event loop
-     */
-    public function getLoop()
-    {
-        return $this->loop;
     }
 }

@@ -6,187 +6,83 @@ namespace Infocyph\DBLayer\Schema;
 
 /**
  * Foreign Key Definition
- * 
- * Represents a foreign key constraint with all its properties.
- * Provides a fluent interface for configuring foreign key relationships.
- * 
- * @package DBLayer\Schema
+ *
+ * Defines foreign key constraints with:
+ * - Reference table and columns
+ * - ON DELETE and ON UPDATE actions
+ * - Constraint naming
+ *
+ * @package Infocyph\DBLayer\Schema
  * @author Hasan
  */
 class ForeignKey
 {
     /**
-     * The blueprint instance
-     */
-    protected Blueprint $blueprint;
-
-    /**
      * The local columns
      */
-    protected array $columns;
+    private array $columns;
 
     /**
-     * The foreign key name
+     * The constraint name
      */
-    protected string $name;
-
-    /**
-     * The referenced table
-     */
-    protected ?string $on = null;
-
-    /**
-     * The referenced columns
-     */
-    protected array $references = [];
+    private ?string $name;
 
     /**
      * The ON DELETE action
      */
-    protected ?string $onDelete = null;
+    private ?string $onDelete = null;
 
     /**
      * The ON UPDATE action
      */
-    protected ?string $onUpdate = null;
+    private ?string $onUpdate = null;
+
+    /**
+     * The reference columns
+     */
+    private array $referenceColumns = ['id'];
+
+    /**
+     * The reference table
+     */
+    private ?string $referenceTable = null;
 
     /**
      * Create a new foreign key instance
      */
-    public function __construct(Blueprint $blueprint, array $columns, string $name)
+    public function __construct(array $columns, ?string $name = null)
     {
-        $this->blueprint = $blueprint;
         $this->columns = $columns;
         $this->name = $name;
     }
 
     /**
-     * Specify the referenced table
+     * Set ON DELETE CASCADE
      */
-    public function on(string $table): static
+    public function cascadeOnDelete(): self
     {
-        $this->on = $table;
-
-        return $this;
+        return $this->onDelete('CASCADE');
     }
 
     /**
-     * Specify the referenced column(s)
+     * Set ON UPDATE CASCADE
      */
-    public function references(string|array $columns): static
+    public function cascadeOnUpdate(): self
     {
-        $this->references = is_array($columns) ? $columns : [$columns];
-
-        return $this;
+        return $this->onUpdate('CASCADE');
     }
 
     /**
-     * Specify the ON DELETE action
+     * Constrained - shorthand for common pattern
      */
-    public function onDelete(string $action): static
+    public function constrained(?string $table = null, string $column = 'id'): self
     {
-        $this->onDelete = $action;
-
-        return $this;
-    }
-
-    /**
-     * Set the foreign key to cascade on delete
-     */
-    public function cascadeOnDelete(): static
-    {
-        return $this->onDelete('cascade');
-    }
-
-    /**
-     * Set the foreign key to restrict on delete
-     */
-    public function restrictOnDelete(): static
-    {
-        return $this->onDelete('restrict');
-    }
-
-    /**
-     * Set the foreign key to set null on delete
-     */
-    public function nullOnDelete(): static
-    {
-        return $this->onDelete('set null');
-    }
-
-    /**
-     * Set the foreign key to no action on delete
-     */
-    public function noActionOnDelete(): static
-    {
-        return $this->onDelete('no action');
-    }
-
-    /**
-     * Specify the ON UPDATE action
-     */
-    public function onUpdate(string $action): static
-    {
-        $this->onUpdate = $action;
-
-        return $this;
-    }
-
-    /**
-     * Set the foreign key to cascade on update
-     */
-    public function cascadeOnUpdate(): static
-    {
-        return $this->onUpdate('cascade');
-    }
-
-    /**
-     * Set the foreign key to restrict on update
-     */
-    public function restrictOnUpdate(): static
-    {
-        return $this->onUpdate('restrict');
-    }
-
-    /**
-     * Set the foreign key to set null on update
-     */
-    public function nullOnUpdate(): static
-    {
-        return $this->onUpdate('set null');
-    }
-
-    /**
-     * Set the foreign key to no action on update
-     */
-    public function noActionOnUpdate(): static
-    {
-        return $this->onUpdate('no action');
-    }
-
-    /**
-     * Finalize the foreign key definition and add it to the blueprint
-     */
-    public function __destruct()
-    {
-        if ($this->on && !empty($this->references)) {
-            $this->blueprint->addCommand('foreign', [
-                'name' => $this->name,
-                'columns' => $this->columns,
-                'on' => $this->on,
-                'references' => implode(',', $this->references),
-                'onDelete' => $this->onDelete,
-                'onUpdate' => $this->onUpdate,
-            ]);
+        if ($table === null) {
+            // Infer table name from column name
+            $table = str_replace('_id', '', $this->columns[0]) . 's';
         }
-    }
 
-    /**
-     * Get the foreign key name
-     */
-    public function getName(): string
-    {
-        return $this->name;
+        return $this->references($column)->on($table);
     }
 
     /**
@@ -198,23 +94,15 @@ class ForeignKey
     }
 
     /**
-     * Get the referenced table
+     * Get the constraint name
      */
-    public function getOn(): ?string
+    public function getName(): ?string
     {
-        return $this->on;
+        return $this->name;
     }
 
     /**
-     * Get the referenced columns
-     */
-    public function getReferences(): array
-    {
-        return $this->references;
-    }
-
-    /**
-     * Get the ON DELETE action
+     * Get ON DELETE action
      */
     public function getOnDelete(): ?string
     {
@@ -222,7 +110,7 @@ class ForeignKey
     }
 
     /**
-     * Get the ON UPDATE action
+     * Get ON UPDATE action
      */
     public function getOnUpdate(): ?string
     {
@@ -230,17 +118,121 @@ class ForeignKey
     }
 
     /**
-     * Convert the foreign key to an array
+     * Get the reference columns
      */
-    public function toArray(): array
+    public function getReferenceColumns(): array
     {
-        return [
-            'name' => $this->name,
-            'columns' => $this->columns,
-            'on' => $this->on,
-            'references' => $this->references,
-            'onDelete' => $this->onDelete,
-            'onUpdate' => $this->onUpdate,
-        ];
+        return $this->referenceColumns;
+    }
+
+    /**
+     * Get the reference table
+     */
+    public function getReferenceTable(): ?string
+    {
+        return $this->referenceTable;
+    }
+
+    /**
+     * Check if foreign key is valid
+     */
+    public function isValid(): bool
+    {
+        return !empty($this->columns) &&
+               !empty($this->referenceTable) &&
+               !empty($this->referenceColumns);
+    }
+
+    /**
+     * Set constraint name
+     */
+    public function name(string $name): self
+    {
+        $this->name = $name;
+        return $this;
+    }
+
+    /**
+     * Set ON DELETE NO ACTION
+     */
+    public function noActionOnDelete(): self
+    {
+        return $this->onDelete('NO ACTION');
+    }
+
+    /**
+     * Set ON UPDATE NO ACTION
+     */
+    public function noActionOnUpdate(): self
+    {
+        return $this->onUpdate('NO ACTION');
+    }
+
+    /**
+     * Set ON DELETE SET NULL
+     */
+    public function nullOnDelete(): self
+    {
+        return $this->onDelete('SET NULL');
+    }
+
+    /**
+     * Set ON UPDATE SET NULL
+     */
+    public function nullOnUpdate(): self
+    {
+        return $this->onUpdate('SET NULL');
+    }
+
+    /**
+     * Set the reference table
+     */
+    public function on(string $table): self
+    {
+        $this->referenceTable = $table;
+        return $this;
+    }
+
+    /**
+     * Set ON DELETE action
+     */
+    public function onDelete(string $action): self
+    {
+        $this->onDelete = strtoupper($action);
+        return $this;
+    }
+
+    /**
+     * Set ON UPDATE action
+     */
+    public function onUpdate(string $action): self
+    {
+        $this->onUpdate = strtoupper($action);
+        return $this;
+    }
+
+    /**
+     * Set the reference table
+     */
+    public function references(string|array $columns): self
+    {
+        $this->referenceColumns = (array) $columns;
+        return $this;
+    }
+
+    /**
+     * Set ON DELETE RESTRICT
+     */
+    public function restrictOnDelete(): self
+    {
+        return $this->onDelete('RESTRICT');
+    }
+
+    /**
+     * Set ON UPDATE RESTRICT
+     */
+    public function restrictOnUpdate(): self
+    {
+        return $this->onUpdate('RESTRICT');
     }
 }
