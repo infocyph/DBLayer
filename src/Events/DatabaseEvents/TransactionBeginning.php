@@ -29,7 +29,7 @@ class TransactionBeginning
     /**
      * Create a new event instance
      */
-    public function __construct(Connection $connection)
+    public function __construct(Connection $connection): void
     {
         $this->connection = $connection;
         $this->time = microtime(true);

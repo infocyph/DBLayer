@@ -29,7 +29,7 @@ class TransactionCommitted
     /**
      * Create a new event instance
      */
-    public function __construct(Connection $connection, float $duration = 0)
+    public function __construct(Connection $connection, float $duration = 0): void
     {
         $this->connection = $connection;
         $this->duration = $duration;

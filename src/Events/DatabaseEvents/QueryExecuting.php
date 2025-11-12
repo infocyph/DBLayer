@@ -38,7 +38,7 @@ class QueryExecuting
     /**
      * Create a new event instance
      */
-    public function __construct(string $sql, array $bindings, Connection $connection)
+    public function __construct(string $sql, array $bindings, Connection $connection): void
     {
         $this->sql = $sql;
         $this->bindings = $bindings;

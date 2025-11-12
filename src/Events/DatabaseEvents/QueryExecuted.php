@@ -49,7 +49,7 @@ class QueryExecuted
         float $time,
         Connection $connection,
         ?int $rowsAffected = null
-    ) {
+    ): void {
         $this->sql = $sql;
         $this->bindings = $bindings;
         $this->time = $time;

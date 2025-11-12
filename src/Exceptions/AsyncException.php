@@ -7,7 +7,8 @@ namespace Infocyph\DBLayer\Exceptions;
 /**
  * Async Exception
  *
- * Exception for async operation errors.
+ * Exception thrown when asynchronous operations fail.
+ * Handles errors related to async adapters, promises, and coroutines.
  *
  * @package Infocyph\DBLayer\Exceptions
  * @author Hasan
@@ -15,65 +16,84 @@ namespace Infocyph\DBLayer\Exceptions;
 class AsyncException extends DBException
 {
     /**
-     * Create exception for adapter not available
+     * Create exception for adapter not found
+     *
+     * @param string $adapterName The requested adapter name
+     * @return self
      */
-    public static function adapterNotAvailable(string $adapter): self
+    public static function adapterNotFound(string $adapterName): self
     {
-        return new self("Async adapter not available: {$adapter}. Install required extension/package");
-    }
-    /**
-     * Create exception for connection failed
-     */
-    public static function connectionFailed(string $reason): self
-    {
-        return new self("Async connection failed: {$reason}");
+        return new self("Async adapter not found: {$adapterName}");
     }
 
     /**
-     * Create exception for no adapter available
+     * Create exception for missing async extension
+     *
+     * @param string $extension Required extension name (swoole, amp, reactphp)
+     * @return self
      */
-    public static function noAdapterAvailable(): self
+    public static function extensionMissing(string $extension): self
     {
-        return new self('No async adapter available. Install swoole, amp, or reactphp');
+        return new self(
+            "Required async extension not installed: {$extension}. " .
+            "Please install the extension to use async features."
+        );
     }
 
     /**
-     * Create exception for not connected
+     * Create exception for promise rejection
+     *
+     * @param string $reason Rejection reason
+     * @return self
      */
-    public static function notConnected(): self
+    public static function promiseRejected(string $reason): self
     {
-        return new self('Not connected to async database');
+        return new self("Promise rejected: {$reason}");
     }
 
     /**
-     * Create exception for pool timeout
+     * Create exception for timeout
+     *
+     * @param float $timeout Timeout duration in seconds
+     * @return self
      */
-    public static function poolTimeout(float $seconds): self
+    public static function timeout(float $timeout): self
     {
-        return new self("Connection pool timeout after {$seconds} seconds");
+        return new self("Async operation timed out after {$timeout} seconds");
     }
 
     /**
-     * Create exception for promise error
+     * Create exception for coroutine errors
+     *
+     * @param string $message Error details
+     * @return self
      */
-    public static function promiseError(string $reason): self
+    public static function coroutineError(string $message): self
     {
-        return new self("Promise error: {$reason}");
+        return new self("Coroutine error: {$message}");
     }
 
     /**
-     * Create exception for query failed
+     * Create exception for pool exhaustion
+     *
+     * @param int $maxConnections Maximum connection limit
+     * @return self
      */
-    public static function queryFailed(string $sql, string $reason): self
+    public static function poolExhausted(int $maxConnections): self
     {
-        return new self("Async query failed: {$reason}\nSQL: {$sql}");
+        return new self(
+            "Async connection pool exhausted. Maximum connections ({$maxConnections}) reached."
+        );
     }
 
     /**
-     * Create exception for unsupported adapter
+     * Create exception for invalid adapter configuration
+     *
+     * @param string $message Configuration error details
+     * @return self
      */
-    public static function unsupportedAdapter(string $adapter): self
+    public static function invalidConfiguration(string $message): self
     {
-        return new self("Unsupported async adapter: {$adapter}");
+        return new self("Invalid async adapter configuration: {$message}");
     }
 }
