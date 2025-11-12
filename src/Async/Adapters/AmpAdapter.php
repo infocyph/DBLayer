@@ -19,7 +19,7 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
 class AmpAdapter implements AdapterInterface
 {
     protected bool $connected = false;
-    protected $connection = null;
+    protected mixed $connection = null;
 
     public function beginTransaction(): Promise
     {

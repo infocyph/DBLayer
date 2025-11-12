@@ -313,6 +313,22 @@ class Security
     }
 
     /**
+     * Get current minute key
+     */
+    protected static function getCurrentMinute(): string
+    {
+        return date('Y-m-d H:i');
+    }
+
+    /**
+     * Get current second key
+     */
+    protected static function getCurrentSecond(): string
+    {
+        return date('Y-m-d H:i:s');
+    }
+
+    /**
      * Check per-minute rate limit
      */
     private static function checkPerMinuteLimit(string $identifier, int $limit): void
@@ -384,21 +400,5 @@ class Security
 
             throw SecurityException::rateLimitExceeded($limit, 'second');
         }
-    }
-
-    /**
-     * Get current minute key
-     */
-    private static function getCurrentMinute(): string
-    {
-        return date('Y-m-d H:i');
-    }
-
-    /**
-     * Get current second key
-     */
-    private static function getCurrentSecond(): string
-    {
-        return date('Y-m-d H:i:s');
     }
 }

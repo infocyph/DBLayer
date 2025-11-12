@@ -12,5 +12,3 @@ git-story_media
 .vscode
 .phpunit.cache
 *.patch
-*.php
-!rector.php

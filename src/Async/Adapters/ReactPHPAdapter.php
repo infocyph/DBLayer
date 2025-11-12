@@ -19,8 +19,8 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
 class ReactPHPAdapter implements AdapterInterface
 {
     protected bool $connected = false;
-    protected $connection = null;
-    protected $loop = null;
+    protected mixed $connection = null;
+    protected mixed $loop = null;
 
     public function beginTransaction(): Promise
     {
