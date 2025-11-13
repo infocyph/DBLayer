@@ -9,44 +9,42 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
 /**
  * Connection Configuration
  *
- * Manages database connection configuration with:
- * - Driver-specific settings
- * - Read/write splitting configuration
- * - Connection pooling options
- * - Security settings
+ * Manages database connection configuration.
+ * Optimized as a readonly immutable class for PHP 8.4.
  *
  * @package Infocyph\DBLayer\Connection
  * @author Hasan
  */
-class ConnectionConfig
+readonly class ConnectionConfig
 {
     /**
      * Default configuration values
      */
     private const DEFAULTS = [
-        'driver' => 'mysql',
-        'host' => 'localhost',
-        'port' => 3306,
-        'database' => '',
-        'username' => 'root',
-        'password' => '',
-        'charset' => 'utf8mb4',
-        'collation' => 'utf8mb4_unicode_ci',
-        'prefix' => '',
-        'strict' => true,
-        'engine' => 'InnoDB',
-        'options' => [],
-        'read' => [],
+      'driver' => 'mysql',
+      'host' => 'localhost',
+      'port' => 3306,
+      'database' => '',
+      'username' => 'root',
+      'password' => '',
+      'charset' => 'utf8mb4',
+      'collation' => 'utf8mb4_unicode_ci',
+      'prefix' => '',
+      'strict' => true,
+      'engine' => 'InnoDB',
+      'options' => [],
+      'read' => [],
     ];
 
     /**
      * Driver-specific default ports
      */
     private const DRIVER_PORTS = [
-        'mysql' => 3306,
-        'pgsql' => 5432,
-        'sqlite' => null,
+      'mysql' => 3306,
+      'pgsql' => 5432,
+      'sqlite' => null,
     ];
+
     /**
      * Configuration array
      */
@@ -73,20 +71,20 @@ class ConnectionConfig
      * Create MySQL configuration
      */
     public static function mysql(
-        string $host,
-        string $database,
-        string $username,
-        string $password,
-        int $port = 3306,
-        array $options = []
+      string $host,
+      string $database,
+      string $username,
+      string $password,
+      int $port = 3306,
+      array $options = []
     ): self {
         return new self(array_merge([
-            'driver' => 'mysql',
-            'host' => $host,
-            'port' => $port,
-            'database' => $database,
-            'username' => $username,
-            'password' => $password,
+          'driver' => 'mysql',
+          'host' => $host,
+          'port' => $port,
+          'database' => $database,
+          'username' => $username,
+          'password' => $password,
         ], $options));
     }
 
@@ -94,20 +92,20 @@ class ConnectionConfig
      * Create PostgreSQL configuration
      */
     public static function pgsql(
-        string $host,
-        string $database,
-        string $username,
-        string $password,
-        int $port = 5432,
-        array $options = []
+      string $host,
+      string $database,
+      string $username,
+      string $password,
+      int $port = 5432,
+      array $options = []
     ): self {
         return new self(array_merge([
-            'driver' => 'pgsql',
-            'host' => $host,
-            'port' => $port,
-            'database' => $database,
-            'username' => $username,
-            'password' => $password,
+          'driver' => 'pgsql',
+          'host' => $host,
+          'port' => $port,
+          'database' => $database,
+          'username' => $username,
+          'password' => $password,
         ], $options));
     }
 
@@ -117,15 +115,16 @@ class ConnectionConfig
     public static function sqlite(string $database, array $options = []): self
     {
         return new self(array_merge([
-            'driver' => 'sqlite',
-            'database' => $database,
+          'driver' => 'sqlite',
+          'database' => $database,
         ], $options));
     }
 
     /**
-     * Clone configuration
+     * Copy configuration
+     * Renamed from 'clone' to avoid syntax error with reserved keyword
      */
-    public function clone(): self
+    public function copy(): self
     {
         return new self($this->config);
     }
@@ -243,11 +242,14 @@ class ConnectionConfig
     }
 
     /**
-     * Set a configuration value
+     * Get a new instance with a modified value
+     * Replaces deprecated mutable set() method
      */
-    public function set(string $key, mixed $value): void
+    public function with(string $key, mixed $value): self
     {
-        $this->config[$key] = $value;
+        $config = $this->config;
+        $config[$key] = $value;
+        return new self($config);
     }
 
     /**
@@ -288,7 +290,6 @@ class ConnectionConfig
     {
         // SQLite doesn't need host, port, username, password
         unset($config['host'], $config['port'], $config['username'], $config['password']);
-
         return $config;
     }
 
@@ -308,14 +309,12 @@ class ConnectionConfig
         $merged = array_merge(self::DEFAULTS, $config);
 
         // Driver-specific defaults
-        $merged = match ($driver) {
+        return match ($driver) {
             'mysql' => $this->applyMySqlDefaults($merged),
             'pgsql' => $this->applyPostgreSqlDefaults($merged),
             'sqlite' => $this->applySqliteDefaults($merged),
             default => $merged,
         };
-
-        return $merged;
     }
 
     /**
@@ -328,7 +327,6 @@ class ConnectionConfig
         }
 
         $driver = $config['driver'];
-
         if (!in_array($driver, ['mysql', 'pgsql', 'sqlite'])) {
             throw ConnectionException::unsupportedDriver($driver);
         }
@@ -343,7 +341,6 @@ class ConnectionConfig
 
         // MySQL and PostgreSQL require more configuration
         $required = ['host', 'database', 'username'];
-
         foreach ($required as $key) {
             if (!isset($config[$key])) {
                 throw ConnectionException::missingConfigKey($key);

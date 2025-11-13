@@ -14,6 +14,7 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
  * - Health monitoring
  * - Load balancing
  * - Auto-scaling
+ * - Non-blocking request queuing
  *
  * @package Infocyph\DBLayer\Async
  * @author Hasan
@@ -24,11 +25,11 @@ class Pool
      * Default configuration
      */
     private const DEFAULTS = [
-        'min' => 2,
-        'max' => 10,
-        'idle_timeout' => 60,
-        'max_lifetime' => 3600,
-        'wait_timeout' => 30,
+      'min' => 2,
+      'max' => 10,
+      'idle_timeout' => 60,
+      'max_lifetime' => 3600,
+      'wait_timeout' => 30,
     ];
 
     /**
@@ -42,9 +43,15 @@ class Pool
     private array $busy = [];
 
     /**
+     * Pending connection requests [resolve, reject, timerId]
+     */
+    private array $pending = [];
+
+    /**
      * Pool configuration
      */
     private array $config;
+
     /**
      * Pool of connections
      */
@@ -59,11 +66,12 @@ class Pool
      * Pool statistics
      */
     private array $stats = [
-        'created' => 0,
-        'destroyed' => 0,
-        'acquired' => 0,
-        'released' => 0,
-        'errors' => 0,
+      'created' => 0,
+      'destroyed' => 0,
+      'acquired' => 0,
+      'released' => 0,
+      'errors' => 0,
+      'pending' => 0,
     ];
 
     /**
@@ -89,10 +97,9 @@ class Pool
             unset($this->available[$id]);
 
             $this->busy[$id] = [
-                'connection' => $connection,
-                'acquired_at' => microtime(true),
+              'connection' => $connection,
+              'acquired_at' => microtime(true),
             ];
-
             $this->stats['acquired']++;
 
             return Promise::resolve($connection);
@@ -103,8 +110,101 @@ class Pool
             return $this->createConnection();
         }
 
-        // Wait for available connection
-        return $this->waitForConnection();
+        // Queue the request
+        return $this->queueRequest();
+    }
+
+    /**
+     * Queue a request for a connection
+     */
+    private function queueRequest(): Promise
+    {
+        $this->stats['pending']++;
+
+        return new Promise(function ($resolve, $reject) {
+            // Optional: Add timeout logic here if using an event loop (Swoole/React)
+            // For now, we rely on the promise mechanism
+            $this->pending[] = [$resolve, $reject, microtime(true)];
+        });
+    }
+
+    /**
+     * Release a connection back to the pool
+     */
+    public function release(AsyncConnection $connection): Promise
+    {
+        $id = spl_object_id($connection);
+        if (!isset($this->busy[$id])) {
+            return Promise::reject(new \RuntimeException('Connection not from this pool'));
+        }
+
+        unset($this->busy[$id]);
+
+        // Check if connection is healthy
+        if (!$connection->isConnected()) {
+            // Destroy invalid connection and try to fulfill pending from a new one if possible
+            $this->destroyConnection($connection);
+            $this->processPending();
+            return Promise::resolve(true);
+        }
+
+        // Check lifetime
+        if ($this->isExpired($id)) {
+            $this->destroyConnection($connection);
+            $this->processPending();
+            return Promise::resolve(true);
+        }
+
+        // If there are pending requests, give the connection directly to the first one
+        if (!empty($this->pending)) {
+            $pending = array_shift($this->pending);
+            [$resolve, $reject, $startTime] = $pending;
+
+            // Check wait timeout
+            if (microtime(true) - $startTime > $this->config['wait_timeout']) {
+                $reject(ConnectionException::timeout($this->config['wait_timeout']));
+                // Recursively try next pending, but release this connection to pool first
+                $this->available[$id] = [
+                  'connection' => $connection,
+                  'released_at' => microtime(true),
+                ];
+                $this->processPending();
+            } else {
+                // Assign to pending request
+                $this->busy[$id] = [
+                  'connection' => $connection,
+                  'acquired_at' => microtime(true),
+                ];
+                $this->stats['acquired']++;
+                $this->stats['pending']--;
+                $resolve($connection);
+            }
+
+            return Promise::resolve(true);
+        }
+
+        // No pending requests, return to available pool
+        $this->available[$id] = [
+          'connection' => $connection,
+          'released_at' => microtime(true),
+        ];
+        $this->stats['released']++;
+
+        return Promise::resolve(true);
+    }
+
+    /**
+     * Process pending requests (try to create new connections if space freed)
+     */
+    private function processPending(): void
+    {
+        while (!empty($this->pending) && count($this->connections) < $this->config['max']) {
+            $pending = array_shift($this->pending);
+            [$resolve, $reject] = $pending;
+
+            $this->createConnection()->then($resolve, $reject);
+            $this->stats['pending']--;
+        }
     }
 
     /**
@@ -117,7 +217,6 @@ class Pool
 
         foreach ($this->available as $id => $data) {
             $idle = $now - $data['released_at'];
-
             if ($idle > $this->config['idle_timeout'] || $this->isExpired($id)) {
                 $promises[] = $this->destroyConnection($data['connection']);
             }
@@ -137,18 +236,24 @@ class Pool
     public function close(): Promise
     {
         $promises = [];
-
         foreach ($this->connections as $id => $data) {
             $promises[] = $data['connection']->disconnect();
         }
 
         return Promise::all($promises)
-            ->then(function () {
-                $this->connections = [];
-                $this->available = [];
-                $this->busy = [];
-                return true;
-            });
+          ->then(function () {
+              $this->connections = [];
+              $this->available = [];
+              $this->busy = [];
+
+              // Reject all pending
+              foreach ($this->pending as [$resolve, $reject]) {
+                  $reject(new \RuntimeException('Pool closed'));
+              }
+              $this->pending = [];
+
+              return true;
+          });
     }
 
     /**
@@ -165,44 +270,12 @@ class Pool
     public function getStats(): array
     {
         return array_merge($this->stats, [
-            'total' => count($this->connections),
-            'available' => count($this->available),
-            'busy' => count($this->busy),
-            'utilization' => $this->getUtilization(),
+          'total' => count($this->connections),
+          'available' => count($this->available),
+          'busy' => count($this->busy),
+          'pending' => count($this->pending),
+          'utilization' => $this->getUtilization(),
         ]);
-    }
-
-    /**
-     * Release a connection back to the pool
-     */
-    public function release(AsyncConnection $connection): Promise
-    {
-        $id = spl_object_id($connection);
-
-        if (!isset($this->busy[$id])) {
-            return Promise::reject(new \RuntimeException('Connection not from this pool'));
-        }
-
-        unset($this->busy[$id]);
-
-        // Check if connection is healthy
-        if (!$connection->isConnected()) {
-            return $this->destroyConnection($connection);
-        }
-
-        // Check lifetime
-        if ($this->isExpired($id)) {
-            return $this->destroyConnection($connection);
-        }
-
-        $this->available[$id] = [
-            'connection' => $connection,
-            'released_at' => microtime(true),
-        ];
-
-        $this->stats['released']++;
-
-        return Promise::resolve(true);
     }
 
     /**
@@ -211,11 +284,12 @@ class Pool
     public function resetStats(): void
     {
         $this->stats = [
-            'created' => 0,
-            'destroyed' => 0,
-            'acquired' => 0,
-            'released' => 0,
-            'errors' => 0,
+          'created' => 0,
+          'destroyed' => 0,
+          'acquired' => 0,
+          'released' => 0,
+          'errors' => 0,
+          'pending' => 0,
         ];
     }
 
@@ -225,10 +299,10 @@ class Pool
     public function withConnection(callable $callback): Promise
     {
         return $this->acquire()
-            ->then(function ($connection) use ($callback) {
-                return Promise::resolve($callback($connection))
-                    ->finally(fn () => $this->release($connection));
-            });
+          ->then(function ($connection) use ($callback) {
+              return Promise::resolve($callback($connection))
+                ->finally(fn () => $this->release($connection));
+          });
     }
 
     /**
@@ -237,34 +311,33 @@ class Pool
     private function createConnection(): Promise
     {
         $connection = ($this->factory)();
-
         if (!$connection instanceof AsyncConnection) {
             return Promise::reject(new \RuntimeException('Factory must return AsyncConnection'));
         }
 
         return $connection->connect()
-            ->then(function () use ($connection) {
-                $id = spl_object_id($connection);
+          ->then(function () use ($connection) {
+              $id = spl_object_id($connection);
 
-                $this->connections[$id] = [
-                    'connection' => $connection,
-                    'created_at' => microtime(true),
-                ];
+              $this->connections[$id] = [
+                'connection' => $connection,
+                'created_at' => microtime(true),
+              ];
 
-                $this->busy[$id] = [
-                    'connection' => $connection,
-                    'acquired_at' => microtime(true),
-                ];
+              $this->busy[$id] = [
+                'connection' => $connection,
+                'acquired_at' => microtime(true),
+              ];
 
-                $this->stats['created']++;
-                $this->stats['acquired']++;
+              $this->stats['created']++;
+              $this->stats['acquired']++;
 
-                return $connection;
-            })
-            ->catch(function ($error) {
-                $this->stats['errors']++;
-                throw $error;
-            });
+              return $connection;
+          })
+          ->catch(function ($error) {
+              $this->stats['errors']++;
+              throw $error;
+          });
     }
 
     /**
@@ -273,7 +346,6 @@ class Pool
     private function destroyConnection(AsyncConnection $connection): Promise
     {
         $id = spl_object_id($connection);
-
         unset($this->connections[$id]);
         unset($this->available[$id]);
         unset($this->busy[$id]);
@@ -316,34 +388,5 @@ class Pool
 
         $age = microtime(true) - $this->connections[$id]['created_at'];
         return $age > $this->config['max_lifetime'];
-    }
-
-    /**
-     * Wait for an available connection
-     */
-    private function waitForConnection(): Promise
-    {
-        return new Promise(function ($resolve, $reject) {
-            $startTime = microtime(true);
-            $timeout = $this->config['wait_timeout'];
-
-            $check = function () use (&$check, $resolve, $reject, $startTime, $timeout) {
-                if (microtime(true) - $startTime > $timeout) {
-                    $reject(ConnectionException::poolExhausted($this->config['max']));
-                    return;
-                }
-
-                if (!empty($this->available)) {
-                    $this->acquire()->then($resolve, $reject);
-                    return;
-                }
-
-                // Check again after 10ms
-                usleep(10000);
-                $check();
-            };
-
-            $check();
-        });
     }
 }

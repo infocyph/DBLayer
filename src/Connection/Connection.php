@@ -348,26 +348,57 @@ class Connection
     /**
      * Establish database connection
      */
+    /**
+     * Establish database connection
+     */
     private function connect(): void
     {
         try {
             $this->pdo = new PDO(
-                $this->buildDsn(),
-                $this->config->getUsername(),
-                $this->config->getPassword(),
-                $this->getConnectionOptions()
+              $this->buildDsn(),
+              $this->config->getUsername(),
+              $this->config->getPassword(),
+              $this->getConnectionOptions()
             );
-
             $this->lastConnectTime = microtime(true);
             $this->reconnectAttempts = 0;
 
             // Run post-connection commands
             $this->runPostConnectCommands($this->pdo);
         } catch (PDOException $e) {
+            // Throw specific exception, which will be caught by reconnect() if applicable
             throw ConnectionException::connectionFailed(
-                $this->config->getDriver(),
-                $e->getMessage()
+              $this->config->getDriver(),
+              $e->getMessage()
             );
+        }
+    }
+
+    /**
+     * Reconnect to database with exponential backoff
+     */
+    private function reconnect(): void
+    {
+        $this->disconnect();
+
+        $attempt = 0;
+
+        while ($attempt < self::MAX_RECONNECT_ATTEMPTS) {
+            $attempt++;
+            $this->reconnectAttempts = $attempt;
+
+            try {
+                $this->connect();
+                return; // Connection successful
+            } catch (ConnectionException $e) {
+                // If we reached max attempts, throw the exception
+                if ($attempt >= self::MAX_RECONNECT_ATTEMPTS) {
+                    throw ConnectionException::maxReconnectAttemptsReached(self::MAX_RECONNECT_ATTEMPTS);
+                }
+
+                // Exponential backoff: 100ms, 200ms, 300ms...
+                usleep(100000 * $attempt);
+            }
         }
     }
 
@@ -519,18 +550,18 @@ class Connection
     /**
      * Reconnect to database
      */
-    private function reconnect(): void
-    {
-        $this->reconnectAttempts++;
-
-        if ($this->reconnectAttempts > self::MAX_RECONNECT_ATTEMPTS) {
-            throw ConnectionException::maxReconnectAttemptsReached();
-        }
-
-        $this->disconnect();
-        usleep(100000 * $this->reconnectAttempts); // Exponential backoff
-        $this->connect();
-    }
+//    private function reconnect(): void
+//    {
+//        $this->reconnectAttempts++;
+//
+//        if ($this->reconnectAttempts > self::MAX_RECONNECT_ATTEMPTS) {
+//            throw ConnectionException::maxReconnectAttemptsReached();
+//        }
+//
+//        $this->disconnect();
+//        usleep(100000 * $this->reconnectAttempts); // Exponential backoff
+//        $this->connect();
+//    }
 
     /**
      * Reconnect read connection
