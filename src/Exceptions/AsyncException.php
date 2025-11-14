@@ -7,7 +7,7 @@ namespace Infocyph\DBLayer\Exceptions;
 /**
  * Errors related to asynchronous database operations and adapters.
  */
-class AsyncException extends DBException
+final class AsyncException extends DBException
 {
     public static function adapterNotFound(string $adapterName): self
     {

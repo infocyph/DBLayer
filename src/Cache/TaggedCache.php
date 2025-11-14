@@ -9,46 +9,45 @@ namespace Infocyph\DBLayer\Cache;
  *
  * Manages cache items with tags for group operations.
  * Allows invalidating multiple cache items by tag.
- *
- * @package Infocyph\DBLayer\Cache
- * @author Hasan
  */
 class TaggedCache
 {
     /**
-     * Tag namespace separator
+     * Tag namespace separator.
      */
     private const TAG_SEPARATOR = '|';
-    /**
-     * Cache instance
-     */
+
     private Cache $cache;
 
     /**
-     * Cache tags
+     * @var array<int, string>
      */
     private array $tags;
 
     /**
-     * Create a new tagged cache instance
+     * Create a new tagged cache instance.
+     *
+     * @param array<int, string> $tags
      */
     public function __construct(Cache $cache, array $tags)
     {
         $this->cache = $cache;
-        $this->tags = $tags;
+        $this->tags  = $tags;
     }
 
     /**
-     * Flush all items with these tags
+     * Flush all items with these tags.
      */
     public function flush(): bool
     {
         $this->flushTagTimestamps();
+
+        // Actual item invalidation is implicit via tag namespace change.
         return true;
     }
 
     /**
-     * Store item forever
+     * Store item forever.
      */
     public function forever(string $key, mixed $value): bool
     {
@@ -56,7 +55,7 @@ class TaggedCache
     }
 
     /**
-     * Delete item from cache
+     * Delete item from cache.
      */
     public function forget(string $key): bool
     {
@@ -64,7 +63,7 @@ class TaggedCache
     }
 
     /**
-     * Get item from cache
+     * Get item from cache.
      */
     public function get(string $key, mixed $default = null): mixed
     {
@@ -72,7 +71,7 @@ class TaggedCache
     }
 
     /**
-     * Check if item exists
+     * Check if item exists.
      */
     public function has(string $key): bool
     {
@@ -80,16 +79,19 @@ class TaggedCache
     }
 
     /**
-     * Store item in cache
+     * Store item in cache.
      */
     public function put(string $key, mixed $value, ?int $ttl = null): bool
     {
         $this->updateTagTimestamps();
+
         return $this->cache->put($this->taggedKey($key), $value, $ttl);
     }
 
     /**
-     * Get item or execute callback and cache result
+     * Get item or execute callback and cache result.
+     *
+     * @param callable(): mixed $callback
      */
     public function remember(string $key, callable $callback, ?int $ttl = null): mixed
     {
@@ -106,7 +108,7 @@ class TaggedCache
     }
 
     /**
-     * Flush tag timestamps
+     * Flush tag timestamps.
      */
     private function flushTagTimestamps(): void
     {
@@ -116,14 +118,14 @@ class TaggedCache
     }
 
     /**
-     * Get tag ID (timestamp)
+     * Get tag ID (timestamp / unique identifier).
      */
     private function getTagId(string $tag): string
     {
         $key = 'tag:' . $tag;
-        $id = $this->cache->get($key);
+        $id  = $this->cache->get($key);
 
-        if ($id === null) {
+        if (! is_string($id) || $id === '') {
             $id = $this->resetTagId($tag);
         }
 
@@ -131,19 +133,20 @@ class TaggedCache
     }
 
     /**
-     * Reset tag ID
+     * Reset tag ID.
      */
     private function resetTagId(string $tag): string
     {
-        $id = uniqid('', true);
+        $id  = uniqid('', true);
         $key = 'tag:' . $tag;
+
         $this->cache->forever($key, $id);
 
         return $id;
     }
 
     /**
-     * Get tag namespace
+     * Build a tagged key with current tag namespace.
      */
     private function taggedKey(string $key): string
     {
@@ -151,7 +154,9 @@ class TaggedCache
     }
 
     /**
-     * Get tag IDs (timestamps)
+     * Get tag IDs (timestamps / unique identifiers).
+     *
+     * @return array<int, string>
      */
     private function tagIds(): array
     {
@@ -165,7 +170,7 @@ class TaggedCache
     }
 
     /**
-     * Update tag timestamps
+     * Ensure tag timestamps exist (without rotating them).
      */
     private function updateTagTimestamps(): void
     {

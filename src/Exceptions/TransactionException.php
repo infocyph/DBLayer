@@ -7,7 +7,7 @@ namespace Infocyph\DBLayer\Exceptions;
 /**
  * Errors related to transactions and savepoints.
  */
-class TransactionException extends DBException
+final class TransactionException extends DBException
 {
     public static function beginFailed(string $message): self
     {

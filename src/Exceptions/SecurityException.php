@@ -7,7 +7,7 @@ namespace Infocyph\DBLayer\Exceptions;
 /**
  * Errors related to security policies (SQL injection, rate limiting, etc.).
  */
-class SecurityException extends DBException
+final class SecurityException extends DBException
 {
     public static function sqlInjectionDetected(string $pattern, string $fragment): self
     {

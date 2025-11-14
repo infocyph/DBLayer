@@ -7,7 +7,7 @@ namespace Infocyph\DBLayer\Exceptions;
 /**
  * Errors related to query building, compilation, or execution.
  */
-class QueryException extends DBException
+final class QueryException extends DBException
 {
     /**
      * Error while executing a query against the database.

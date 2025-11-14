@@ -7,7 +7,7 @@ namespace Infocyph\DBLayer\Exceptions;
 /**
  * Errors related to establishing or maintaining database connections.
  */
-class ConnectionException extends DBException
+final class ConnectionException extends DBException
 {
     public static function connectionFailed(string $dsn, string $reason = ''): self
     {

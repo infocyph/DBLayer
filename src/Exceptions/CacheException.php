@@ -7,7 +7,7 @@ namespace Infocyph\DBLayer\Exceptions;
 /**
  * Errors related to DBLayer's internal caching strategies.
  */
-class CacheException extends DBException
+final class CacheException extends DBException
 {
     public static function writeFailed(string $key, string $reason): self
     {

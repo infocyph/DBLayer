@@ -11,48 +11,53 @@ use Infocyph\DBLayer\Cache\Strategies\MemoryStrategy;
  * Cache Manager
  *
  * Manages query result caching with:
- * - Multiple cache strategies (Memory, File, Redis)
+ * - Multiple cache strategies (Memory, File, Redis-like if added)
  * - TTL (time-to-live) support
  * - Cache tags for group invalidation
  * - Cache statistics and monitoring
  * - Automatic cache key generation
- *
- * @package Infocyph\DBLayer\Cache
- * @author Hasan
  */
 class Cache
 {
     /**
-     * Default TTL in seconds
+     * Default TTL in seconds.
      */
     private int $defaultTtl = 3600;
 
     /**
-     * Enable/disable caching
+     * Enable/disable caching.
      */
     private bool $enabled = true;
 
     /**
-     * Cache prefix
+     * Cache prefix.
      */
     private string $prefix = 'dblayer:';
 
     /**
-     * Cache statistics
+     * Cache statistics.
+     *
+     * @var array{
+     *   hits:int,
+     *   misses:int,
+     *   writes:int,
+     *   deletes:int
+     * }
      */
     private array $stats = [
-        'hits' => 0,
-        'misses' => 0,
-        'writes' => 0,
-        'deletes' => 0,
+      'hits'    => 0,
+      'misses'  => 0,
+      'writes'  => 0,
+      'deletes' => 0,
     ];
+
     /**
-     * Cache strategy instance
+     * Cache strategy instance.
      */
     private CacheStrategy $strategy;
 
     /**
-     * Create a new cache instance
+     * Create a new cache instance.
      */
     public function __construct(?CacheStrategy $strategy = null)
     {
@@ -60,25 +65,29 @@ class Cache
     }
 
     /**
-     * Cache query result
+     * Cache query result.
+     *
+     * @param array<int|string, mixed> $bindings
      */
     public function cacheQuery(string $sql, array $bindings, mixed $result, ?int $ttl = null): bool
     {
         $key = $this->generateQueryKey($sql, $bindings);
+
         return $this->put($key, $result, $ttl);
     }
 
     /**
-     * Decrement cache value
+     * Decrement cache value.
      */
     public function decrement(string $key, int $value = 1): int
     {
         $key = $this->makeKey($key);
+
         return $this->strategy->decrement($key, $value);
     }
 
     /**
-     * Disable caching
+     * Disable caching.
      */
     public function disable(): void
     {
@@ -86,7 +95,7 @@ class Cache
     }
 
     /**
-     * Enable caching
+     * Enable caching.
      */
     public function enable(): void
     {
@@ -94,7 +103,7 @@ class Cache
     }
 
     /**
-     * Clear all cache items
+     * Clear all cache items.
      */
     public function flush(): bool
     {
@@ -102,7 +111,7 @@ class Cache
     }
 
     /**
-     * Store item in cache forever
+     * Store item in cache forever.
      */
     public function forever(string $key, mixed $value): bool
     {
@@ -110,11 +119,11 @@ class Cache
     }
 
     /**
-     * Delete item from cache
+     * Delete item from cache.
      */
     public function forget(string $key): bool
     {
-        if (!$this->enabled) {
+        if (! $this->enabled) {
             return false;
         }
 
@@ -128,35 +137,41 @@ class Cache
             }
 
             return $result;
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
             return false;
         }
     }
 
     /**
-     * Clear cached query result
+     * Clear cached query result.
+     *
+     * @param array<int|string, mixed> $bindings
      */
     public function forgetQuery(string $sql, array $bindings): bool
     {
         $key = $this->generateQueryKey($sql, $bindings);
+
         return $this->forget($key);
     }
 
     /**
-     * Generate cache key from SQL and bindings
+     * Generate cache key from SQL and bindings.
+     *
+     * @param array<int|string, mixed> $bindings
      */
     public function generateQueryKey(string $sql, array $bindings = []): string
     {
         $key = $sql . serialize($bindings);
+
         return md5($key);
     }
 
     /**
-     * Get item from cache
+     * Get item from cache.
      */
     public function get(string $key, mixed $default = null): mixed
     {
-        if (!$this->enabled) {
+        if (! $this->enabled) {
             return $default;
         }
 
@@ -167,28 +182,34 @@ class Cache
 
             if ($value !== null) {
                 $this->stats['hits']++;
+
                 return $value;
             }
 
             $this->stats['misses']++;
+
             return $default;
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
             $this->stats['misses']++;
+
             return $default;
         }
     }
 
     /**
-     * Get cached query result
+     * Get cached query result.
+     *
+     * @param array<int|string, mixed> $bindings
      */
     public function getCachedQuery(string $sql, array $bindings): mixed
     {
         $key = $this->generateQueryKey($sql, $bindings);
+
         return $this->get($key);
     }
 
     /**
-     * Get default TTL
+     * Get default TTL.
      */
     public function getDefaultTtl(): int
     {
@@ -196,7 +217,7 @@ class Cache
     }
 
     /**
-     * Get cache prefix
+     * Get cache prefix.
      */
     public function getPrefix(): string
     {
@@ -204,22 +225,36 @@ class Cache
     }
 
     /**
-     * Get cache statistics
+     * Get cache statistics.
+     *
+     * @return array{
+     *   hits:int,
+     *   misses:int,
+     *   writes:int,
+     *   deletes:int,
+     *   total_requests:int,
+     *   hit_rate:float,
+     *   miss_rate:float
+     * }
      */
     public function getStats(): array
     {
-        $total = $this->stats['hits'] + $this->stats['misses'];
-        $hitRate = $total > 0 ? ($this->stats['hits'] / $total) * 100 : 0;
+        $total   = $this->stats['hits'] + $this->stats['misses'];
+        $hitRate = $total > 0 ? ($this->stats['hits'] / $total) * 100 : 0.0;
 
-        return array_merge($this->stats, [
-            'total_requests' => $total,
-            'hit_rate' => round($hitRate, 2),
-            'miss_rate' => round(100 - $hitRate, 2),
-        ]);
+        return [
+          'hits'           => $this->stats['hits'],
+          'misses'         => $this->stats['misses'],
+          'writes'         => $this->stats['writes'],
+          'deletes'        => $this->stats['deletes'],
+          'total_requests' => $total,
+          'hit_rate'       => round($hitRate, 2),
+          'miss_rate'      => round(100 - $hitRate, 2),
+        ];
     }
 
     /**
-     * Get cache strategy
+     * Get cache strategy.
      */
     public function getStrategy(): CacheStrategy
     {
@@ -227,11 +262,11 @@ class Cache
     }
 
     /**
-     * Check if item exists in cache
+     * Check if item exists in cache.
      */
     public function has(string $key): bool
     {
-        if (!$this->enabled) {
+        if (! $this->enabled) {
             return false;
         }
 
@@ -241,16 +276,17 @@ class Cache
     }
 
     /**
-     * Increment cache value
+     * Increment cache value.
      */
     public function increment(string $key, int $value = 1): int
     {
         $key = $this->makeKey($key);
+
         return $this->strategy->increment($key, $value);
     }
 
     /**
-     * Check if caching is enabled
+     * Check if caching is enabled.
      */
     public function isEnabled(): bool
     {
@@ -258,11 +294,11 @@ class Cache
     }
 
     /**
-     * Store item in cache
+     * Store item in cache.
      */
     public function put(string $key, mixed $value, ?int $ttl = null): bool
     {
-        if (!$this->enabled) {
+        if (! $this->enabled) {
             return false;
         }
 
@@ -277,13 +313,15 @@ class Cache
             }
 
             return $result;
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
             return false;
         }
     }
 
     /**
-     * Get item or execute callback and cache result
+     * Get item or execute callback and cache result.
+     *
+     * @param callable(): mixed $callback
      */
     public function remember(string $key, callable $callback, ?int $ttl = null): mixed
     {
@@ -300,7 +338,9 @@ class Cache
     }
 
     /**
-     * Get item or execute callback and cache forever
+     * Get item or execute callback and cache forever.
+     *
+     * @param callable(): mixed $callback
      */
     public function rememberForever(string $key, callable $callback): mixed
     {
@@ -308,20 +348,20 @@ class Cache
     }
 
     /**
-     * Reset statistics
+     * Reset statistics.
      */
     public function resetStats(): void
     {
         $this->stats = [
-            'hits' => 0,
-            'misses' => 0,
-            'writes' => 0,
-            'deletes' => 0,
+          'hits'    => 0,
+          'misses'  => 0,
+          'writes'  => 0,
+          'deletes' => 0,
         ];
     }
 
     /**
-     * Set default TTL
+     * Set default TTL.
      */
     public function setDefaultTtl(int $ttl): void
     {
@@ -329,7 +369,7 @@ class Cache
     }
 
     /**
-     * Set cache prefix
+     * Set cache prefix.
      */
     public function setPrefix(string $prefix): void
     {
@@ -337,7 +377,7 @@ class Cache
     }
 
     /**
-     * Set cache strategy
+     * Set cache strategy.
      */
     public function setStrategy(CacheStrategy $strategy): void
     {
@@ -345,7 +385,9 @@ class Cache
     }
 
     /**
-     * Tag cache items for group operations
+     * Tag cache items for group operations.
+     *
+     * @param array<int, string>|string $tags
      */
     public function tags(array|string $tags): TaggedCache
     {
@@ -355,7 +397,7 @@ class Cache
     }
 
     /**
-     * Make full cache key with prefix
+     * Make full cache key with prefix.
      */
     private function makeKey(string $key): string
     {

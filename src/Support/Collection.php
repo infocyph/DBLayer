@@ -30,10 +30,10 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     /**
      * @var array<TKey, TValue>
      */
-    protected array $items = [];
+    protected array $items;
 
     /**
-     * Create a new collection
+     * Create a new collection.
      *
      * @param array<array-key, mixed> $items Initial items
      */
@@ -43,7 +43,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Convert collection to JSON string
+     * Convert collection to JSON string.
      */
     public function __toString(): string
     {
@@ -51,18 +51,28 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Create a collection from an array
+     * Create a collection from an array.
      *
      * @param array<array-key, mixed> $items
-     * @return self<array-key, mixed>
+     * @return static
      */
-    public static function make(array $items = []): self
+    public static function make(array $items = []): static
     {
-        return new self($items);
+        return new static($items);
     }
 
     /**
-     * Get all items in the collection
+     * Create an empty collection.
+     *
+     * @return static
+     */
+    public static function empty(): static
+    {
+        return new static();
+    }
+
+    /**
+     * Get all items in the collection.
      *
      * @return array<TKey, TValue>
      */
@@ -72,7 +82,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Get the average of a given key (or of values themselves if $key is null)
+     * Get the average of a given key (or of values themselves if $key is null).
      *
      * @param string|null $key Key to average
      * @return int|float
@@ -89,24 +99,25 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Chunk the collection into smaller collections
+     * Chunk the collection into smaller collections.
      *
      * @param int $size Chunk size
-     * @return self<int, self<TKey, TValue>>
+     * @return static<int, static<TKey, TValue>>
      */
-    public function chunk(int $size): self
+    public function chunk(int $size): static
     {
         if ($size <= 0 || $this->items === []) {
-            return new self();
+            return static::empty();
         }
 
         $chunks = [];
 
         foreach (array_chunk($this->items, $size, true) as $chunk) {
-            $chunks[] = new self($chunk);
+            $chunks[] = new static($chunk);
         }
 
-        return new self($chunks);
+        /** @var static<int, static<TKey, TValue>> */
+        return new static($chunks);
     }
 
     /**
@@ -125,7 +136,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Count the number of items (Countable implementation)
+     * Count the number of items (Countable implementation).
      */
     public function count(): int
     {
@@ -133,7 +144,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Get the current item (Iterator implementation)
+     * Get the current item (Iterator implementation).
      *
      * @return TValue
      */
@@ -143,19 +154,22 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Filter the collection using a callback
+     * Filter the collection using a callback.
      *
      * @param callable(TValue, TKey): bool|null $callback Filter callback
-     * @return self<TKey, TValue>
+     * @return static<TKey, TValue>
      */
-    public function filter(?callable $callback = null): self
+    public function filter(?callable $callback = null): static
     {
         if ($this->items === []) {
-            return new self();
+            return static::empty();
         }
 
         if ($callback === null) {
-            return new self(array_filter($this->items));
+            /** @var array<TKey, TValue> $filtered */
+            $filtered = array_filter($this->items);
+
+            return new static($filtered);
         }
 
         $results = [];
@@ -166,11 +180,12 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
             }
         }
 
-        return new self($results);
+        /** @var static<TKey, TValue> */
+        return new static($results);
     }
 
     /**
-     * Get the first item, optionally matching a callback
+     * Get the first item, optionally matching a callback.
      *
      * @param callable(TValue, TKey): bool|null $callback
      * @param mixed $default
@@ -200,7 +215,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Determine if the collection is empty
+     * Determine if the collection is empty.
      */
     public function isEmpty(): bool
     {
@@ -208,7 +223,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Determine if the collection is not empty
+     * Determine if the collection is not empty.
      */
     public function isNotEmpty(): bool
     {
@@ -216,7 +231,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Get the current key (Iterator implementation)
+     * Get the current key (Iterator implementation).
      *
      * @return TKey|null
      */
@@ -227,15 +242,15 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Map over the collection
+     * Map over the collection.
      *
      * @param callable(TValue, TKey): mixed $callback
-     * @return self<TKey, mixed>
+     * @return static<TKey, mixed>
      */
-    public function map(callable $callback): self
+    public function map(callable $callback): static
     {
         if ($this->items === []) {
-            return new self();
+            return static::empty();
         }
 
         $results = [];
@@ -244,11 +259,12 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
             $results[$key] = $callback($value, $key);
         }
 
-        return new self($results);
+        /** @var static<TKey, mixed> */
+        return new static($results);
     }
 
     /**
-     * Move to the next item (Iterator implementation)
+     * Move to the next item (Iterator implementation).
      */
     public function next(): void
     {
@@ -256,7 +272,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Check if offset exists (ArrayAccess implementation)
+     * Check if offset exists (ArrayAccess implementation).
      *
      * @param mixed $offset
      */
@@ -266,7 +282,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Get offset value (ArrayAccess implementation)
+     * Get offset value (ArrayAccess implementation).
      *
      * @param mixed $offset
      * @return TValue|null
@@ -277,7 +293,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Set offset value (ArrayAccess implementation)
+     * Set offset value (ArrayAccess implementation).
      *
      * @param mixed $offset
      * @param TValue $value
@@ -286,6 +302,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     {
         if ($offset === null) {
             $this->items[] = $value;
+
             return;
         }
 
@@ -293,7 +310,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Unset offset value (ArrayAccess implementation)
+     * Unset offset value (ArrayAccess implementation).
      *
      * @param mixed $offset
      */
@@ -303,7 +320,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Rewind the iterator (Iterator implementation)
+     * Rewind the iterator (Iterator implementation).
      */
     public function rewind(): void
     {
@@ -311,7 +328,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Get the sum of a given key (or of values themselves if $key is null)
+     * Get the sum of a given key (or of values themselves if $key is null).
      *
      * @param string|null $key Key to sum
      * @return int|float
@@ -352,7 +369,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Convert collection to array
+     * Convert collection to array.
      *
      * @return array<TKey, TValue>
      */
@@ -362,15 +379,20 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Convert collection to JSON
+     * Convert collection to JSON.
      */
     public function toJson(int $options = 0): string
     {
-        return json_encode($this->jsonSerialize(), $options | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]';
+        $json = json_encode(
+          $this->jsonSerialize(),
+          $options | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+        );
+
+        return $json === false ? '[]' : $json;
     }
 
     /**
-     * Check if the current position is valid (Iterator implementation)
+     * Check if the current position is valid (Iterator implementation).
      */
     public function valid(): bool
     {
@@ -378,13 +400,13 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Filter items by key/value
+     * Filter items by key/value.
      *
      * @param string $key
      * @param mixed $value
-     * @return self<TKey, TValue>
+     * @return static<TKey, TValue>
      */
-    public function where(string $key, mixed $value): self
+    public function where(string $key, mixed $value): static
     {
         return $this->filter(
           static fn ($item) => (
@@ -395,7 +417,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Get data for JSON serialization
+     * Get data for JSON serialization.
      *
      * @return array<TKey, TValue>
      */

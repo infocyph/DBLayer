@@ -7,7 +7,7 @@ namespace Infocyph\DBLayer\Exceptions;
 /**
  * Errors related to schema operations (DDL, migrations, metadata).
  */
-class SchemaException extends DBException
+final class SchemaException extends DBException
 {
     public static function tableNotFound(string $table): self
     {

@@ -9,29 +9,30 @@ namespace Infocyph\DBLayer\Cache\Strategies;
  *
  * In-memory cache storage for single request lifecycle.
  * Fast but volatile - cleared between requests.
- *
- * @package Infocyph\DBLayer\Cache\Strategies
- * @author Hasan
  */
 class MemoryStrategy implements CacheStrategy
 {
     /**
-     * Cache storage
+     * Cache storage.
+     *
+     * @var array<string, mixed>
      */
     private array $cache = [];
 
     /**
-     * Expiration times
+     * Expiration times.
+     *
+     * @var array<string, int>
      */
     private array $expires = [];
 
     /**
-     * Clean expired items
+     * Clean expired items.
      */
     public function cleanExpired(): int
     {
         $cleaned = 0;
-        $now = time();
+        $now     = time();
 
         foreach ($this->expires as $key => $expireTime) {
             if ($expireTime > 0 && $now >= $expireTime) {
@@ -44,7 +45,7 @@ class MemoryStrategy implements CacheStrategy
     }
 
     /**
-     * Decrement value
+     * Decrement value.
      */
     public function decrement(string $key, int $value = 1): int
     {
@@ -52,30 +53,32 @@ class MemoryStrategy implements CacheStrategy
     }
 
     /**
-     * Clear all items
+     * Clear all items.
      */
     public function flush(): bool
     {
-        $this->cache = [];
+        $this->cache   = [];
         $this->expires = [];
+
         return true;
     }
 
     /**
-     * Delete item from cache
+     * Delete item from cache.
      */
     public function forget(string $key): bool
     {
         unset($this->cache[$key], $this->expires[$key]);
+
         return true;
     }
 
     /**
-     * Get item from cache
+     * Get item from cache.
      */
     public function get(string $key): mixed
     {
-        if (!$this->has($key)) {
+        if (! $this->has($key)) {
             return null;
         }
 
@@ -83,39 +86,44 @@ class MemoryStrategy implements CacheStrategy
     }
 
     /**
-     * Check if item exists and not expired
+     * Check if item exists and not expired.
      */
     public function has(string $key): bool
     {
-        if (!isset($this->cache[$key])) {
+        if (! array_key_exists($key, $this->cache)) {
             return false;
         }
 
-        // Check expiration
-        if (isset($this->expires[$key]) && $this->expires[$key] > 0) {
-            if (time() >= $this->expires[$key]) {
-                $this->forget($key);
-                return false;
-            }
+        if (! isset($this->expires[$key]) || $this->expires[$key] <= 0) {
+            return true;
+        }
+
+        if (time() >= $this->expires[$key]) {
+            $this->forget($key);
+
+            return false;
         }
 
         return true;
     }
 
     /**
-     * Increment value
+     * Increment value.
      */
     public function increment(string $key, int $value = 1): int
     {
         $current = (int) $this->get($key);
-        $new = $current + $value;
+        $new     = $current + $value;
+
         $this->put($key, $new, 0);
 
         return $new;
     }
 
     /**
-     * Get all cache keys
+     * Get all cache keys.
+     *
+     * @return array<int, string>
      */
     public function keys(): array
     {
@@ -123,7 +131,7 @@ class MemoryStrategy implements CacheStrategy
     }
 
     /**
-     * Store item in cache
+     * Store item in cache.
      */
     public function put(string $key, mixed $value, int $ttl): bool
     {
@@ -139,7 +147,7 @@ class MemoryStrategy implements CacheStrategy
     }
 
     /**
-     * Get cache size
+     * Get cache size.
      */
     public function size(): int
     {

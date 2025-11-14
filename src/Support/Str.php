@@ -23,9 +23,8 @@ class Str
     public static function camel(string $value): string
     {
         $value = static::studly($value);
-        $value = lcfirst($value);
 
-        return $value;
+        return lcfirst($value);
     }
 
     /**
@@ -94,7 +93,14 @@ class Str
             return $value;
         }
 
-        if (str_ends_with($value, 'y') && ! str_ends_with($value, 'ay') && ! str_ends_with($value, 'ey') && ! str_ends_with($value, 'iy') && ! str_ends_with($value, 'oy') && ! str_ends_with($value, 'uy')) {
+        if (
+          str_ends_with($value, 'y')
+          && ! str_ends_with($value, 'ay')
+          && ! str_ends_with($value, 'ey')
+          && ! str_ends_with($value, 'iy')
+          && ! str_ends_with($value, 'oy')
+          && ! str_ends_with($value, 'uy')
+        ) {
             return substr($value, 0, -1) . 'ies';
         }
 
@@ -147,16 +153,16 @@ class Str
      */
     public static function slug(string $title, string $separator = '-'): string
     {
-        // Replace non letters or digits by separator
+        // Replace non letters or digits by separator.
         $title = preg_replace('/[^\pL\d]+/u', $separator, $title) ?? '';
 
-        // Trim
+        // Trim.
         $title = trim($title, $separator);
 
-        // Lowercase
+        // Lowercase.
         $title = mb_strtolower($title, 'UTF-8');
 
-        // Remove unwanted characters (just in case)
+        // Remove unwanted characters (just in case).
         $title = preg_replace('/[^' . preg_quote($separator, '/') . '\w]+/u', '', $title) ?? '';
 
         return $title;
@@ -172,13 +178,12 @@ class Str
         }
 
         $value = preg_replace('/\s+/u', '', $value) ?? $value;
-
         $value = preg_replace('/(.)(?=[A-Z])/u', '$1' . $delimiter, $value) ?? $value;
         $value = mb_strtolower($value, 'UTF-8');
 
         $value = str_replace(['-', '_'], $delimiter, $value);
 
-        // Collapse multiple delimiters
+        // Collapse multiple delimiters.
         $value = preg_replace('/' . preg_quote($delimiter, '/') . '+/', $delimiter, $value) ?? $value;
 
         return $value;

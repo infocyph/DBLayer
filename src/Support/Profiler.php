@@ -14,19 +14,10 @@ namespace Infocyph\DBLayer\Support;
  */
 class Profiler
 {
-    /**
-     * @var bool
-     */
     private bool $enabled = false;
 
-    /**
-     * @var float
-     */
     private float $startTime = 0.0;
 
-    /**
-     * @var int
-     */
     private int $startMemory = 0;
 
     /**
@@ -35,7 +26,7 @@ class Profiler
     private array $profiles = [];
 
     /**
-     * Clear all profiling data
+     * Clear all profiling data.
      */
     public function clear(): void
     {
@@ -45,7 +36,7 @@ class Profiler
     }
 
     /**
-     * Disable profiling
+     * Disable profiling.
      */
     public function disable(): void
     {
@@ -53,7 +44,7 @@ class Profiler
     }
 
     /**
-     * Enable profiling
+     * Enable profiling.
      */
     public function enable(): void
     {
@@ -87,13 +78,13 @@ class Profiler
           'memory'   => $memory,
         ];
 
-        // reset for next measurement
+        // Reset for next measurement.
         $this->startTime   = 0.0;
         $this->startMemory = 0;
     }
 
     /**
-     * Get the slowest recorded query profile
+     * Get the slowest recorded query profile.
      *
      * @return array{sql:string,bindings:array<array-key,mixed>,time:float,memory:int}|null
      */
@@ -115,7 +106,7 @@ class Profiler
     }
 
     /**
-     * Get aggregated stats for all queries
+     * Get aggregated stats for all queries.
      *
      * @return array{
      *   count:int,
@@ -154,7 +145,7 @@ class Profiler
     }
 
     /**
-     * Check if profiling is enabled
+     * Check if profiling is enabled.
      */
     public function isEnabled(): bool
     {
@@ -162,7 +153,7 @@ class Profiler
     }
 
     /**
-     * Get all query profiles
+     * Get all query profiles.
      *
      * @return array<int, array{sql:string,bindings:array<array-key,mixed>,time:float,memory:int}>
      */
@@ -172,7 +163,7 @@ class Profiler
     }
 
     /**
-     * Start profiling a query
+     * Start profiling a query.
      */
     public function start(): void
     {

@@ -7,7 +7,7 @@ namespace Infocyph\DBLayer\Exceptions;
 /**
  * Errors related to ORM models and relationships.
  */
-class ModelException extends DBException
+final class ModelException extends DBException
 {
     public static function notFound(string|int $id, string $modelClass): self
     {
