@@ -15,24 +15,22 @@ use JsonSerializable;
  * Fluent array wrapper providing chainable methods for array manipulation.
  * Implements standard PHP interfaces for array-like behavior.
  *
- * @package Infocyph\DBLayer\Support
- * @author Hasan
- * @implements ArrayAccess<array-key, mixed>
- * @implements Iterator<array-key, mixed>
+ * This class is intentionally lightweight and non-magic. It does not try to be
+ * a full ORM collection; that lives under ORM and can wrap/extend this.
+ *
+ * @template TKey of array-key
+ * @template TValue
+ *
+ * @implements ArrayAccess<TKey, TValue>
+ * @implements Iterator<TKey, TValue>
+ * @implements JsonSerializable
  */
 class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
 {
     /**
-     * Collection items
-     *
-     * @var array<array-key, mixed>
+     * @var array<TKey, TValue>
      */
     protected array $items = [];
-
-    /**
-     * Current iterator position
-     */
-    private int $position = 0;
 
     /**
      * Create a new collection
@@ -46,8 +44,6 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
 
     /**
      * Convert collection to JSON string
-     *
-     * @return string
      */
     public function __toString(): string
     {
@@ -55,10 +51,10 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Create a new collection instance
+     * Create a collection from an array
      *
-     * @param array<array-key, mixed> $items Initial items
-     * @return self
+     * @param array<array-key, mixed> $items
+     * @return self<array-key, mixed>
      */
     public static function make(array $items = []): self
     {
@@ -68,7 +64,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     /**
      * Get all items in the collection
      *
-     * @return array<array-key, mixed>
+     * @return array<TKey, TValue>
      */
     public function all(): array
     {
@@ -76,38 +72,48 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Get the average value of a given key
+     * Get the average of a given key (or of values themselves if $key is null)
      *
-     * @param string|null $key Key to average (null for numeric array)
+     * @param string|null $key Key to average
      * @return int|float
      */
     public function avg(?string $key = null): int|float
     {
         $count = $this->count();
-        return $count > 0 ? $this->sum($key) / $count : 0;
+
+        if ($count === 0) {
+            return 0;
+        }
+
+        return $this->sum($key) / $count;
     }
 
     /**
      * Chunk the collection into smaller collections
      *
      * @param int $size Chunk size
-     * @return self<int, self>
+     * @return self<int, self<TKey, TValue>>
      */
     public function chunk(int $size): self
     {
+        if ($size <= 0 || $this->items === []) {
+            return new self();
+        }
+
         $chunks = [];
+
         foreach (array_chunk($this->items, $size, true) as $chunk) {
             $chunks[] = new self($chunk);
         }
+
         return new self($chunks);
     }
 
     /**
-     * Determine if an item exists in the collection
+     * Determine if an item exists in the collection.
      *
-     * @param mixed $key Key or value to check
-     * @param mixed $value Value to check (if key provided)
-     * @return bool
+     * If only one argument is given, checks if that value exists.
+     * If two arguments are given, treats them as key/value and calls where().
      */
     public function contains(mixed $key, mixed $value = null): bool
     {
@@ -115,13 +121,11 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
             return in_array($key, $this->items, true);
         }
 
-        return $this->where($key, $value)->isNotEmpty();
+        return $this->where((string) $key, $value)->isNotEmpty();
     }
 
     /**
      * Count the number of items (Countable implementation)
-     *
-     * @return int
      */
     public function count(): int
     {
@@ -129,9 +133,9 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Get current item (Iterator implementation)
+     * Get the current item (Iterator implementation)
      *
-     * @return mixed
+     * @return TValue
      */
     public function current(): mixed
     {
@@ -141,34 +145,53 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     /**
      * Filter the collection using a callback
      *
-     * @param callable|null $callback Filter callback
-     * @return self
+     * @param callable(TValue, TKey): bool|null $callback Filter callback
+     * @return self<TKey, TValue>
      */
     public function filter(?callable $callback = null): self
     {
+        if ($this->items === []) {
+            return new self();
+        }
+
         if ($callback === null) {
             return new self(array_filter($this->items));
         }
 
-        return new self(array_filter($this->items, $callback, ARRAY_FILTER_USE_BOTH));
+        $results = [];
+
+        foreach ($this->items as $key => $value) {
+            if ($callback($value, $key) === true) {
+                $results[$key] = $value;
+            }
+        }
+
+        return new self($results);
     }
 
     /**
-     * Get the first item matching the condition
+     * Get the first item, optionally matching a callback
      *
-     * @param callable|null $callback Filter callback
-     * @param mixed $default Default value if not found
-     * @return mixed
+     * @param callable(TValue, TKey): bool|null $callback
+     * @param mixed $default
+     * @return TValue|mixed
      */
     public function first(?callable $callback = null, mixed $default = null): mixed
     {
+        if ($this->items === []) {
+            return $default;
+        }
+
         if ($callback === null) {
-            $value = reset($this->items);
-            return $value !== false ? $value : $default;
+            foreach ($this->items as $item) {
+                return $item;
+            }
+
+            return $default;
         }
 
         foreach ($this->items as $key => $value) {
-            if ($callback($value, $key)) {
+            if ($callback($value, $key) === true) {
                 return $value;
             }
         }
@@ -178,49 +201,54 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
 
     /**
      * Determine if the collection is empty
-     *
-     * @return bool
      */
     public function isEmpty(): bool
     {
-        return empty($this->items);
+        return $this->items === [];
     }
 
     /**
      * Determine if the collection is not empty
-     *
-     * @return bool
      */
     public function isNotEmpty(): bool
     {
-        return !$this->isEmpty();
+        return $this->items !== [];
     }
 
     /**
-     * Get current iterator key (Iterator implementation)
+     * Get the current key (Iterator implementation)
      *
-     * @return int|string|null
+     * @return TKey|null
      */
     public function key(): int|string|null
     {
+        /** @var TKey|null */
         return key($this->items);
     }
 
     /**
      * Map over the collection
      *
-     * @param callable $callback Map callback
-     * @return self
+     * @param callable(TValue, TKey): mixed $callback
+     * @return self<TKey, mixed>
      */
     public function map(callable $callback): self
     {
-        return new self(array_map($callback, $this->items, array_keys($this->items)));
+        if ($this->items === []) {
+            return new self();
+        }
+
+        $results = [];
+
+        foreach ($this->items as $key => $value) {
+            $results[$key] = $callback($value, $key);
+        }
+
+        return new self($results);
     }
 
     /**
-     * Move to next iterator position (Iterator implementation)
-     *
-     * @return void
+     * Move to the next item (Iterator implementation)
      */
     public function next(): void
     {
@@ -231,18 +259,17 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
      * Check if offset exists (ArrayAccess implementation)
      *
      * @param mixed $offset
-     * @return bool
      */
     public function offsetExists(mixed $offset): bool
     {
-        return isset($this->items[$offset]);
+        return array_key_exists($offset, $this->items);
     }
 
     /**
      * Get offset value (ArrayAccess implementation)
      *
      * @param mixed $offset
-     * @return mixed
+     * @return TValue|null
      */
     public function offsetGet(mixed $offset): mixed
     {
@@ -253,23 +280,22 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
      * Set offset value (ArrayAccess implementation)
      *
      * @param mixed $offset
-     * @param mixed $value
-     * @return void
+     * @param TValue $value
      */
     public function offsetSet(mixed $offset, mixed $value): void
     {
         if ($offset === null) {
             $this->items[] = $value;
-        } else {
-            $this->items[$offset] = $value;
+            return;
         }
+
+        $this->items[$offset] = $value;
     }
 
     /**
-     * Unset offset (ArrayAccess implementation)
+     * Unset offset value (ArrayAccess implementation)
      *
      * @param mixed $offset
-     * @return void
      */
     public function offsetUnset(mixed $offset): void
     {
@@ -277,9 +303,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Rewind iterator to first position (Iterator implementation)
-     *
-     * @return void
+     * Rewind the iterator (Iterator implementation)
      */
     public function rewind(): void
     {
@@ -287,24 +311,50 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Get the sum of a given key
+     * Get the sum of a given key (or of values themselves if $key is null)
      *
      * @param string|null $key Key to sum
      * @return int|float
      */
     public function sum(?string $key = null): int|float
     {
-        if ($key === null) {
-            return array_sum($this->items);
+        if ($this->items === []) {
+            return 0;
         }
 
-        return array_sum(array_column($this->items, $key));
+        $total = 0;
+
+        if ($key === null) {
+            foreach ($this->items as $value) {
+                if (is_numeric($value)) {
+                    $total += $value + 0;
+                }
+            }
+
+            return $total;
+        }
+
+        foreach ($this->items as $item) {
+            $value = null;
+
+            if (is_array($item) && array_key_exists($key, $item)) {
+                $value = $item[$key];
+            } elseif (is_object($item) && isset($item->{$key})) {
+                $value = $item->{$key};
+            }
+
+            if (is_numeric($value)) {
+                $total += $value + 0;
+            }
+        }
+
+        return $total;
     }
 
     /**
      * Convert collection to array
      *
-     * @return array<array-key, mixed>
+     * @return array<TKey, TValue>
      */
     public function toArray(): array
     {
@@ -312,19 +362,15 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     }
 
     /**
-     * Convert collection to JSON (JsonSerializable implementation)
-     *
-     * @return string
+     * Convert collection to JSON
      */
     public function toJson(int $options = 0): string
     {
-        return json_encode($this->jsonSerialize(), $options);
+        return json_encode($this->jsonSerialize(), $options | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]';
     }
 
     /**
-     * Check if current iterator position is valid (Iterator implementation)
-     *
-     * @return bool
+     * Check if the current position is valid (Iterator implementation)
      */
     public function valid(): bool
     {
@@ -336,17 +382,22 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
      *
      * @param string $key
      * @param mixed $value
-     * @return self
+     * @return self<TKey, TValue>
      */
     public function where(string $key, mixed $value): self
     {
-        return $this->filter(fn ($item) => isset($item[$key]) && $item[$key] === $value);
+        return $this->filter(
+          static fn ($item) => (
+            (is_array($item) && array_key_exists($key, $item) && $item[$key] === $value)
+            || (is_object($item) && isset($item->{$key}) && $item->{$key} === $value)
+          )
+        );
     }
 
     /**
      * Get data for JSON serialization
      *
-     * @return array<array-key, mixed>
+     * @return array<TKey, TValue>
      */
     public function jsonSerialize(): array
     {

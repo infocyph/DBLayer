@@ -8,49 +8,44 @@ namespace Infocyph\DBLayer\Support;
  * Query Profiler
  *
  * Tracks and analyzes database query performance.
- * Provides timing, memory usage, and query statistics.
+ * Provides timing, memory usage, and basic query statistics.
  *
- * @package Infocyph\DBLayer\Support
- * @author Hasan
+ * Lightweight and disabled by default; enable only when needed.
  */
 class Profiler
 {
     /**
-     * Whether profiling is enabled
+     * @var bool
      */
     private bool $enabled = false;
 
     /**
-     * Collected query profiles
-     *
-     * @var array<int, array{sql: string, bindings: array<string, mixed>, time: float, memory: int}>
+     * @var float
+     */
+    private float $startTime = 0.0;
+
+    /**
+     * @var int
+     */
+    private int $startMemory = 0;
+
+    /**
+     * @var array<int, array{sql:string,bindings:array<array-key,mixed>,time:float,memory:int}>
      */
     private array $profiles = [];
 
     /**
-     * Start time for current query
-     */
-    private ?float $startTime = null;
-
-    /**
-     * Start memory for current query
-     */
-    private ?int $startMemory = null;
-
-    /**
-     * Clear all collected profiles
-     *
-     * @return void
+     * Clear all profiling data
      */
     public function clear(): void
     {
-        $this->profiles = [];
+        $this->profiles    = [];
+        $this->startTime   = 0.0;
+        $this->startMemory = 0;
     }
 
     /**
      * Disable profiling
-     *
-     * @return void
      */
     public function disable(): void
     {
@@ -59,8 +54,6 @@ class Profiler
 
     /**
      * Enable profiling
-     *
-     * @return void
      */
     public function enable(): void
     {
@@ -68,82 +61,100 @@ class Profiler
     }
 
     /**
-     * Finish profiling current query
+     * Finish profiling a query.
      *
-     * @param string $sql SQL query
-     * @param array<string, mixed> $bindings Query bindings
-     * @return void
+     * This should be called after start(), passing the executed SQL and bindings.
+     *
+     * @param string $sql
+     * @param array<array-key, mixed> $bindings
      */
     public function finish(string $sql, array $bindings = []): void
     {
-        if (!$this->enabled || $this->startTime === null) {
+        if (! $this->enabled || $this->startTime <= 0.0) {
             return;
         }
 
-        $time = (microtime(true) - $this->startTime) * 1000; // Convert to milliseconds
-        $memory = memory_get_usage() - ($this->startMemory ?? 0);
+        $endTime   = microtime(true);
+        $endMemory = memory_get_usage();
+
+        $timeMs = ($endTime - $this->startTime) * 1000;
+        $memory = $endMemory - $this->startMemory;
 
         $this->profiles[] = [
-            'sql' => $sql,
-            'bindings' => $bindings,
-            'time' => round($time, 2),
-            'memory' => $memory,
+          'sql'      => $sql,
+          'bindings' => $bindings,
+          'time'     => round($timeMs, 2),
+          'memory'   => $memory,
         ];
 
-        $this->startTime = null;
-        $this->startMemory = null;
+        // reset for next measurement
+        $this->startTime   = 0.0;
+        $this->startMemory = 0;
     }
 
     /**
-     * Get the slowest query
+     * Get the slowest recorded query profile
      *
-     * @return array{sql: string, bindings: array<string, mixed>, time: float, memory: int}|null
+     * @return array{sql:string,bindings:array<array-key,mixed>,time:float,memory:int}|null
      */
     public function getSlowestQuery(): ?array
     {
-        if (empty($this->profiles)) {
+        if ($this->profiles === []) {
             return null;
         }
 
-        return array_reduce(
-            $this->profiles,
-            fn ($carry, $profile) => ($carry === null || $profile['time'] > $carry['time']) ? $profile : $carry
-        );
+        $slowest = null;
+
+        foreach ($this->profiles as $profile) {
+            if ($slowest === null || $profile['time'] > $slowest['time']) {
+                $slowest = $profile;
+            }
+        }
+
+        return $slowest;
     }
 
     /**
-     * Get statistics about collected profiles
+     * Get aggregated stats for all queries
      *
-     * @return array{count: int, total_time: float, avg_time: float, total_memory: int}
+     * @return array{
+     *   count:int,
+     *   total_time:float,
+     *   avg_time:float,
+     *   total_memory:int
+     * }
      */
     public function getStats(): array
     {
         $count = count($this->profiles);
-        
+
         if ($count === 0) {
             return [
-                'count' => 0,
-                'total_time' => 0.0,
-                'avg_time' => 0.0,
-                'total_memory' => 0,
+              'count'        => 0,
+              'total_time'   => 0.0,
+              'avg_time'     => 0.0,
+              'total_memory' => 0,
             ];
         }
 
-        $totalTime = array_sum(array_column($this->profiles, 'time'));
-        $totalMemory = array_sum(array_column($this->profiles, 'memory'));
+        $totalTime   = 0.0;
+        $totalMemory = 0;
+
+        foreach ($this->profiles as $profile) {
+            $totalTime   += $profile['time'];
+            $totalMemory += $profile['memory'];
+        }
 
         return [
-            'count' => $count,
-            'total_time' => round($totalTime, 2),
-            'avg_time' => round($totalTime / $count, 2),
-            'total_memory' => $totalMemory,
+          'count'        => $count,
+          'total_time'   => round($totalTime, 2),
+          'avg_time'     => round($totalTime / $count, 2),
+          'total_memory' => $totalMemory,
         ];
     }
 
     /**
      * Check if profiling is enabled
-     *
-     * @return bool
      */
     public function isEnabled(): bool
     {
@@ -151,9 +162,9 @@ class Profiler
     }
 
     /**
-     * Get all collected profiles
+     * Get all query profiles
      *
-     * @return array<int, array{sql: string, bindings: array<string, mixed>, time: float, memory: int}>
+     * @return array<int, array{sql:string,bindings:array<array-key,mixed>,time:float,memory:int}>
      */
     public function profiles(): array
     {
@@ -162,16 +173,14 @@ class Profiler
 
     /**
      * Start profiling a query
-     *
-     * @return void
      */
     public function start(): void
     {
-        if (!$this->enabled) {
+        if (! $this->enabled) {
             return;
         }
 
-        $this->startTime = microtime(true);
+        $this->startTime   = microtime(true);
         $this->startMemory = memory_get_usage();
     }
 }

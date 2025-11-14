@@ -12,20 +12,19 @@ use Throwable;
  * Simple file-based logging for debugging database operations.
  * Provides query logging, error tracking, and timing information.
  *
- * @package Infocyph\DBLayer\Support
- * @author Hasan
+ * Intentionally minimal and opt-in; disabled by default.
  */
 class Logger
 {
     /**
-     * Whether logging is enabled
-     */
-    private bool $enabled = false;
-
-    /**
-     * Log file path
+     * @var string
      */
     private string $logFile;
+
+    /**
+     * @var bool
+     */
+    private bool $enabled = false;
 
     /**
      * Create a new logger instance
@@ -34,25 +33,21 @@ class Logger
      */
     public function __construct(?string $logFile = null)
     {
-        $this->logFile = $logFile ?? sys_get_temp_dir() . '/dblayer.log';
+        $this->logFile = $logFile ?? (rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'dblayer.log');
     }
 
     /**
      * Clear the log file
-     *
-     * @return void
      */
     public function clear(): void
     {
-        if (file_exists($this->logFile)) {
-            file_put_contents($this->logFile, '');
+        if (is_file($this->logFile)) {
+            @unlink($this->logFile);
         }
     }
 
     /**
      * Disable logging
-     *
-     * @return void
      */
     public function disable(): void
     {
@@ -61,8 +56,6 @@ class Logger
 
     /**
      * Enable logging
-     *
-     * @return void
      */
     public function enable(): void
     {
@@ -71,36 +64,30 @@ class Logger
 
     /**
      * Log an error message
-     *
-     * @param string $message Error message
-     * @param Throwable|null $exception Optional exception
-     * @return void
      */
     public function error(string $message, ?Throwable $exception = null): void
     {
-        if (!$this->enabled) {
+        if (! $this->enabled) {
             return;
         }
 
         $context = [
-            'level' => 'ERROR',
-            'message' => $message,
+          'level'   => 'ERROR',
+          'message' => $message,
         ];
 
-        if ($exception) {
+        if ($exception !== null) {
             $context['exception'] = get_class($exception);
-            $context['file'] = $exception->getFile();
-            $context['line'] = $exception->getLine();
-            $context['trace'] = $exception->getTraceAsString();
+            $context['file']      = $exception->getFile();
+            $context['line']      = $exception->getLine();
+            $context['trace']     = $exception->getTraceAsString();
         }
 
         $this->write($context);
     }
 
     /**
-     * Get the log file path
-     *
-     * @return string
+     * Get log file path
      */
     public function getLogFile(): string
     {
@@ -109,8 +96,6 @@ class Logger
 
     /**
      * Check if logging is enabled
-     *
-     * @return bool
      */
     public function isEnabled(): bool
     {
@@ -120,45 +105,56 @@ class Logger
     /**
      * Log a query execution
      *
-     * @param string $sql SQL query
-     * @param array<string, mixed> $bindings Query bindings
-     * @param float $time Execution time in milliseconds
-     * @return void
+     * @param string $sql      The SQL statement
+     * @param array<int|string, mixed> $bindings Bound parameters
+     * @param float $time      Execution time in milliseconds
      */
     public function query(string $sql, array $bindings = [], float $time = 0.0): void
     {
-        if (!$this->enabled) {
+        if (! $this->enabled) {
             return;
         }
 
-        $this->write([
-            'level' => 'QUERY',
-            'sql' => $sql,
-            'bindings' => $bindings,
-            'time' => round($time, 2) . 'ms',
-        ]);
+        $context = [
+          'level'    => 'QUERY',
+          'sql'      => $sql,
+        ];
+
+        if ($bindings !== []) {
+            $context['bindings'] = $bindings;
+        }
+
+        if ($time > 0.0) {
+            $context['time_ms'] = round($time, 2);
+        }
+
+        $this->write($context);
     }
 
     /**
-     * Write log entry to file
+     * Write a structured log entry to the log file.
      *
-     * @param array<string, mixed> $context Log context
-     * @return void
+     * @param array<string, mixed> $context
      */
     private function write(array $context): void
     {
         $timestamp = date('Y-m-d H:i:s');
+
         $level = $context['level'] ?? 'INFO';
         unset($context['level']);
 
+        $json = json_encode(
+          $context,
+          JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+        ) ?: '{}';
+
         $entry = sprintf(
-            "[%s] %s: %s
-",
-            $timestamp,
-            $level,
-            json_encode($context, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+          "[%s] %s: %s\n",
+          $timestamp,
+          $level,
+          $json
         );
 
-        file_put_contents($this->logFile, $entry, FILE_APPEND);
+        @file_put_contents($this->logFile, $entry, FILE_APPEND | LOCK_EX);
     }
 }
