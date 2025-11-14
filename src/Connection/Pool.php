@@ -142,7 +142,7 @@ class Pool
     public function getStats(): array
     {
         $activeCount = 0;
-        $idleCount = 0;
+        $idleCount   = 0;
 
         foreach ($this->connections as $connections) {
             $activeCount += count($connections);
@@ -152,14 +152,18 @@ class Pool
             $idleCount += count($connections);
         }
 
+        $max = (int) $this->poolConfig['max_connections'];
+        $utilization = $max > 0 ? ($activeCount / $max) * 100 : 0.0;
+
         return array_merge($this->stats, [
-            'active_connections' => $activeCount,
-            'idle_connections' => $idleCount,
-            'total_connections' => $activeCount + $idleCount,
-            'max_connections' => $this->poolConfig['max_connections'],
-            'pool_utilization' => ($activeCount / $this->poolConfig['max_connections']) * 100,
+          'active_connections' => $activeCount,
+          'idle_connections'   => $idleCount,
+          'total_connections'  => $activeCount + $idleCount,
+          'max_connections'    => $max,
+          'pool_utilization'   => $utilization,
         ]);
     }
+
 
     /**
      * Perform health check on all connections

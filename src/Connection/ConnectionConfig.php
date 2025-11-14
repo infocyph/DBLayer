@@ -21,27 +21,27 @@ readonly class ConnectionConfig
      * Default configuration values
      */
     private const DEFAULTS = [
-      'driver' => 'mysql',
-      'host' => 'localhost',
-      'port' => 3306,
-      'database' => '',
-      'username' => 'root',
-      'password' => '',
-      'charset' => 'utf8mb4',
+      'driver'    => 'mysql',
+      'host'      => 'localhost',
+      'port'      => 3306,
+      'database'  => '',
+      'username'  => 'root',
+      'password'  => '',
+      'charset'   => 'utf8mb4',
       'collation' => 'utf8mb4_unicode_ci',
-      'prefix' => '',
-      'strict' => true,
-      'engine' => 'InnoDB',
-      'options' => [],
-      'read' => [],
+      'prefix'    => '',
+      'strict'    => true,
+      'engine'    => 'InnoDB',
+      'options'   => [],
+      'read'      => [],
     ];
 
     /**
      * Driver-specific default ports
      */
     private const DRIVER_PORTS = [
-      'mysql' => 3306,
-      'pgsql' => 5432,
+      'mysql'  => 3306,
+      'pgsql'  => 5432,
       'sqlite' => null,
     ];
 
@@ -79,9 +79,9 @@ readonly class ConnectionConfig
       array $options = []
     ): self {
         return new self(array_merge([
-          'driver' => 'mysql',
-          'host' => $host,
-          'port' => $port,
+          'driver'   => 'mysql',
+          'host'     => $host,
+          'port'     => $port,
           'database' => $database,
           'username' => $username,
           'password' => $password,
@@ -100,9 +100,9 @@ readonly class ConnectionConfig
       array $options = []
     ): self {
         return new self(array_merge([
-          'driver' => 'pgsql',
-          'host' => $host,
-          'port' => $port,
+          'driver'   => 'pgsql',
+          'host'     => $host,
+          'port'     => $port,
           'database' => $database,
           'username' => $username,
           'password' => $password,
@@ -115,7 +115,7 @@ readonly class ConnectionConfig
     public static function sqlite(string $database, array $options = []): self
     {
         return new self(array_merge([
-          'driver' => 'sqlite',
+          'driver'   => 'sqlite',
           'database' => $database,
         ], $options));
     }
@@ -137,105 +137,66 @@ readonly class ConnectionConfig
         return $this->config[$key] ?? $default;
     }
 
-    /**
-     * Get charset
-     */
     public function getCharset(): string
     {
         return $this->config['charset'];
     }
 
-    /**
-     * Get collation
-     */
     public function getCollation(): string
     {
         return $this->config['collation'];
     }
 
-    /**
-     * Get database name
-     */
     public function getDatabase(): string
     {
         return $this->config['database'];
     }
 
-    /**
-     * Get driver name
-     */
     public function getDriver(): string
     {
         return $this->config['driver'];
     }
 
-    /**
-     * Get host
-     */
     public function getHost(): string
     {
-        return $this->config['host'];
+        return $this->config['host'] ?? '';
     }
 
-    /**
-     * Get connection options
-     */
     public function getOptions(): array
     {
         return $this->config['options'];
     }
 
-    /**
-     * Get password
-     */
     public function getPassword(): string
     {
-        return $this->config['password'];
+        return $this->config['password'] ?? '';
     }
 
-    /**
-     * Get port
-     */
     public function getPort(): int
     {
-        return $this->config['port'];
+        return isset($this->config['port']) ? (int) $this->config['port'] : 0;
     }
 
-    /**
-     * Get table prefix
-     */
     public function getPrefix(): string
     {
         return $this->config['prefix'];
     }
 
-    /**
-     * Get read configuration
-     */
     public function getReadConfig(): array
     {
         return $this->config['read'];
     }
 
-    /**
-     * Get username
-     */
     public function getUsername(): string
     {
-        return $this->config['username'];
+        return $this->config['username'] ?? '';
     }
 
-    /**
-     * Check if configuration has a key
-     */
     public function has(string $key): bool
     {
-        return isset($this->config[$key]);
+        return array_key_exists($key, $this->config);
     }
 
-    /**
-     * Check if read configuration exists
-     */
     public function hasReadConfig(): bool
     {
         return !empty($this->config['read']);
@@ -243,18 +204,15 @@ readonly class ConnectionConfig
 
     /**
      * Get a new instance with a modified value
-     * Replaces deprecated mutable set() method
      */
     public function with(string $key, mixed $value): self
     {
         $config = $this->config;
         $config[$key] = $value;
+
         return new self($config);
     }
 
-    /**
-     * Get all configuration as array
-     */
     public function toArray(): array
     {
         return $this->config;
@@ -265,9 +223,9 @@ readonly class ConnectionConfig
      */
     private function applyMySqlDefaults(array $config): array
     {
-        $config['charset'] = $config['charset'] ?? 'utf8mb4';
+        $config['charset']   = $config['charset']   ?? 'utf8mb4';
         $config['collation'] = $config['collation'] ?? 'utf8mb4_unicode_ci';
-        $config['engine'] = $config['engine'] ?? 'InnoDB';
+        $config['engine']    = $config['engine']    ?? 'InnoDB';
 
         return $config;
     }
@@ -278,7 +236,7 @@ readonly class ConnectionConfig
     private function applyPostgreSqlDefaults(array $config): array
     {
         $config['charset'] = $config['charset'] ?? 'utf8';
-        $config['schema'] = $config['schema'] ?? 'public';
+        $config['schema']  = $config['schema']  ?? 'public';
 
         return $config;
     }
@@ -288,8 +246,9 @@ readonly class ConnectionConfig
      */
     private function applySqliteDefaults(array $config): array
     {
-        // SQLite doesn't need host, port, username, password
-        unset($config['host'], $config['port'], $config['username'], $config['password']);
+        // SQLite doesn't need host/port; username/password are harmless.
+        unset($config['host'], $config['port']);
+
         return $config;
     }
 
@@ -301,7 +260,7 @@ readonly class ConnectionConfig
         $driver = $config['driver'];
 
         // Set default port based on driver
-        if (!isset($config['port']) && isset(self::DRIVER_PORTS[$driver])) {
+        if (!isset($config['port']) && array_key_exists($driver, self::DRIVER_PORTS)) {
             $config['port'] = self::DRIVER_PORTS[$driver];
         }
 
@@ -310,10 +269,10 @@ readonly class ConnectionConfig
 
         // Driver-specific defaults
         return match ($driver) {
-            'mysql' => $this->applyMySqlDefaults($merged),
-            'pgsql' => $this->applyPostgreSqlDefaults($merged),
+            'mysql'  => $this->applyMySqlDefaults($merged),
+            'pgsql'  => $this->applyPostgreSqlDefaults($merged),
             'sqlite' => $this->applySqliteDefaults($merged),
-            default => $merged,
+            default  => $merged,
         };
     }
 
@@ -327,7 +286,7 @@ readonly class ConnectionConfig
         }
 
         $driver = $config['driver'];
-        if (!in_array($driver, ['mysql', 'pgsql', 'sqlite'])) {
+        if (!in_array($driver, ['mysql', 'pgsql', 'sqlite'], true)) {
             throw ConnectionException::unsupportedDriver($driver);
         }
 
@@ -336,6 +295,7 @@ readonly class ConnectionConfig
             if (!isset($config['database'])) {
                 throw ConnectionException::missingConfigKey('database');
             }
+
             return;
         }
 
