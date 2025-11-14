@@ -5,60 +5,40 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Exceptions;
 
 use RuntimeException;
+use Throwable;
 
 /**
- * Database Exception
- *
- * Base exception class for all DBLayer exceptions.
- * Provides a foundation for creating specific database-related exceptions.
- *
- * @package Infocyph\DBLayer\Exceptions
- * @author Hasan
+ * Base exception for all DBLayer-related errors.
  */
 class DBException extends RuntimeException
 {
-    /**
-     * Create a general database exception
-     *
-     * @param string $message Error message
-     * @param int $code Error code (default: 0)
-     * @return self
-     */
-    public static function create(string $message, int $code = 0): self
-    {
-        return new self($message, $code);
+    public function __construct(
+      string $message = '',
+      int $code = 0,
+      ?Throwable $previous = null
+    ) {
+        parent::__construct($message, $code, $previous);
     }
 
     /**
-     * Create exception for database errors
-     *
-     * @param string $message Error details
-     * @return self
+     * Wrap a lower-level throwable into a DBException subclass.
      */
-    public static function databaseError(string $message): self
+    public static function fromThrowable(Throwable $throwable, ?string $prefix = null): static
     {
-        return new self("Database error: {$message}");
+        $message = $throwable->getMessage();
+
+        if ($prefix !== null && $prefix !== '') {
+            $message = $prefix . ': ' . $message;
+        }
+
+        return new static($message, (int) $throwable->getCode(), $throwable);
     }
 
     /**
-     * Create exception for unsupported operations
-     *
-     * @param string $operation The unsupported operation name
-     * @return self
+     * Generic invalid configuration error.
      */
-    public static function unsupportedOperation(string $operation): self
+    public static function invalidConfiguration(string $message): static
     {
-        return new self("Unsupported operation: {$operation}");
-    }
-
-    /**
-     * Create exception for invalid configuration
-     *
-     * @param string $message Configuration error details
-     * @return self
-     */
-    public static function invalidConfiguration(string $message): self
-    {
-        return new self("Invalid configuration: {$message}");
+        return new static('Invalid configuration: ' . $message);
     }
 }

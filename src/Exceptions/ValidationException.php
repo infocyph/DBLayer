@@ -4,29 +4,42 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Exceptions;
 
+use Throwable;
+
 /**
- * Validation Exception
- *
- * Exception for data validation errors.
- *
- * @package Infocyph\DBLayer\Exceptions
- * @author Hasan
+ * Data validation errors (e.g. before persisting models/queries).
  */
 class ValidationException extends DBException
 {
-    protected array $errors = [];
+    /**
+     * @var array<string, array<int, string>|string>
+     */
+    protected array $errors;
 
-    public function __construct(string $message = '', array $errors = [], int $code = 0, ?\Throwable $previous = null)
-    {
+    public function __construct(
+      string $message = 'Validation failed.',
+      array $errors = [],
+      int $code = 0,
+      ?Throwable $previous = null
+    ) {
         parent::__construct($message, $code, $previous);
+
         $this->errors = $errors;
     }
 
+    /**
+     * Create a validation exception with an error bag.
+     *
+     * @param array<string, array<int, string>|string> $errors
+     */
     public static function withErrors(array $errors): self
     {
-        return new self('Validation failed', $errors);
+        return new self('Validation failed.', $errors);
     }
 
+    /**
+     * @return array<string, array<int, string>|string>
+     */
     public function getErrors(): array
     {
         return $this->errors;
@@ -34,6 +47,6 @@ class ValidationException extends DBException
 
     public function hasErrors(): bool
     {
-        return !empty($this->errors);
+        return $this->errors !== [];
     }
 }
