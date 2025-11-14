@@ -5,74 +5,56 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Async\Adapters;
 
 use Infocyph\DBLayer\Async\Promise;
+use Infocyph\DBLayer\Exceptions\AsyncException;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
+use RuntimeException;
+use Throwable;
 
 /**
  * Amp Adapter
  *
- * Async database adapter for Amp framework.
- * Provides non-blocking MySQL operations using amphp/mysql.
+ * Async database adapter for the Amp framework.
+ * Uses amphp/mysql (v3-style) underneath.
  *
- * @package Infocyph\DBLayer\Async\Adapters
- * @author Hasan
+ * NOTE: This adapter assumes it is used within an Amp runtime.
  */
-class AmpAdapter implements AdapterInterface
+final class AmpAdapter implements AdapterInterface
 {
-    protected bool $connected = false;
-    protected mixed $connection = null;
+    private bool $connected = false;
 
-    public function beginTransaction(): Promise
-    {
-        return new Promise(function ($resolve, $reject) {
-            if (!$this->connected || !$this->connection) {
-                $reject(ConnectionException::lostConnection());
-                return;
-            }
-
-            \Amp\async(function () use ($resolve, $reject) {
-                try {
-                    $transaction = $this->connection->beginTransaction();
-                    $resolve($transaction);
-                } catch (\Throwable $e) {
-                    $reject(new \RuntimeException($e->getMessage()));
-                }
-            });
-        });
-    }
-
-    public function commit(): Promise
-    {
-        return $this->query('COMMIT');
-    }
+    /**
+     * @var mixed|null Underlying Amp MySQL connection
+     */
+    private mixed $connection = null;
 
     public function connect(array $config): Promise
     {
-        return new Promise(function ($resolve, $reject) use ($config) {
+        return new Promise(function (callable $resolve, callable $reject) use ($config): void {
             if (!class_exists('\Amp\Mysql\MysqlConfig')) {
-                $reject(ConnectionException::missingExtension('amphp/mysql'));
+                $reject(AsyncException::extensionMissing('amphp/mysql'));
                 return;
             }
 
             try {
                 $ampConfig = \Amp\Mysql\MysqlConfig::fromString(sprintf(
-                    'host=%s port=%d user=%s password=%s db=%s',
-                    $config['host'] ?? 'localhost',
-                    $config['port'] ?? 3306,
-                    $config['username'] ?? 'root',
-                    $config['password'] ?? '',
-                    $config['database'] ?? ''
+                  'host=%s port=%d user=%s password=%s db=%s',
+                  $config['host'] ?? 'localhost',
+                  $config['port'] ?? 3306,
+                  $config['username'] ?? 'root',
+                  $config['password'] ?? '',
+                  $config['database'] ?? ''
                 ));
 
-                \Amp\async(function () use ($ampConfig, $resolve, $reject) {
+                \Amp\async(function () use ($ampConfig, $resolve, $reject): void {
                     try {
                         $this->connection = \Amp\Mysql\connect($ampConfig);
                         $this->connected = true;
                         $resolve(true);
-                    } catch (\Throwable $e) {
+                    } catch (Throwable $e) {
                         $reject(ConnectionException::connectionFailed('mysql', $e->getMessage()));
                     }
                 });
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 $reject(ConnectionException::connectionFailed('mysql', $e->getMessage()));
             }
         });
@@ -80,26 +62,24 @@ class AmpAdapter implements AdapterInterface
 
     public function disconnect(): Promise
     {
-        return new Promise(function ($resolve, $reject) {
-            if ($this->connection) {
-                \Amp\async(function () use ($resolve) {
+        return new Promise(function (callable $resolve): void {
+            if ($this->connection !== null) {
+                \Amp\async(function () use ($resolve): void {
                     try {
                         $this->connection->close();
-                    } catch (\Throwable $e) {
+                    } catch (Throwable) {
                         // Ignore close errors
                     }
+
                     $this->connected = false;
+                    $this->connection = null;
                     $resolve(true);
                 });
-            } else {
-                $resolve(true);
+                return;
             }
-        });
-    }
 
-    public function getName(): string
-    {
-        return 'amp';
+            $resolve(true);
+        });
     }
 
     public function isConnected(): bool
@@ -109,15 +89,15 @@ class AmpAdapter implements AdapterInterface
 
     public function query(string $sql, array $bindings = []): Promise
     {
-        return new Promise(function ($resolve, $reject) use ($sql, $bindings) {
-            if (!$this->connected || !$this->connection) {
+        return new Promise(function (callable $resolve, callable $reject) use ($sql, $bindings): void {
+            if (!$this->isConnected()) {
                 $reject(ConnectionException::lostConnection());
                 return;
             }
 
-            \Amp\async(function () use ($sql, $bindings, $resolve, $reject) {
+            \Amp\async(function () use ($sql, $bindings, $resolve, $reject): void {
                 try {
-                    if (!empty($bindings)) {
+                    if ($bindings !== []) {
                         $statement = $this->connection->prepare($sql);
                         $result = $statement->execute($bindings);
                     } else {
@@ -130,15 +110,44 @@ class AmpAdapter implements AdapterInterface
                     }
 
                     $resolve($rows);
-                } catch (\Throwable $e) {
-                    $reject(new \RuntimeException($e->getMessage()));
+                } catch (Throwable $e) {
+                    $reject(AsyncException::promiseRejected($e->getMessage()));
                 }
             });
         });
     }
 
+    public function beginTransaction(): Promise
+    {
+        return new Promise(function (callable $resolve, callable $reject): void {
+            if (!$this->isConnected()) {
+                $reject(ConnectionException::lostConnection());
+                return;
+            }
+
+            \Amp\async(function () use ($resolve, $reject): void {
+                try {
+                    $result = $this->connection->beginTransaction();
+                    $resolve($result);
+                } catch (Throwable $e) {
+                    $reject(AsyncException::promiseRejected($e->getMessage()));
+                }
+            });
+        });
+    }
+
+    public function commit(): Promise
+    {
+        return $this->query('COMMIT');
+    }
+
     public function rollBack(): Promise
     {
         return $this->query('ROLLBACK');
+    }
+
+    public function getName(): string
+    {
+        return 'amp';
     }
 }

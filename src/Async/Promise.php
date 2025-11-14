@@ -9,83 +9,68 @@ use Throwable;
 /**
  * Promise Implementation
  *
- * Lightweight promise implementation for async operations:
- * - Deferred resolution/rejection
- * - Chaining with then/catch/finally
- * - State management (pending/fulfilled/rejected)
- * - Error propagation
- *
- * @package Infocyph\DBLayer\Async
- * @author Hasan
+ * Lightweight promise abstraction for async operations.
+ * This is intentionally minimal and primarily used as a
+ * compositional wrapper around runtime-native async APIs.
  */
-class Promise
+final class Promise
 {
+    private const STATE_PENDING   = 'pending';
     private const STATE_FULFILLED = 'fulfilled';
-    /**
-     * Promise states
-     */
-    private const STATE_PENDING = 'pending';
-    private const STATE_REJECTED = 'rejected';
+    private const STATE_REJECTED  = 'rejected';
 
     /**
-     * Finally callbacks
-     */
-    private array $onFinally = [];
-
-    /**
-     * Success callbacks
+     * @var callable[]
      */
     private array $onFulfilled = [];
 
     /**
-     * Error callbacks
+     * @var callable[]
      */
     private array $onRejected = [];
 
     /**
-     * Rejection reason
+     * @var callable[]
      */
+    private array $onFinally = [];
+
+    private string $state = self::STATE_PENDING;
+
+    private mixed $value = null;
+
     private ?Throwable $reason = null;
 
     /**
-     * Current promise state
-     */
-    private string $state = self::STATE_PENDING;
-
-    /**
-     * Resolved value
-     */
-    private mixed $value = null;
-
-    /**
-     * Create a new promise instance
+     * @param callable(callable(mixed):void, callable(Throwable):void):void|null $executor
      */
     public function __construct(?callable $executor = null)
     {
         if ($executor !== null) {
             try {
                 $executor(
-                    fn ($value) => $this->resolve($value),
-                    fn ($reason) => $this->reject($reason)
+                  fn (mixed $value) => $this->doResolve($value),
+                  fn (Throwable $reason) => $this->doReject($reason)
                 );
             } catch (Throwable $e) {
-                $this->reject($e);
+                $this->doReject($e);
             }
         }
     }
 
     /**
-     * Wait for all promises to resolve
+     * Create a promise that resolves when all promises resolve.
+     *
+     * @param array<int, Promise|mixed> $promises
      */
     public static function all(array $promises): self
     {
-        return new self(function ($resolve, $reject) use ($promises) {
-            if (empty($promises)) {
+        return new self(function (callable $resolve, callable $reject) use ($promises): void {
+            if ($promises === []) {
                 $resolve([]);
                 return;
             }
 
-            $results = [];
+            $results   = [];
             $remaining = count($promises);
 
             foreach ($promises as $index => $promise) {
@@ -94,33 +79,37 @@ class Promise
                 }
 
                 $promise->then(
-                    function ($value) use ($index, &$results, &$remaining, $resolve) {
-                        $results[$index] = $value;
-                        $remaining--;
+                  function (mixed $value) use ($index, &$results, &$remaining, $resolve): void {
+                      $results[$index] = $value;
+                      $remaining--;
 
-                        if ($remaining === 0) {
-                            ksort($results);
-                            $resolve($results);
-                        }
-                    },
-                    fn ($reason) => $reject($reason)
+                      if ($remaining === 0) {
+                          ksort($results);
+                          $resolve($results);
+                      }
+                  },
+                  static function (Throwable $reason) use ($reject): void {
+                      $reject($reason);
+                  }
                 );
             }
         });
     }
 
     /**
-     * Wait for all promises to settle
+     * Create a promise that resolves when all promises settle.
+     *
+     * @param array<int, Promise|mixed> $promises
      */
     public static function allSettled(array $promises): self
     {
-        return new self(function ($resolve) use ($promises) {
-            if (empty($promises)) {
+        return new self(function (callable $resolve) use ($promises): void {
+            if ($promises === []) {
                 $resolve([]);
                 return;
             }
 
-            $results = [];
+            $results   = [];
             $remaining = count($promises);
 
             foreach ($promises as $index => $promise) {
@@ -129,36 +118,46 @@ class Promise
                 }
 
                 $promise
-                    ->then(
-                        function ($value) use ($index, &$results, &$remaining, $resolve) {
-                            $results[$index] = ['status' => 'fulfilled', 'value' => $value];
-                            $remaining--;
-                            if ($remaining === 0) {
-                                ksort($results);
-                                $resolve($results);
-                            }
+                  ->then(
+                    function (mixed $value) use ($index, &$results, &$remaining, $resolve): void {
+                        $results[$index] = [
+                          'status' => 'fulfilled',
+                          'value'  => $value,
+                        ];
+                        $remaining--;
+
+                        if ($remaining === 0) {
+                            ksort($results);
+                            $resolve($results);
                         }
-                    )
-                    ->catch(
-                        function ($reason) use ($index, &$results, &$remaining, $resolve) {
-                            $results[$index] = ['status' => 'rejected', 'reason' => $reason];
-                            $remaining--;
-                            if ($remaining === 0) {
-                                ksort($results);
-                                $resolve($results);
-                            }
+                    }
+                  )
+                  ->catch(
+                    function (Throwable $reason) use ($index, &$results, &$remaining, $resolve): void {
+                        $results[$index] = [
+                          'status' => 'rejected',
+                          'reason' => $reason,
+                        ];
+                        $remaining--;
+
+                        if ($remaining === 0) {
+                            ksort($results);
+                            $resolve($results);
                         }
-                    );
+                    }
+                  );
             }
         });
     }
 
     /**
-     * Wait for first promise to resolve
+     * Return a promise that resolves or rejects with the first settled promise.
+     *
+     * @param array<int, Promise|mixed> $promises
      */
     public static function race(array $promises): self
     {
-        return new self(function ($resolve, $reject) use ($promises) {
+        return new self(function (callable $resolve, callable $reject) use ($promises): void {
             foreach ($promises as $promise) {
                 if (!$promise instanceof self) {
                     $promise = self::resolve($promise);
@@ -170,27 +169,79 @@ class Promise
     }
 
     /**
-     * Create a rejected promise
-     */
-    public static function reject(Throwable $reason): self
-    {
-        $promise = new self();
-        $promise->doReject($reason);
-        return $promise;
-    }
-
-    /**
-     * Create a resolved promise
+     * Create a resolved promise.
      */
     public static function resolve(mixed $value): self
     {
         $promise = new self();
         $promise->doResolve($value);
+
         return $promise;
     }
 
     /**
-     * Add rejection handler
+     * Create a rejected promise.
+     */
+    public static function reject(Throwable $reason): self
+    {
+        $promise = new self();
+        $promise->doReject($reason);
+
+        return $promise;
+    }
+
+    /**
+     * Add a fulfillment / rejection handler.
+     *
+     * @param callable(mixed):mixed|null     $onFulfilled
+     * @param callable(Throwable):mixed|null $onRejected
+     */
+    public function then(?callable $onFulfilled = null, ?callable $onRejected = null): self
+    {
+        $next = new self();
+
+        $this->onFulfilled[] = function (mixed $value) use ($next, $onFulfilled): void {
+            if ($onFulfilled === null) {
+                $next->doResolve($value);
+                return;
+            }
+
+            try {
+                $result = $onFulfilled($value);
+                $next->doResolve($result);
+            } catch (Throwable $e) {
+                $next->doReject($e);
+            }
+        };
+
+        if ($onRejected !== null) {
+            $this->onRejected[] = function (Throwable $reason) use ($next, $onRejected): void {
+                try {
+                    $result = $onRejected($reason);
+                    $next->doResolve($result);
+                } catch (Throwable $e) {
+                    $next->doReject($e);
+                }
+            };
+        } else {
+            $this->onRejected[] = static function (Throwable $reason) use ($next): void {
+                $next->doReject($reason);
+            };
+        }
+
+        if ($this->state === self::STATE_FULFILLED) {
+            $this->callHandlers($this->onFulfilled, true, $this->value);
+        } elseif ($this->state === self::STATE_REJECTED) {
+            $this->callHandlers($this->onRejected, true, $this->reason);
+        }
+
+        return $next;
+    }
+
+    /**
+     * Add a rejection handler.
+     *
+     * @param callable(Throwable):mixed $onRejected
      */
     public function catch(callable $onRejected): self
     {
@@ -198,101 +249,51 @@ class Promise
     }
 
     /**
-     * Add finally handler
+     * Add a finally handler (called on both resolve and reject).
+     *
+     * @param callable():void $onFinally
      */
     public function finally(callable $onFinally): self
     {
         $this->onFinally[] = $onFinally;
 
         if ($this->state !== self::STATE_PENDING) {
-            $this->callHandlers($this->onFinally);
+            $this->callHandlers($this->onFinally, false);
         }
 
         return $this;
     }
 
-    /**
-     * Get promise state
-     */
     public function getState(): string
     {
         return $this->state;
     }
 
-    /**
-     * Check if promise is fulfilled
-     */
-    public function isFulfilled(): bool
-    {
-        return $this->state === self::STATE_FULFILLED;
-    }
-
-    /**
-     * Check if promise is pending
-     */
     public function isPending(): bool
     {
         return $this->state === self::STATE_PENDING;
     }
 
-    /**
-     * Check if promise is rejected
-     */
+    public function isFulfilled(): bool
+    {
+        return $this->state === self::STATE_FULFILLED;
+    }
+
     public function isRejected(): bool
     {
         return $this->state === self::STATE_REJECTED;
     }
 
     /**
-     * Add fulfillment handler
-     */
-    public function then(?callable $onFulfilled = null, ?callable $onRejected = null): self
-    {
-        $promise = new self();
-
-        $this->onFulfilled[] = function ($value) use ($promise, $onFulfilled) {
-            if ($onFulfilled === null) {
-                $promise->resolve($value);
-                return;
-            }
-
-            try {
-                $result = $onFulfilled($value);
-                $promise->resolve($result);
-            } catch (Throwable $e) {
-                $promise->reject($e);
-            }
-        };
-
-        if ($onRejected !== null) {
-            $this->onRejected[] = function ($reason) use ($promise, $onRejected) {
-                try {
-                    $result = $onRejected($reason);
-                    $promise->resolve($result);
-                } catch (Throwable $e) {
-                    $promise->reject($e);
-                }
-            };
-        } else {
-            $this->onRejected[] = fn ($reason) => $promise->reject($reason);
-        }
-
-        if ($this->state === self::STATE_FULFILLED) {
-            $this->callHandlers($this->onFulfilled, $this->value);
-        } elseif ($this->state === self::STATE_REJECTED) {
-            $this->callHandlers($this->onRejected, $this->reason);
-        }
-
-        return $promise;
-    }
-
-    /**
-     * Wait for promise to settle and return value
+     * Block until the promise settles and return its value or throw its reason.
+     *
+     * WARNING: This is a busy-wait and should be used sparingly,
+     * mainly for tests or CLI tools – not in hot paths.
      */
     public function wait(): mixed
     {
         while ($this->state === self::STATE_PENDING) {
-            usleep(1000); // 1ms
+            usleep(1_000); // 1ms
         }
 
         if ($this->state === self::STATE_REJECTED) {
@@ -303,44 +304,27 @@ class Promise
     }
 
     /**
-     * Call handlers
+     * @param callable[]               $handlers
+     * @param bool                     $withArg  true = pass $arg, false = call with no args
+     * @param mixed|Throwable|null     $arg
      */
-    private function callHandlers(array &$handlers, mixed $arg = null): void
+    private function callHandlers(array &$handlers, bool $withArg, mixed $arg = null): void
     {
         foreach ($handlers as $handler) {
             try {
-                if ($arg !== null) {
+                if ($withArg) {
                     $handler($arg);
                 } else {
                     $handler();
                 }
-            } catch (Throwable $e) {
-                // Silently catch to prevent unhandled exceptions
+            } catch (Throwable) {
+                // Swallow handler exceptions to avoid breaking the chain
             }
         }
 
         $handlers = [];
     }
 
-    /**
-     * Reject the promise
-     */
-    private function doReject(Throwable $reason): void
-    {
-        if ($this->state !== self::STATE_PENDING) {
-            return;
-        }
-
-        $this->state = self::STATE_REJECTED;
-        $this->reason = $reason;
-
-        $this->callHandlers($this->onRejected, $reason);
-        $this->callHandlers($this->onFinally);
-    }
-
-    /**
-     * Resolve the promise
-     */
     private function doResolve(mixed $value): void
     {
         if ($this->state !== self::STATE_PENDING) {
@@ -349,8 +333,12 @@ class Promise
 
         if ($value instanceof self) {
             $value->then(
-                fn ($v) => $this->doResolve($v),
-                fn ($r) => $this->doReject($r)
+              function (mixed $inner): void {
+                  $this->doResolve($inner);
+              },
+              function (Throwable $reason): void {
+                  $this->doReject($reason);
+              }
             );
             return;
         }
@@ -358,7 +346,20 @@ class Promise
         $this->state = self::STATE_FULFILLED;
         $this->value = $value;
 
-        $this->callHandlers($this->onFulfilled, $value);
-        $this->callHandlers($this->onFinally);
+        $this->callHandlers($this->onFulfilled, true, $value);
+        $this->callHandlers($this->onFinally, false);
+    }
+
+    private function doReject(Throwable $reason): void
+    {
+        if ($this->state !== self::STATE_PENDING) {
+            return;
+        }
+
+        $this->state  = self::STATE_REJECTED;
+        $this->reason = $reason;
+
+        $this->callHandlers($this->onRejected, true, $reason);
+        $this->callHandlers($this->onFinally, false);
     }
 }

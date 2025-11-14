@@ -9,50 +9,53 @@ use Infocyph\DBLayer\Async\Promise;
 /**
  * Adapter Interface
  *
- * Defines the contract for async database adapters.
- * Implementations provide specific async runtime support.
- *
- * @package Infocyph\DBLayer\Async\Adapters
- * @author Hasan
+ * Contract for async database adapters.
+ * Implementations must integrate with a specific async runtime
+ * (Amp, ReactPHP, Swoole, etc.) but expose a uniform Promise API.
  */
 interface AdapterInterface
 {
     /**
-     * Begin a transaction
-     */
-    public function beginTransaction(): Promise;
-
-    /**
-     * Commit a transaction
-     */
-    public function commit(): Promise;
-    /**
-     * Connect to the database
+     * Connect to the database.
+     *
+     * @param array<string, mixed> $config
      */
     public function connect(array $config): Promise;
 
     /**
-     * Disconnect from the database
+     * Disconnect from the database.
      */
     public function disconnect(): Promise;
 
     /**
-     * Get adapter name
-     */
-    public function getName(): string;
-
-    /**
-     * Check if connected
+     * Check if the adapter has an active connection.
      */
     public function isConnected(): bool;
 
     /**
-     * Execute a query
+     * Execute a SQL query.
+     *
+     * @param array<int|string, mixed> $bindings
      */
     public function query(string $sql, array $bindings = []): Promise;
 
     /**
-     * Rollback a transaction
+     * Begin a transaction.
+     */
+    public function beginTransaction(): Promise;
+
+    /**
+     * Commit the current transaction.
+     */
+    public function commit(): Promise;
+
+    /**
+     * Roll back the current transaction.
      */
     public function rollBack(): Promise;
+
+    /**
+     * Return a stable adapter name (e.g. "amp", "reactphp", "swoole").
+     */
+    public function getName(): string;
 }
