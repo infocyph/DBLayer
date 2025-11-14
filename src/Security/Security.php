@@ -9,143 +9,260 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
 /**
  * Security Manager
  *
- * Provides comprehensive security features:
- * - SQL injection prevention
- * - Rate limiting (per-minute, per-second)
- * - Query pattern validation
- * - Dangerous operation detection
- * - Input sanitization
- * - Security event logging
+ * Provides:
+ *  - SQL injection detection (via QueryValidator)
+ *  - Rate limiting (per-minute, per-second)
+ *  - Query validation (length, dangerous patterns, injection)
+ *  - Dangerous operation detection & confirmation
+ *  - Input sanitization & LIKE escaping
+ *  - Security event logging
  *
- * @package Infocyph\DBLayer\Security
- * @author Hasan
+ * All checks are controlled by SecurityMode.
  */
 class Security
 {
     /**
-     * Dangerous SQL patterns
+     * Dangerous SQL patterns (regex) for STRICT mode.
+     *
+     * These are high-risk operations; we log and block them when
+     * STRICT validation is enabled.
      */
     private const DANGEROUS_PATTERNS = [
-        '/;\s*(drop|truncate|delete)\s+/i',
-        '/union\s+.*select/i',
-        '/into\s+(outfile|dumpfile)/i',
-        '/load_file\s*\(/i',
-        '/benchmark\s*\(/i',
-        '/sleep\s*\(/i',
-        '/waitfor\s+delay/i',
-        '/exec\s*\(/i',
-        '/execute\s+immediate/i',
+      '/;\s*(drop|truncate|delete)\s+/i',
+      '/into\s+(outfile|dumpfile)/i',
+      '/load_file\s*\(/i',
+      '/benchmark\s*\(/i',
+      '/sleep\s*\(/i',
+      '/waitfor\s+delay/i',
+      '/exec\s*\(/i',
+      '/execute\s+immediate/i',
     ];
 
     /**
-     * Default rate limits
+     * Defaults (compatible with old constants).
      */
-    private const DEFAULT_LIMITS = [
-        'queries_per_minute' => 1000,
-        'queries_per_second' => 100,
-        'max_query_length' => 10000,
-        'max_in_clause_items' => 1000,
-    ];
+    private const DEFAULT_QUERIES_PER_MINUTE = 1000;
+    private const DEFAULT_QUERIES_PER_SECOND = 100;
+    private const DEFAULT_MAX_QUERY_LENGTH   = 10000;
+    private const DEFAULT_MAX_IN_ITEMS       = 1000;
 
     /**
-     * SQL injection patterns
+     * STRICT mode can be a bit tighter.
      */
-    private const INJECTION_PATTERNS = [
-        '/(\s|^)(or|and)\s+[\w\'"]+\s*=\s*[\w\'"]+/i',
-        '/[\'"]\s*(or|and)\s+[\'"]/i',
-        '/[\w]+\s*=\s*[\w]+\s*--/i',
-        '/\/\*.*\*\//i',
-        '/--\s*$/m',
-        '/#.*$/m',
-    ];
-    /**
-     * Rate limit tracking (per minute)
-     */
-    private static array $rateLimitMinute = [];
+    private const STRICT_MAX_QUERY_LENGTH = 8000;
+    private const STRICT_MAX_IN_ITEMS     = 800;
 
     /**
-     * Rate limit tracking (per second)
+     * Global security mode.
      */
-    private static array $rateLimitSecond = [];
+    private static SecurityMode $mode = SecurityMode::NORMAL;
 
     /**
-     * Check rate limit for identifier
+     * Shared rate limiter instance.
      */
-    public static function checkRateLimit(string $identifier, array $limits = []): void
+    private static ?RateLimiter $rateLimiter = null;
+
+    /**
+     * Get current security mode.
+     */
+    public static function getMode(): SecurityMode
     {
-        $limits = array_merge(self::DEFAULT_LIMITS, $limits);
-
-        // Check per-second rate limit
-        self::checkPerSecondLimit($identifier, $limits['queries_per_second']);
-
-        // Check per-minute rate limit
-        self::checkPerMinuteLimit($identifier, $limits['queries_per_minute']);
+        return self::$mode;
     }
 
     /**
-     * Check transaction timeout
+     * Set global security mode.
+     */
+    public static function setMode(SecurityMode $mode): void
+    {
+        self::$mode = $mode;
+    }
+
+    private static function limiter(): RateLimiter
+    {
+        if (self::$rateLimiter === null) {
+            self::$rateLimiter = new RateLimiter();
+        }
+
+        return self::$rateLimiter;
+    }
+
+    /**
+     * Check rate limits (per-second & per-minute) for an identifier.
+     *
+     * Mode does NOT affect rate limiting; this is orthogonal.
+     *
+     * @param array{
+     *   queries_per_minute?:int,
+     *   queries_per_second?:int
+     * } $limits
+     *
+     * @throws SecurityException
+     */
+    public static function checkRateLimit(string $identifier, array $limits = []): void
+    {
+        $perSecond = $limits['queries_per_second'] ?? self::DEFAULT_QUERIES_PER_SECOND;
+        $perMinute = $limits['queries_per_minute'] ?? self::DEFAULT_QUERIES_PER_MINUTE;
+
+        $limiter = self::limiter();
+
+        if ($perSecond > 0) {
+            $limiter->check($identifier . ':sec', $perSecond, 1);
+        }
+
+        if ($perMinute > 0) {
+            $limiter->check($identifier . ':min', $perMinute, 60);
+        }
+    }
+
+    /**
+     * Check transaction timeout (simple elapsed-time guard).
+     *
+     * Mode does not affect this; it's always active if you call it.
+     *
+     * @throws SecurityException
      */
     public static function checkTransactionTimeout(float $startTime, int $maxTime = 30): void
     {
         $elapsed = microtime(true) - $startTime;
 
         if ($elapsed > $maxTime) {
-            throw SecurityException::transactionTimeout($elapsed, $maxTime);
+            throw SecurityException::unsafeOperation(
+              "Transaction exceeded max time of {$maxTime}s (elapsed: " . round($elapsed, 3) . 's).'
+            );
         }
     }
 
     /**
-     * Clear all rate limits
+     * Clear all rate limits.
      */
     public static function clearAllRateLimits(): void
     {
-        self::$rateLimitMinute = [];
-        self::$rateLimitSecond = [];
+        self::limiter()->clear();
     }
 
     /**
-     * Detect SQL injection attempts
-     */
-    public static function detectSqlInjection(string $input): void
-    {
-        foreach (self::INJECTION_PATTERNS as $pattern) {
-            if (preg_match($pattern, $input)) {
-                self::logSecurityEvent('injection_attempt', 'Possible SQL injection detected', [
-                    'input' => $input,
-                    'pattern' => $pattern,
-                ]);
-
-                throw SecurityException::sqlInjectionDetected();
-            }
-        }
-    }
-
-    /**
-     * Generate secure token
-     */
-    public static function generateToken(int $length = 32): string
-    {
-        return bin2hex(random_bytes($length));
-    }
-
-    /**
-     * Get rate limit status
+     * Get rate limit status (current counts + configured defaults).
+     *
+     * @return array{
+     *   queries_this_minute:int,
+     *   queries_this_second:int,
+     *   limit_per_minute:int,
+     *   limit_per_second:int
+     * }
      */
     public static function getRateLimitStatus(string $identifier): array
     {
-        $currentMinute = self::getCurrentMinute();
-        $currentSecond = self::getCurrentSecond();
+        $limiter = self::limiter();
 
         return [
-            'queries_this_minute' => self::$rateLimitMinute[$identifier][$currentMinute] ?? 0,
-            'queries_this_second' => self::$rateLimitSecond[$identifier][$currentSecond] ?? 0,
-            'limit_per_minute' => self::DEFAULT_LIMITS['queries_per_minute'],
-            'limit_per_second' => self::DEFAULT_LIMITS['queries_per_second'],
+          'queries_this_minute' => $limiter->getCount($identifier . ':min', 60),
+          'queries_this_second' => $limiter->getCount($identifier . ':sec', 1),
+          'limit_per_minute'    => self::DEFAULT_QUERIES_PER_MINUTE,
+          'limit_per_second'    => self::DEFAULT_QUERIES_PER_SECOND,
         ];
     }
 
     /**
-     * Hash sensitive data
+     * Detect SQL injection attempts with logging, respecting SecurityMode.
+     *
+     * @throws SecurityException
+     */
+    public static function detectSqlInjection(string $sql): void
+    {
+        if (self::$mode === SecurityMode::OFF) {
+            return;
+        }
+
+        $validator = new QueryValidator();
+
+        try {
+            $validator->detectSqlInjection($sql);
+        } catch (SecurityException $e) {
+            self::logSecurityEvent(
+              'injection_attempt',
+              'Possible SQL injection detected',
+              [
+                'sql'   => mb_substr($sql, 0, 512, 'UTF-8'),
+                'error' => $e->getMessage(),
+              ]
+            );
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Validate a query according to current SecurityMode.
+     *
+     * NORMAL:
+     *   - Length check (DEFAULT_MAX_QUERY_LENGTH)
+     *   - Injection heuristics + binding checks
+     *
+     * STRICT:
+     *   - Tighter length (STRICT_MAX_QUERY_LENGTH)
+     *   - Injection heuristics + bindings
+     *   - Regex-based dangerous pattern detection
+     *
+     * OFF:
+     *   - No checks (no-op)
+     *
+     * @param array<int|string, mixed> $bindings
+     *
+     * @throws SecurityException
+     */
+    public static function validateQuery(string $sql, array $bindings = []): void
+    {
+        $mode = self::$mode;
+
+        if ($mode === SecurityMode::OFF) {
+            return;
+        }
+
+        // Length guard (mode-dependent).
+        $maxLength = $mode === SecurityMode::STRICT
+          ? self::STRICT_MAX_QUERY_LENGTH
+          : self::DEFAULT_MAX_QUERY_LENGTH;
+
+        SecurityValidator::validateQueryLength($sql, $maxLength);
+
+        // STRICT: deep dangerous pattern scan (DDL / file / timing abuse).
+        if ($mode === SecurityMode::STRICT) {
+            foreach (self::DANGEROUS_PATTERNS as $pattern) {
+                if (preg_match($pattern, $sql) === 1) {
+                    self::logSecurityEvent(
+                      'dangerous_query',
+                      'Query contains dangerous pattern',
+                      [
+                        'sql'     => mb_substr($sql, 0, 512, 'UTF-8'),
+                        'pattern' => $pattern,
+                      ]
+                    );
+
+                    throw SecurityException::unsafeQuery('Query contains dangerous SQL pattern.');
+                }
+            }
+        }
+
+        // Always do injection + binding checks in NORMAL / STRICT.
+        $validator = new QueryValidator();
+        $validator->validateQuery($sql, $bindings);
+    }
+
+    /**
+     * Generate secure token.
+     */
+    public static function generateToken(int $length = 32): string
+    {
+        if ($length <= 0) {
+            return '';
+        }
+
+        return bin2hex(random_bytes($length));
+    }
+
+    /**
+     * Hash sensitive data.
      */
     public static function hashSensitiveData(string $data, string $algo = 'sha256'): string
     {
@@ -153,159 +270,7 @@ class Security
     }
 
     /**
-     * Check if operation is dangerous
-     */
-    public static function isDangerousOperation(string $sql): bool
-    {
-        $sql = strtolower(trim($sql));
-
-        $dangerous = [
-            'drop table',
-            'drop database',
-            'truncate',
-            'delete from',
-            'grant',
-            'revoke',
-            'alter table',
-            'create table',
-        ];
-        return array_any($dangerous, fn ($operation) => str_starts_with($sql, $operation));
-    }
-
-    /**
-     * Log security event
-     */
-    public static function logSecurityEvent(string $type, string $message, array $context = []): void
-    {
-        error_log(json_encode([
-            'type' => 'security',
-            'event' => $type,
-            'message' => $message,
-            'context' => $context,
-            'timestamp' => date('Y-m-d H:i:s'),
-            'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
-            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
-        ]));
-    }
-
-    /**
-     * Require confirmation for dangerous operation
-     */
-    public static function requireConfirmation(string $sql, bool $confirmed = false): void
-    {
-        if (self::isDangerousOperation($sql) && !$confirmed) {
-            throw SecurityException::confirmationRequired($sql);
-        }
-    }
-
-    /**
-     * Reset rate limits for identifier
-     */
-    public static function resetRateLimit(string $identifier): void
-    {
-        unset(self::$rateLimitMinute[$identifier]);
-        unset(self::$rateLimitSecond[$identifier]);
-    }
-
-    /**
-     * Sanitize input value
-     */
-    public static function sanitizeInput(mixed $value): mixed
-    {
-        if (is_string($value)) {
-            // Remove null bytes
-            $value = str_replace("\0", '', $value);
-
-            // Remove control characters except newline and tab
-            $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $value);
-        }
-
-        return $value;
-    }
-
-    /**
-     * Sanitize LIKE pattern
-     */
-    public static function sanitizeLikePattern(string $pattern): string
-    {
-        // Escape special LIKE characters
-        return str_replace(['%', '_', '\\'], ['\\%', '\\_', '\\\\'], $pattern);
-    }
-
-    /**
-     * Validate column name
-     */
-    public static function validateColumnName(string $column): void
-    {
-        // Column name should only contain alphanumeric, underscore, and dot
-        if (!preg_match('/^[a-zA-Z0-9_.]+$/', $column)) {
-            throw SecurityException::invalidColumnName($column);
-        }
-    }
-
-    /**
-     * Validate IN clause size
-     */
-    public static function validateInClauseSize(array $values): void
-    {
-        if (count($values) > self::DEFAULT_LIMITS['max_in_clause_items']) {
-            throw SecurityException::inClauseTooLarge(
-                count($values),
-                self::DEFAULT_LIMITS['max_in_clause_items']
-            );
-        }
-    }
-
-    /**
-     * Validate query for dangerous patterns
-     */
-    public static function validateQuery(string $sql): void
-    {
-        // Check query length
-        if (strlen($sql) > self::DEFAULT_LIMITS['max_query_length']) {
-            self::logSecurityEvent('query_too_long', 'Query exceeds maximum length', [
-                'length' => strlen($sql),
-                'max' => self::DEFAULT_LIMITS['max_query_length'],
-            ]);
-
-            throw SecurityException::queryTooLong(strlen($sql), self::DEFAULT_LIMITS['max_query_length']);
-        }
-
-        // Check for dangerous patterns
-        foreach (self::DANGEROUS_PATTERNS as $pattern) {
-            if (preg_match($pattern, $sql)) {
-                self::logSecurityEvent('dangerous_query', 'Query contains dangerous pattern', [
-                    'sql' => $sql,
-                    'pattern' => $pattern,
-                ]);
-
-                throw SecurityException::dangerousQuery($sql);
-            }
-        }
-
-        // Check for SQL injection attempts
-        self::detectSqlInjection($sql);
-    }
-
-    /**
-     * Validate table name
-     */
-    public static function validateTableName(string $table): void
-    {
-        // Table name should only contain alphanumeric, underscore, and dot
-        if (!preg_match('/^[a-zA-Z0-9_.]+$/', $table)) {
-            throw SecurityException::invalidTableName($table);
-        }
-
-        // Check for SQL keywords that shouldn't be table names
-        $keywords = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'DROP', 'UNION'];
-        if (in_array(strtoupper($table), $keywords, true)) {
-            throw SecurityException::invalidTableName($table);
-        }
-    }
-
-    /**
-     * Validate token
+     * Validate token equality in constant time.
      */
     public static function validateToken(string $token, string $expected): bool
     {
@@ -313,92 +278,134 @@ class Security
     }
 
     /**
-     * Get current minute key
+     * Check if operation is obviously dangerous by leading keyword.
      */
-    protected static function getCurrentMinute(): string
+    public static function isDangerousOperation(string $sql): bool
     {
-        return date('Y-m-d H:i');
-    }
+        $sql = strtolower(ltrim($sql));
 
-    /**
-     * Get current second key
-     */
-    protected static function getCurrentSecond(): string
-    {
-        return date('Y-m-d H:i:s');
-    }
+        $dangerous = [
+          'drop table',
+          'drop database',
+          'truncate',
+          'delete from',
+          'grant ',
+          'revoke ',
+          'alter table',
+          'create table',
+        ];
 
-    /**
-     * Check per-minute rate limit
-     */
-    private static function checkPerMinuteLimit(string $identifier, int $limit): void
-    {
-        $currentMinute = self::getCurrentMinute();
-
-        if (!isset(self::$rateLimitMinute[$identifier])) {
-            self::$rateLimitMinute[$identifier] = [];
-        }
-
-        // Clean old minutes
-        foreach (self::$rateLimitMinute[$identifier] as $minute => $count) {
-            if ($minute !== $currentMinute) {
-                unset(self::$rateLimitMinute[$identifier][$minute]);
+        foreach ($dangerous as $operation) {
+            if (str_starts_with($sql, $operation)) {
+                return true;
             }
         }
 
-        // Increment counter
-        if (!isset(self::$rateLimitMinute[$identifier][$currentMinute])) {
-            self::$rateLimitMinute[$identifier][$currentMinute] = 0;
+        return false;
+    }
+
+    /**
+     * Require confirmation for dangerous operation.
+     *
+     * @throws SecurityException
+     */
+    public static function requireConfirmation(string $sql, bool $confirmed = false): void
+    {
+        if (self::$mode === SecurityMode::OFF) {
+            return;
         }
 
-        self::$rateLimitMinute[$identifier][$currentMinute]++;
-
-        // Check limit
-        if (self::$rateLimitMinute[$identifier][$currentMinute] > $limit) {
-            self::logSecurityEvent('rate_limit_exceeded', 'Per-minute rate limit exceeded', [
-                'identifier' => $identifier,
-                'count' => self::$rateLimitMinute[$identifier][$currentMinute],
-                'limit' => $limit,
-            ]);
-
-            throw SecurityException::rateLimitExceeded($limit, 'minute');
+        if (self::isDangerousOperation($sql) && ! $confirmed) {
+            throw SecurityException::unsafeOperation(
+              'Dangerous SQL operation requires explicit confirmation.'
+            );
         }
     }
 
     /**
-     * Check per-second rate limit
+     * Reset rate limits for identifier.
      */
-    private static function checkPerSecondLimit(string $identifier, int $limit): void
+    public static function resetRateLimit(string $identifier): void
     {
-        $currentSecond = self::getCurrentSecond();
+        $limiter = self::limiter();
+        $limiter->reset($identifier . ':sec');
+        $limiter->reset($identifier . ':min');
+    }
 
-        if (!isset(self::$rateLimitSecond[$identifier])) {
-            self::$rateLimitSecond[$identifier] = [];
+    /**
+     * Sanitize input value.
+     */
+    public static function sanitizeInput(mixed $value): mixed
+    {
+        return SecurityValidator::sanitizeInput($value);
+    }
+
+    /**
+     * Sanitize LIKE pattern.
+     */
+    public static function sanitizeLikePattern(string $pattern): string
+    {
+        return SecurityValidator::sanitizeLikePattern($pattern);
+    }
+
+    /**
+     * Validate column name.
+     *
+     * @throws SecurityException
+     */
+    public static function validateColumnName(string $column): void
+    {
+        SecurityValidator::validateColumnName($column);
+    }
+
+    /**
+     * Validate IN clause size using mode-appropriate max.
+     *
+     * @throws SecurityException
+     */
+    public static function validateInClauseSize(array $values): void
+    {
+        $maxItems = self::$mode === SecurityMode::STRICT
+          ? self::STRICT_MAX_IN_ITEMS
+          : self::DEFAULT_MAX_IN_ITEMS;
+
+        SecurityValidator::validateInClauseSize($values, $maxItems);
+    }
+
+    /**
+     * Validate table name.
+     *
+     * @throws SecurityException
+     */
+    public static function validateTableName(string $table): void
+    {
+        SecurityValidator::validateTableName($table);
+
+        // Extra guard against using raw SQL keywords as bare table names.
+        $keywords = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'DROP', 'UNION'];
+
+        if (in_array(strtoupper($table), $keywords, true)) {
+            throw SecurityException::invalidConfiguration(
+              "Invalid table name [{$table}]."
+            );
         }
+    }
 
-        // Clean old seconds
-        foreach (self::$rateLimitSecond[$identifier] as $second => $count) {
-            if ($second !== $currentSecond) {
-                unset(self::$rateLimitSecond[$identifier][$second]);
-            }
-        }
+    /**
+     * Log a security event (kept simple and JSON-structured).
+     */
+    public static function logSecurityEvent(string $type, string $message, array $context = []): void
+    {
+        $payload = [
+          'type'      => 'security',
+          'event'     => $type,
+          'message'   => $message,
+          'context'   => $context,
+          'timestamp' => date('Y-m-d H:i:s'),
+          'ip'        => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+          'user_agent'=> $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
+        ];
 
-        // Increment counter
-        if (!isset(self::$rateLimitSecond[$identifier][$currentSecond])) {
-            self::$rateLimitSecond[$identifier][$currentSecond] = 0;
-        }
-
-        self::$rateLimitSecond[$identifier][$currentSecond]++;
-
-        // Check limit
-        if (self::$rateLimitSecond[$identifier][$currentSecond] > $limit) {
-            self::logSecurityEvent('rate_limit_exceeded', 'Per-second rate limit exceeded', [
-                'identifier' => $identifier,
-                'count' => self::$rateLimitSecond[$identifier][$currentSecond],
-                'limit' => $limit,
-            ]);
-
-            throw SecurityException::rateLimitExceeded($limit, 'second');
-        }
+        error_log(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 }
