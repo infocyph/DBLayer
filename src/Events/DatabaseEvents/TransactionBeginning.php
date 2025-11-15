@@ -10,9 +10,6 @@ use Infocyph\DBLayer\Connection\Connection;
  * Transaction Beginning Event
  *
  * Dispatched when a transaction is starting.
- *
- * @package Infocyph\DBLayer\Events\DatabaseEvents
- * @author Hasan
  */
 final class TransactionBeginning
 {
@@ -29,6 +26,9 @@ final class TransactionBeginning
         $this->time       = $time ?? microtime(true);
     }
 
+    /**
+     * @return array{connection:string,time:float}
+     */
     public function toArray(): array
     {
         return [

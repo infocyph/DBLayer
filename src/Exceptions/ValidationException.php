@@ -7,7 +7,7 @@ namespace Infocyph\DBLayer\Exceptions;
 use Throwable;
 
 /**
- * Data validation errors (e.g. before persisting models/queries).
+ * Data validation errors (e.g. config validation, input checks).
  */
 final class ValidationException extends DBException
 {

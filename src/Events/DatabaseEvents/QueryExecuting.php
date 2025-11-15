@@ -10,9 +10,6 @@ use Infocyph\DBLayer\Connection\Connection;
  * Query Executing Event
  *
  * Dispatched before a query is executed.
- *
- * @package Infocyph\DBLayer\Events\DatabaseEvents
- * @author Hasan
  */
 final class QueryExecuting
 {
@@ -31,8 +28,12 @@ final class QueryExecuting
     /**
      * @param array<int|string, mixed> $bindings
      */
-    public function __construct(string $sql, array $bindings, Connection $connection, ?float $time = null)
-    {
+    public function __construct(
+      string $sql,
+      array $bindings,
+      Connection $connection,
+      ?float $time = null
+    ) {
         $this->sql        = $sql;
         $this->bindings   = $bindings;
         $this->connection = $connection;
@@ -41,6 +42,13 @@ final class QueryExecuting
 
     /**
      * Get event data as array.
+     *
+     * @return array{
+     *   sql:string,
+     *   bindings:array<int|string,mixed>,
+     *   connection:string,
+     *   time:float
+     * }
      */
     public function toArray(): array
     {

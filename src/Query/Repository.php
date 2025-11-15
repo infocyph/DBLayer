@@ -2,13 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Infocyph\DBLayer\Query\Repository;
+namespace Infocyph\DBLayer\Query;
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Grammar\Grammar;
-use Infocyph\DBLayer\Query\Executor;
-use Infocyph\DBLayer\Query\QueryBuilder;
-use Infocyph\DBLayer\Query\ResultProcessor;
 use Infocyph\DBLayer\Support\Collection;
 
 /**
@@ -19,40 +16,32 @@ use Infocyph\DBLayer\Support\Collection;
  * - Provides table-aware helpers (find, all, pluck, aggregates)
  * - Allows flexible scoping via closures
  *
- * Extend this per "model":
- *
- *   final class UserRepository extends Repository {
- *       protected function table(): string { return 'users'; }
- *       protected function primaryKey(): string { return 'id'; }
- *   }
- *
- * @package Infocyph\DBLayer\Query\Repository
- * @author Hasan
+ * Extend this per "model".
  */
 abstract class Repository
 {
     /**
-     * Database connection
+     * Database connection.
      */
     protected Connection $connection;
 
     /**
-     * SQL grammar compiler
+     * SQL grammar compiler.
      */
     protected Grammar $grammar;
 
     /**
-     * Query executor
+     * Query executor.
      */
     protected Executor $executor;
 
     /**
-     * Result processor
+     * Result processor.
      */
     protected ResultProcessor $results;
 
     /**
-     * Create a new repository instance
+     * Create a new repository instance.
      */
     public function __construct(
       Connection $connection,
@@ -61,9 +50,9 @@ abstract class Repository
       ResultProcessor $results
     ) {
         $this->connection = $connection;
-        $this->grammar = $grammar;
-        $this->executor = $executor;
-        $this->results = $results;
+        $this->grammar    = $grammar;
+        $this->executor   = $executor;
+        $this->results    = $results;
     }
 
     /**
@@ -128,9 +117,6 @@ abstract class Repository
     /**
      * Get rows using an optional scoped query as a Collection.
      *
-     * Example:
-     *   $repo->get(fn (QueryBuilder $q) => $q->where('status', 'active'));
-     *
      * @param callable(QueryBuilder):void|null $scope
      */
     public function get(?callable $scope = null, array $columns = ['*']): Collection
@@ -148,8 +134,8 @@ abstract class Repository
     /**
      * Get the first row matching an optional scoped query.
      *
-     * Example:
-     *   $user = $repo->first(fn ($q) => $q->where('email', $email));
+     * @param callable(QueryBuilder):void|null $scope
+     * @return array<string,mixed>|null
      */
     public function first(?callable $scope = null, array $columns = ['*']): ?array
     {
@@ -163,6 +149,8 @@ abstract class Repository
 
     /**
      * Find a row by primary key.
+     *
+     * @return array<string,mixed>|null
      */
     public function find(mixed $id, array $columns = ['*']): ?array
     {
@@ -214,11 +202,8 @@ abstract class Repository
     /**
      * Pluck a single column into a flat array, optionally keyed by another column.
      *
-     * Example:
-     *   $emails = $repo->pluck('email');
-     *   $namesById = $repo->pluck('name', 'id');
-     *
      * @param callable(QueryBuilder):void|null $scope
+     * @return array<int|string,mixed>
      */
     public function pluck(string $column, ?string $keyColumn = null, ?callable $scope = null): array
     {
@@ -239,11 +224,8 @@ abstract class Repository
     /**
      * Group results by a column into an array keyed by that column.
      *
-     * Example:
-     *   $grouped = $repo->groupByKey('status');
-     *
      * @param callable(QueryBuilder):void|null $scope
-     * @return array<string|int,array<int,array<string,mixed>>>
+     * @return array<string|int,list<array<string,mixed>>>
      */
     public function groupByKey(string $column, ?callable $scope = null): array
     {
@@ -259,10 +241,11 @@ abstract class Repository
 
     /**
      * Count rows for an optional scoped query.
+     *
+     * @param callable(QueryBuilder):void|null $scope
      */
     public function count(?callable $scope = null): int
     {
-        // Use aggregate on a scoped builder to avoid leaking state
         $query = $this->applyScope(
           $this->query(),
           $scope
@@ -273,6 +256,8 @@ abstract class Repository
 
     /**
      * Check if any row exists for an optional scoped query.
+     *
+     * @param callable(QueryBuilder):void|null $scope
      */
     public function exists(?callable $scope = null): bool
     {
@@ -286,14 +271,6 @@ abstract class Repository
 
     /**
      * Get a ready-to-use QueryBuilder for advanced usage.
-     *
-     * This is an escape hatch when the repository helpers
-     * are not enough:
-     *
-     *   $repo->builder()
-     *       ->where('status', 'pending')
-     *       ->orderByDesc('created_at')
-     *       ->get();
      */
     public function builder(): QueryBuilder
     {

@@ -15,8 +15,8 @@ use JsonSerializable;
  * Fluent array wrapper providing chainable methods for array manipulation.
  * Implements standard PHP interfaces for array-like behavior.
  *
- * This class is intentionally lightweight and non-magic. It does not try to be
- * a full ORM collection; that lives under ORM and can wrap/extend this.
+ * Intentionally lightweight and non-magic. Higher-level layers
+ * can wrap or extend it if needed.
  *
  * @template TKey of array-key
  * @template TValue
@@ -25,7 +25,7 @@ use JsonSerializable;
  * @implements Iterator<TKey, TValue>
  * @implements JsonSerializable
  */
-class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
+final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
 {
     /**
      * @var array<TKey, TValue>
@@ -35,7 +35,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     /**
      * Create a new collection.
      *
-     * @param array<array-key, mixed> $items Initial items
+     * @param array<TKey, TValue> $items Initial items
      */
     public function __construct(array $items = [])
     {
@@ -53,7 +53,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     /**
      * Create a collection from an array.
      *
-     * @param array<array-key, mixed> $items
+     * @param array<TKey, TValue> $items
      * @return static
      */
     public static function make(array $items = []): static
@@ -83,19 +83,49 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
 
     /**
      * Get the average of a given key (or of values themselves if $key is null).
+     * Only numeric values are considered in the average.
      *
      * @param string|null $key Key to average
      * @return int|float
      */
     public function avg(?string $key = null): int|float
     {
-        $count = $this->count();
+        if ($this->items === []) {
+            return 0;
+        }
+
+        $total = 0;
+        $count = 0;
+
+        if ($key === null) {
+            foreach ($this->items as $value) {
+                if (is_numeric($value)) {
+                    $total += $value + 0;
+                    $count++;
+                }
+            }
+        } else {
+            foreach ($this->items as $item) {
+                $value = null;
+
+                if (is_array($item) && array_key_exists($key, $item)) {
+                    $value = $item[$key];
+                } elseif (is_object($item) && isset($item->{$key})) {
+                    $value = $item->{$key};
+                }
+
+                if (is_numeric($value)) {
+                    $total += $value + 0;
+                    $count++;
+                }
+            }
+        }
 
         if ($count === 0) {
             return 0;
         }
 
-        return $this->sum($key) / $count;
+        return $total / $count;
     }
 
     /**
@@ -295,7 +325,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
     /**
      * Set offset value (ArrayAccess implementation).
      *
-     * @param mixed $offset
+     * @param mixed  $offset
      * @param TValue $value
      */
     public function offsetSet(mixed $offset, mixed $value): void
@@ -403,7 +433,7 @@ class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
      * Filter items by key/value.
      *
      * @param string $key
-     * @param mixed $value
+     * @param mixed  $value
      * @return static<TKey, TValue>
      */
     public function where(string $key, mixed $value): static

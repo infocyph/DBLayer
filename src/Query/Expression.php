@@ -9,19 +9,16 @@ namespace Infocyph\DBLayer\Query;
  *
  * Represents a raw SQL expression that should not be escaped or quoted.
  * Useful for database functions, raw SQL, and complex expressions.
- *
- * @package Infocyph\DBLayer\Query
- * @author Hasan
  */
 final class Expression
 {
     /**
-     * The value of the expression
+     * The value of the expression.
      */
     private string $value;
 
     /**
-     * Create a new expression instance
+     * Create a new expression instance.
      */
     public function __construct(string $value)
     {
@@ -29,15 +26,7 @@ final class Expression
     }
 
     /**
-     * Get the string representation
-     */
-    public function __toString(): string
-    {
-        return $this->getValue();
-    }
-
-    /**
-     * Create a new expression instance (static factory)
+     * Create a new expression instance (static factory).
      */
     public static function make(string $value): self
     {
@@ -45,10 +34,18 @@ final class Expression
     }
 
     /**
-     * Get the value of the expression
+     * Get the value of the expression.
      */
     public function getValue(): string
     {
         return $this->value;
+    }
+
+    /**
+     * Get the string representation.
+     */
+    public function __toString(): string
+    {
+        return $this->getValue();
     }
 }

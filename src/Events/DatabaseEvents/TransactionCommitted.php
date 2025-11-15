@@ -10,9 +10,6 @@ use Infocyph\DBLayer\Connection\Connection;
  * Transaction Committed Event
  *
  * Dispatched when a transaction is committed.
- *
- * @package Infocyph\DBLayer\Events\DatabaseEvents
- * @author Hasan
  */
 final class TransactionCommitted
 {
@@ -29,6 +26,9 @@ final class TransactionCommitted
         $this->duration   = $duration;
     }
 
+    /**
+     * @return array{connection:string,duration:float}
+     */
     public function toArray(): array
     {
         return [

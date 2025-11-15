@@ -6,6 +6,7 @@ namespace Infocyph\DBLayer\Cache;
 
 use Infocyph\DBLayer\Cache\Strategies\CacheStrategy;
 use Infocyph\DBLayer\Cache\Strategies\MemoryStrategy;
+use Throwable;
 
 /**
  * Cache Manager
@@ -137,7 +138,7 @@ class Cache
             }
 
             return $result;
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return false;
         }
     }
@@ -189,7 +190,7 @@ class Cache
             $this->stats['misses']++;
 
             return $default;
-        } catch (\Throwable) {
+        } catch (Throwable) {
             $this->stats['misses']++;
 
             return $default;
@@ -313,13 +314,16 @@ class Cache
             }
 
             return $result;
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return false;
         }
     }
 
     /**
      * Get item or execute callback and cache result.
+     *
+     * NOTE: null results are treated as a cache miss and will be recomputed
+     * on subsequent calls. If you need to cache nulls, use a sentinel value.
      *
      * @param callable(): mixed $callback
      */

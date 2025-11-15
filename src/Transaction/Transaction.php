@@ -12,7 +12,7 @@ use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\TransactionException;
 
 /**
- * Transaction Manager
+ * Transaction
  *
  * Manages database transactions with:
  * - Nested transaction support via savepoints
@@ -20,9 +20,6 @@ use Infocyph\DBLayer\Exceptions\TransactionException;
  * - Transaction timeout detection
  * - Event callbacks (before begin, after commit, after rollback)
  * - Transaction statistics
- *
- * @package Infocyph\DBLayer\Transaction
- * @author Hasan
  */
 final class Transaction
 {
@@ -36,8 +33,8 @@ final class Transaction
      * }
      */
     private array $callbacks = [
-      'beforeBegin' => [],
-      'afterCommit' => [],
+      'beforeBegin'   => [],
+      'afterCommit'   => [],
       'afterRollback' => [],
     ];
 
@@ -47,29 +44,29 @@ final class Transaction
     private readonly Connection $connection;
 
     /**
-     * Current transaction level (0 = no transaction).
+     * Current transaction nesting level (0 = no transaction).
      */
     private int $level = 0;
 
     /**
-     * Maximum transaction time in seconds.
+     * Maximum transaction time in seconds (top-level only).
      */
     private int $maxTransactionTime = 30;
 
     /**
-     * Savepoint stack.
+     * Savepoint stack (ordered by creation).
      *
      * @var list<string>
      */
     private array $savepoints = [];
 
     /**
-     * Transaction start time (top-level only).
+     * Transaction start time in microseconds (top-level only).
      */
     private ?float $startTime = null;
 
     /**
-     * Transaction statistics.
+     * Transaction statistics (per connection).
      *
      * @var array{
      *   total:int,
@@ -88,7 +85,7 @@ final class Transaction
     ];
 
     /**
-     * Create a new transaction manager.
+     * Create a new transaction wrapper.
      */
     public function __construct(Connection $connection)
     {
@@ -96,7 +93,7 @@ final class Transaction
     }
 
     /**
-     * Register an after commit callback.
+     * Register an after-commit callback.
      */
     public function afterCommit(callable $callback): void
     {
@@ -104,7 +101,7 @@ final class Transaction
     }
 
     /**
-     * Register an after rollback callback.
+     * Register an after-rollback callback.
      */
     public function afterRollback(callable $callback): void
     {
@@ -112,7 +109,7 @@ final class Transaction
     }
 
     /**
-     * Register a before begin callback.
+     * Register a before-begin callback.
      */
     public function beforeBegin(callable $callback): void
     {
@@ -133,7 +130,7 @@ final class Transaction
             $this->startTime = microtime(true);
             $this->stats['total']++;
 
-            // Dispatch typed event.
+            // Dispatch event (class name channel).
             Events::dispatch(
               TransactionBeginning::class,
               [new TransactionBeginning($this->connection)]
@@ -150,13 +147,13 @@ final class Transaction
     }
 
     /**
-     * Clear all callbacks.
+     * Clear all registered callbacks.
      */
     public function clearCallbacks(): void
     {
         $this->callbacks = [
-          'beforeBegin' => [],
-          'afterCommit' => [],
+          'beforeBegin'   => [],
+          'afterCommit'   => [],
           'afterRollback' => [],
         ];
     }
@@ -176,11 +173,12 @@ final class Transaction
         if ($this->level === 0) {
             // Commit actual transaction.
             $this->connection->commit();
-            $elapsed          = $this->startTime !== null ? microtime(true) - $this->startTime : 0.0;
-            $this->startTime  = null;
+
+            $elapsed         = $this->startTime !== null ? (microtime(true) - $this->startTime) : 0.0;
+            $this->startTime = null;
             $this->stats['committed']++;
 
-            // Dispatch typed event.
+            // Dispatch event.
             Events::dispatch(
               TransactionCommitted::class,
               [new TransactionCommitted($this->connection, $elapsed)]
@@ -220,7 +218,7 @@ final class Transaction
                 $this->rollback();
 
                 // Check if we should retry.
-                if ($attempt === $attempts || !$this->causedByDeadlock($e)) {
+                if ($attempt === $attempts || ! $this->causedByDeadlock($e)) {
                     throw $e;
                 }
 
@@ -244,7 +242,7 @@ final class Transaction
     }
 
     /**
-     * Get elapsed transaction time (top-level only).
+     * Get elapsed transaction time (seconds, top-level only).
      */
     public function getElapsedTime(): float
     {
@@ -256,7 +254,7 @@ final class Transaction
     }
 
     /**
-     * Get maximum transaction time (seconds).
+     * Get configured maximum transaction time (seconds).
      */
     public function getMaxTime(): int
     {
@@ -264,7 +262,7 @@ final class Transaction
     }
 
     /**
-     * Get transaction start time (or null).
+     * Get transaction start time (microtime) or null.
      */
     public function getStartTime(): ?float
     {
@@ -273,15 +271,32 @@ final class Transaction
 
     /**
      * Get transaction statistics (including derived fields).
+     *
+     * @return array{
+     *   total:int,
+     *   committed:int,
+     *   rolled_back:int,
+     *   deadlocks:int,
+     *   timeouts:int,
+     *   in_transaction:bool,
+     *   current_level:int,
+     *   savepoints:int,
+     *   elapsed_time:float
+     * }
      */
     public function getStats(): array
     {
-        return array_merge($this->stats, [
+        return [
+          'total'          => $this->stats['total'],
+          'committed'      => $this->stats['committed'],
+          'rolled_back'    => $this->stats['rolled_back'],
+          'deadlocks'      => $this->stats['deadlocks'],
+          'timeouts'       => $this->stats['timeouts'],
           'in_transaction' => $this->inTransaction(),
           'current_level'  => $this->level,
           'savepoints'     => count($this->savepoints),
           'elapsed_time'   => $this->getElapsedTime(),
-        ]);
+        ];
     }
 
     /**
@@ -320,7 +335,7 @@ final class Transaction
     }
 
     /**
-     * Reset per-transaction statistics.
+     * Reset per-connection transaction statistics.
      */
     public function resetStats(): void
     {
@@ -346,7 +361,7 @@ final class Transaction
     }
 
     /**
-     * Rollback the transaction (optionally to a specific nesting level).
+     * Roll back the transaction (optionally to a specific nesting level).
      */
     public function rollback(?int $toLevel = null): void
     {
@@ -362,11 +377,12 @@ final class Transaction
             if ($this->level === 0) {
                 // Rollback actual transaction.
                 $this->connection->rollBack();
-                $elapsed         = $this->startTime !== null ? microtime(true) - $this->startTime : 0.0;
+
+                $elapsed         = $this->startTime !== null ? (microtime(true) - $this->startTime) : 0.0;
                 $this->startTime = null;
                 $this->stats['rolled_back']++;
 
-                // Dispatch typed event.
+                // Dispatch event.
                 Events::dispatch(
                   TransactionRolledBack::class,
                   [new TransactionRolledBack($this->connection, $elapsed)]
@@ -387,7 +403,7 @@ final class Transaction
     }
 
     /**
-     * Rollback to a specific named savepoint (keeps level as-is).
+     * Roll back to a specific named savepoint (keeps nesting level as-is).
      */
     public function rollbackToSavepoint(string $name): void
     {
@@ -426,7 +442,7 @@ final class Transaction
     }
 
     /**
-     * Set maximum transaction time.
+     * Set maximum transaction time in seconds.
      */
     public function setMaxTime(int $seconds): void
     {
@@ -465,11 +481,11 @@ final class Transaction
     }
 
     /**
-     * Create a new auto-generated savepoint name (not executed).
+     * Create a new auto-generated savepoint name (does not issue SQL).
      */
     private function createSavepoint(): string
     {
-        $name             = $this->generateSavepointName();
+        $name               = $this->generateSavepointName();
         $this->savepoints[] = $name;
 
         return $name;
@@ -490,6 +506,7 @@ final class Transaction
      */
     private function generateSavepointName(): string
     {
+        // Level+1 so names are slightly indicative of nesting depth.
         return 'sp_' . ($this->level + 1) . '_' . uniqid('', false);
     }
 }

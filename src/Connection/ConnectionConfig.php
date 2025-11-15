@@ -11,14 +11,13 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
  *
  * Manages database connection configuration.
  * Optimized as a readonly immutable class for PHP 8.4.
- *
- * @package Infocyph\DBLayer\Connection
- * @author Hasan
  */
 readonly class ConnectionConfig
 {
     /**
-     * Default configuration values
+     * Default configuration values.
+     *
+     * @var array<string, mixed>
      */
     private const DEFAULTS = [
       'driver'    => 'mysql',
@@ -37,7 +36,9 @@ readonly class ConnectionConfig
     ];
 
     /**
-     * Driver-specific default ports
+     * Driver-specific default ports.
+     *
+     * @var array<string, int|null>
      */
     private const DRIVER_PORTS = [
       'mysql'  => 3306,
@@ -46,12 +47,16 @@ readonly class ConnectionConfig
     ];
 
     /**
-     * Configuration array
+     * Configuration array.
+     *
+     * @var array<string, mixed>
      */
     private array $config;
 
     /**
-     * Create a new configuration instance
+     * Create a new configuration instance.
+     *
+     * @param array<string, mixed> $config
      */
     public function __construct(array $config)
     {
@@ -60,7 +65,9 @@ readonly class ConnectionConfig
     }
 
     /**
-     * Create configuration from array
+     * Create configuration from array.
+     *
+     * @param array<string, mixed> $config
      */
     public static function fromArray(array $config): self
     {
@@ -68,7 +75,9 @@ readonly class ConnectionConfig
     }
 
     /**
-     * Create MySQL configuration
+     * Create MySQL configuration.
+     *
+     * @param array<string, mixed> $options
      */
     public static function mysql(
       string $host,
@@ -89,7 +98,9 @@ readonly class ConnectionConfig
     }
 
     /**
-     * Create PostgreSQL configuration
+     * Create PostgreSQL configuration.
+     *
+     * @param array<string, mixed> $options
      */
     public static function pgsql(
       string $host,
@@ -110,7 +121,9 @@ readonly class ConnectionConfig
     }
 
     /**
-     * Create SQLite configuration
+     * Create SQLite configuration.
+     *
+     * @param array<string, mixed> $options
      */
     public static function sqlite(string $database, array $options = []): self
     {
@@ -121,8 +134,8 @@ readonly class ConnectionConfig
     }
 
     /**
-     * Copy configuration
-     * Renamed from 'clone' to avoid syntax error with reserved keyword
+     * Copy configuration.
+     * Renamed from 'clone' to avoid syntax error with reserved keyword.
      */
     public function copy(): self
     {
@@ -130,7 +143,7 @@ readonly class ConnectionConfig
     }
 
     /**
-     * Get a specific configuration value
+     * Get a specific configuration value.
      */
     public function get(string $key, mixed $default = null): mixed
     {
@@ -162,6 +175,9 @@ readonly class ConnectionConfig
         return $this->config['host'] ?? '';
     }
 
+    /**
+     * @return array<int|string, mixed>
+     */
     public function getOptions(): array
     {
         return $this->config['options'];
@@ -182,6 +198,9 @@ readonly class ConnectionConfig
         return $this->config['prefix'];
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function getReadConfig(): array
     {
         return $this->config['read'];
@@ -199,27 +218,34 @@ readonly class ConnectionConfig
 
     public function hasReadConfig(): bool
     {
-        return !empty($this->config['read']);
+        return ! empty($this->config['read']);
     }
 
     /**
-     * Get a new instance with a modified value
+     * Get a new instance with a modified value.
      */
     public function with(string $key, mixed $value): self
     {
-        $config = $this->config;
-        $config[$key] = $value;
+        $config        = $this->config;
+        $config[$key]  = $value;
 
         return new self($config);
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         return $this->config;
     }
 
     /**
-     * Apply MySQL-specific defaults
+     * Apply MySQL-specific defaults.
+     *
+     * @param array<string, mixed> $config
+     *
+     * @return array<string, mixed>
      */
     private function applyMySqlDefaults(array $config): array
     {
@@ -231,7 +257,11 @@ readonly class ConnectionConfig
     }
 
     /**
-     * Apply PostgreSQL-specific defaults
+     * Apply PostgreSQL-specific defaults.
+     *
+     * @param array<string, mixed> $config
+     *
+     * @return array<string, mixed>
      */
     private function applyPostgreSqlDefaults(array $config): array
     {
@@ -242,7 +272,11 @@ readonly class ConnectionConfig
     }
 
     /**
-     * Apply SQLite-specific defaults
+     * Apply SQLite-specific defaults.
+     *
+     * @param array<string, mixed> $config
+     *
+     * @return array<string, mixed>
      */
     private function applySqliteDefaults(array $config): array
     {
@@ -253,21 +287,25 @@ readonly class ConnectionConfig
     }
 
     /**
-     * Merge with default configuration
+     * Merge with default configuration.
+     *
+     * @param array<string, mixed> $config
+     *
+     * @return array<string, mixed>
      */
     private function mergeDefaults(array $config): array
     {
         $driver = $config['driver'];
 
-        // Set default port based on driver
-        if (!isset($config['port']) && array_key_exists($driver, self::DRIVER_PORTS)) {
+        // Set default port based on driver.
+        if (! isset($config['port']) && array_key_exists($driver, self::DRIVER_PORTS)) {
             $config['port'] = self::DRIVER_PORTS[$driver];
         }
 
-        // Merge with defaults
+        // Merge with defaults.
         $merged = array_merge(self::DEFAULTS, $config);
 
-        // Driver-specific defaults
+        // Driver-specific defaults.
         return match ($driver) {
             'mysql'  => $this->applyMySqlDefaults($merged),
             'pgsql'  => $this->applyPostgreSqlDefaults($merged),
@@ -277,32 +315,33 @@ readonly class ConnectionConfig
     }
 
     /**
-     * Validate configuration
+     * Validate configuration.
+     *
+     * @param array<string, mixed> $config
      */
     private function validateConfig(array $config): void
     {
-        if (!isset($config['driver'])) {
+        if (! isset($config['driver'])) {
             throw ConnectionException::missingConfigKey('driver');
         }
 
         $driver = $config['driver'];
-        if (!in_array($driver, ['mysql', 'pgsql', 'sqlite'], true)) {
+        if (! in_array($driver, ['mysql', 'pgsql', 'sqlite'], true)) {
             throw ConnectionException::unsupportedDriver($driver);
         }
 
-        // SQLite only requires database path
+        // SQLite only requires database path.
         if ($driver === 'sqlite') {
-            if (!isset($config['database'])) {
+            if (! isset($config['database'])) {
                 throw ConnectionException::missingConfigKey('database');
             }
 
             return;
         }
 
-        // MySQL and PostgreSQL require more configuration
-        $required = ['host', 'database', 'username'];
-        foreach ($required as $key) {
-            if (!isset($config[$key])) {
+        // MySQL and PostgreSQL require more configuration.
+        foreach (['host', 'database', 'username'] as $key) {
+            if (! isset($config[$key])) {
                 throw ConnectionException::missingConfigKey($key);
             }
         }

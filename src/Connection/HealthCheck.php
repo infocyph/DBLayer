@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection;
 
+use Throwable;
+
 /**
  * Connection Health Monitor
  *
@@ -12,61 +14,84 @@ namespace Infocyph\DBLayer\Connection;
  * - Latency monitoring
  * - Query performance tracking
  * - Error rate monitoring
- * - Automatic recovery attempts
- *
- * @package Infocyph\DBLayer\Connection
- * @author Hasan
  */
-class HealthCheck
+final class HealthCheck
 {
     /**
-     * Default configuration
+     * Default configuration.
+     *
+     * @var array{check_interval:int,max_latency_ms:int,max_error_rate:float,sample_size:int}
      */
     private const DEFAULTS = [
-        'check_interval' => 30,
-        'max_latency_ms' => 1000,
-        'max_error_rate' => 0.1,
-        'sample_size' => 100,
+      'check_interval' => 30,
+      'max_latency_ms' => 1000,
+      'max_error_rate' => 0.1,
+      'sample_size'    => 100,
     ];
 
     /**
-     * Health check configuration
+     * Health check configuration.
+     *
+     * @var array{check_interval:int,max_latency_ms:int,max_error_rate:float,sample_size:int}
      */
     private array $config;
+
     /**
-     * Connection to monitor
+     * Connection to monitor.
      */
     private Connection $connection;
 
     /**
-     * Health metrics
+     * Health metrics.
+     *
+     * @var array{
+     *   last_check:float|null,
+     *   is_healthy:bool,
+     *   latency_ms:float,
+     *   error_rate:float,
+     *   total_checks:int,
+     *   failed_checks:int,
+     *   last_error:string|null
+     * }
      */
     private array $metrics = [
-        'last_check' => null,
-        'is_healthy' => true,
-        'latency_ms' => 0,
-        'error_rate' => 0,
-        'total_checks' => 0,
-        'failed_checks' => 0,
-        'last_error' => null,
+      'last_check'    => null,
+      'is_healthy'    => true,
+      'latency_ms'    => 0.0,
+      'error_rate'    => 0.0,
+      'total_checks'  => 0,
+      'failed_checks' => 0,
+      'last_error'    => null,
     ];
 
     /**
-     * Query performance samples
+     * Query performance samples.
+     *
+     * @var array<int, array{duration:float,success:bool,timestamp:float}>
      */
     private array $samples = [];
 
     /**
-     * Create a new health check instance
+     * Create a new health check instance.
+     *
+     * @param array<string, mixed> $config
      */
     public function __construct(Connection $connection, array $config = [])
     {
         $this->connection = $connection;
-        $this->config = array_merge(self::DEFAULTS, $config);
+
+        $merged = array_merge(self::DEFAULTS, $config);
+
+        $this->config = [
+          'check_interval' => (int) $merged['check_interval'],
+          'max_latency_ms' => (int) $merged['max_latency_ms'],
+          'max_error_rate' => (float) $merged['max_error_rate'],
+          'sample_size'    => (int) $merged['sample_size'],
+        ];
     }
 
     /**
-     * Perform a health check
+     * Perform a health check.
      */
     public function check(): bool
     {
@@ -74,21 +99,22 @@ class HealthCheck
         $this->metrics['last_check'] = microtime(true);
 
         try {
-            // Measure latency
+            // Measure latency.
             $startTime = microtime(true);
             $this->connection->getPdo()->query('SELECT 1');
-            $latency = (microtime(true) - $startTime) * 1000;
+            $latency = (microtime(true) - $startTime) * 1000.0;
 
             $this->metrics['latency_ms'] = round($latency, 2);
 
-            // Check latency threshold
+            // Check latency threshold.
             if ($latency > $this->config['max_latency_ms']) {
                 $this->metrics['is_healthy'] = false;
-                $this->metrics['last_error'] = "High latency: {$latency}ms";
+                $this->metrics['last_error'] = 'High latency: ' . round($latency, 2) . 'ms';
+
                 return false;
             }
 
-            // Check error rate
+            // Check error rate.
             $stats = $this->connection->getStats();
             if ($stats['queries'] > 0) {
                 $errorRate = $stats['errors'] / $stats['queries'];
@@ -96,7 +122,8 @@ class HealthCheck
 
                 if ($errorRate > $this->config['max_error_rate']) {
                     $this->metrics['is_healthy'] = false;
-                    $this->metrics['last_error'] = "High error rate: " . ($errorRate * 100) . "%";
+                    $this->metrics['last_error'] = 'High error rate: ' . round($errorRate * 100, 2) . '%';
+
                     return false;
                 }
             }
@@ -105,7 +132,7 @@ class HealthCheck
             $this->metrics['last_error'] = null;
 
             return true;
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $this->metrics['failed_checks']++;
             $this->metrics['is_healthy'] = false;
             $this->metrics['last_error'] = $e->getMessage();
@@ -115,7 +142,17 @@ class HealthCheck
     }
 
     /**
-     * Get health metrics
+     * Get health metrics.
+     *
+     * @return array{
+     *   last_check:float|null,
+     *   is_healthy:bool,
+     *   latency_ms:float,
+     *   error_rate:float,
+     *   total_checks:int,
+     *   failed_checks:int,
+     *   last_error:string|null
+     * }
      */
     public function getMetrics(): array
     {
@@ -123,58 +160,85 @@ class HealthCheck
     }
 
     /**
-     * Get performance statistics from samples
+     * Get performance statistics from samples.
+     *
+     * @return array{
+     *   avg_duration:float,
+     *   min_duration:float,
+     *   max_duration:float,
+     *   p50_duration:float,
+     *   p95_duration:float,
+     *   p99_duration:float,
+     *   success_rate:float
+     * }
      */
     public function getPerformanceStats(): array
     {
-        if (empty($this->samples)) {
+        if ($this->samples === []) {
             return [
-                'avg_duration' => 0,
-                'min_duration' => 0,
-                'max_duration' => 0,
-                'p50_duration' => 0,
-                'p95_duration' => 0,
-                'p99_duration' => 0,
-                'success_rate' => 0,
+              'avg_duration' => 0.0,
+              'min_duration' => 0.0,
+              'max_duration' => 0.0,
+              'p50_duration' => 0.0,
+              'p95_duration' => 0.0,
+              'p99_duration' => 0.0,
+              'success_rate' => 0.0,
             ];
         }
 
         $durations = array_column($this->samples, 'duration');
-        $successes = array_filter($this->samples, fn ($s) => $s['success']);
-
         sort($durations);
 
+        $count     = count($this->samples);
+        $successes = 0;
+
+        foreach ($this->samples as $sample) {
+            if ($sample['success']) {
+                $successes++;
+            }
+        }
+
+        $avg = array_sum($durations) / count($durations);
+
         return [
-            'avg_duration' => round(array_sum($durations) / count($durations), 4),
-            'min_duration' => round(min($durations), 4),
-            'max_duration' => round(max($durations), 4),
-            'p50_duration' => round($this->percentile($durations, 50), 4),
-            'p95_duration' => round($this->percentile($durations, 95), 4),
-            'p99_duration' => round($this->percentile($durations, 99), 4),
-            'success_rate' => round(count($successes) / count($this->samples), 4),
+          'avg_duration' => round($avg, 4),
+          'min_duration' => round((float) min($durations), 4),
+          'max_duration' => round((float) max($durations), 4),
+          'p50_duration' => round($this->percentile($durations, 50.0), 4),
+          'p95_duration' => round($this->percentile($durations, 95.0), 4),
+          'p99_duration' => round($this->percentile($durations, 99.0), 4),
+          'success_rate' => round($successes / $count, 4),
         ];
     }
 
     /**
-     * Get detailed health report
+     * Get detailed health report.
+     *
+     * @return array{
+     *   status:string,
+     *   metrics:array<string,mixed>,
+     *   performance:array<string,float>,
+     *   connection_stats:array<string,int>,
+     *   config:array<string,mixed>
+     * }
      */
     public function getReport(): array
     {
         return [
-            'status' => $this->getStatus(),
-            'metrics' => $this->getMetrics(),
-            'performance' => $this->getPerformanceStats(),
-            'connection_stats' => $this->connection->getStats(),
-            'config' => $this->config,
+          'status'           => $this->getStatus(),
+          'metrics'          => $this->getMetrics(),
+          'performance'      => $this->getPerformanceStats(),
+          'connection_stats' => $this->connection->getStats(),
+          'config'           => $this->config,
         ];
     }
 
     /**
-     * Get health status
+     * Get health status.
      */
     public function getStatus(): string
     {
-        if (!$this->metrics['is_healthy']) {
+        if (! $this->metrics['is_healthy']) {
             return 'unhealthy';
         }
 
@@ -186,11 +250,11 @@ class HealthCheck
     }
 
     /**
-     * Check if connection is healthy
+     * Check if connection is healthy.
      */
     public function isHealthy(): bool
     {
-        // Perform check if interval elapsed
+        // Perform check if interval elapsed.
         if ($this->shouldPerformCheck()) {
             $this->check();
         }
@@ -199,62 +263,70 @@ class HealthCheck
     }
 
     /**
-     * Record query performance sample
+     * Record query performance sample.
      */
     public function recordSample(float $duration, bool $success): void
     {
         $this->samples[] = [
-            'duration' => $duration,
-            'success' => $success,
-            'timestamp' => microtime(true),
+          'duration'  => $duration,
+          'success'   => $success,
+          'timestamp' => microtime(true),
         ];
 
-        // Keep only recent samples
+        // Keep only recent samples.
         if (count($this->samples) > $this->config['sample_size']) {
             array_shift($this->samples);
         }
     }
 
     /**
-     * Reset health metrics
+     * Reset health metrics.
      */
     public function reset(): void
     {
         $this->metrics = [
-            'last_check' => null,
-            'is_healthy' => true,
-            'latency_ms' => 0,
-            'error_rate' => 0,
-            'total_checks' => 0,
-            'failed_checks' => 0,
-            'last_error' => null,
+          'last_check'    => null,
+          'is_healthy'    => true,
+          'latency_ms'    => 0.0,
+          'error_rate'    => 0.0,
+          'total_checks'  => 0,
+          'failed_checks' => 0,
+          'last_error'    => null,
         ];
 
         $this->samples = [];
     }
 
     /**
-     * Calculate percentile value
+     * Calculate percentile value.
+     *
+     * @param list<float> $sorted
      */
     private function percentile(array $sorted, float $percentile): float
     {
-        $index = ($percentile / 100) * (count($sorted) - 1);
-        $lower = floor($index);
-        $upper = ceil($index);
+        $count = count($sorted);
 
-        if ($lower === $upper) {
-            return $sorted[(int) $index];
+        if ($count === 0) {
+            return 0.0;
         }
 
-        $lowerValue = $sorted[(int) $lower];
-        $upperValue = $sorted[(int) $upper];
-        $fraction = $index - $lower;
+        $index  = ($percentile / 100.0) * ($count - 1);
+        $lower  = (int) floor($index);
+        $upper  = (int) ceil($index);
+
+        if ($lower === $upper) {
+            return (float) $sorted[$lower];
+        }
+
+        $lowerValue = (float) $sorted[$lower];
+        $upperValue = (float) $sorted[$upper];
+        $fraction   = $index - $lower;
 
         return $lowerValue + ($upperValue - $lowerValue) * $fraction;
     }
 
     /**
-     * Check if health check should be performed
+     * Check if health check should be performed.
      */
     private function shouldPerformCheck(): bool
     {
@@ -263,6 +335,7 @@ class HealthCheck
         }
 
         $elapsed = microtime(true) - $this->metrics['last_check'];
+
         return $elapsed >= $this->config['check_interval'];
     }
 }

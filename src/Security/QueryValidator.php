@@ -11,9 +11,9 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
  *
  * Heuristic SQL injection detection and binding sanity checks.
  * Does NOT enforce length or "dangerous operation" rules – those
- * are handled at Security façade level depending on SecurityMode.
+ * are handled at Security facade level depending on SecurityMode.
  */
-class QueryValidator
+final class QueryValidator
 {
     /**
      * SQL injection patterns (focused on classic payloads):
@@ -21,6 +21,9 @@ class QueryValidator
      *  - OR/AND tautologies
      *  - comment abuse
      *  - "col = col --" patterns
+     *
+     * NOTE: This is intentionally conservative; patterns may be tuned
+     * via Security facade mode (NORMAL/STRICT/OFF).
      */
     private const INJECTION_PATTERNS = [
         // UNION-based injections

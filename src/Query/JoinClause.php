@@ -10,49 +10,47 @@ namespace Infocyph\DBLayer\Query;
  * Builds complex JOIN clauses with multiple conditions:
  * - Multiple ON conditions
  * - OR conditions
- * - Nested conditions (via where* variants)
- * - WHERE conditions within JOIN
- *
- * @package Infocyph\DBLayer\Query
- * @author Hasan
+ * - WHERE / WHERE IN / NULL checks inside JOIN
  */
 class JoinClause
 {
     /**
-     * The join conditions
+     * The join conditions.
      *
-     * @var array<int,array<string,mixed>>
+     * @var list<array<string,mixed>>
      */
     private array $conditions = [];
 
     /**
-     * Bound values for where/whereIn conditions
+     * Bound values for where/whereIn conditions.
      *
-     * @var array<int,mixed>
+     * @var list<mixed>
      */
     private array $bindings = [];
 
     /**
-     * The table being joined
+     * The table being joined.
      */
     private string $table;
 
     /**
-     * The type of join
+     * The type of join.
      */
     private string $type;
 
     /**
-     * Create a new join clause instance
+     * Create a new join clause instance.
      */
     public function __construct(string $table, string $type = 'inner')
     {
         $this->table = $table;
-        $this->type = $type;
+        $this->type  = $type;
     }
 
     /**
-     * Get all join conditions
+     * Get all join conditions.
+     *
+     * @return list<array<string,mixed>>
      */
     public function getConditions(): array
     {
@@ -60,7 +58,9 @@ class JoinClause
     }
 
     /**
-     * Get bindings for this join
+     * Get bindings for this join.
+     *
+     * @return list<mixed>
      */
     public function getBindings(): array
     {
@@ -68,7 +68,7 @@ class JoinClause
     }
 
     /**
-     * Get the table being joined
+     * Get the table being joined.
      */
     public function getTable(): string
     {
@@ -76,7 +76,7 @@ class JoinClause
     }
 
     /**
-     * Get the type of join
+     * Get the type of join.
      */
     public function getType(): string
     {
@@ -84,7 +84,7 @@ class JoinClause
     }
 
     /**
-     * Check if join has conditions
+     * Check if join has conditions.
      */
     public function hasConditions(): bool
     {
@@ -92,23 +92,23 @@ class JoinClause
     }
 
     /**
-     * Add an ON clause
+     * Add an ON clause.
      */
     public function on(string $first, string $operator, string $second, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-          'type' => 'basic',
-          'first' => $first,
+          'type'     => 'basic',
+          'first'    => $first,
           'operator' => $operator,
-          'second' => $second,
-          'boolean' => $boolean,
+          'second'   => $second,
+          'boolean'  => $boolean,
         ];
 
         return $this;
     }
 
     /**
-     * Add an OR ON clause
+     * Add an OR ON clause.
      */
     public function orOn(string $first, string $operator, string $second): self
     {
@@ -116,7 +116,7 @@ class JoinClause
     }
 
     /**
-     * Add an OR WHERE clause to the join
+     * Add an OR WHERE clause to the join.
      */
     public function orWhere(string $column, string $operator, mixed $value): self
     {
@@ -124,16 +124,16 @@ class JoinClause
     }
 
     /**
-     * Add a WHERE clause to the join
+     * Add a WHERE clause to the join.
      */
     public function where(string $column, string $operator, mixed $value, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-          'type' => 'where',
-          'column' => $column,
+          'type'     => 'where',
+          'column'   => $column,
           'operator' => $operator,
-          'value' => $value,
-          'boolean' => $boolean,
+          'value'    => $value,
+          'boolean'  => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -142,14 +142,16 @@ class JoinClause
     }
 
     /**
-     * Add a WHERE IN clause to the join
+     * Add a WHERE IN clause to the join.
+     *
+     * @param list<mixed> $values
      */
     public function whereIn(string $column, array $values, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-          'type' => 'whereIn',
-          'column' => $column,
-          'values' => $values,
+          'type'    => 'whereIn',
+          'column'  => $column,
+          'values'  => $values,
           'boolean' => $boolean,
         ];
 
@@ -161,13 +163,13 @@ class JoinClause
     }
 
     /**
-     * Add a WHERE NOT NULL clause to the join
+     * Add a WHERE NOT NULL clause to the join.
      */
     public function whereNotNull(string $column, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-          'type' => 'whereNotNull',
-          'column' => $column,
+          'type'    => 'whereNotNull',
+          'column'  => $column,
           'boolean' => $boolean,
         ];
 
@@ -175,13 +177,13 @@ class JoinClause
     }
 
     /**
-     * Add a WHERE NULL clause to the join
+     * Add a WHERE NULL clause to the join.
      */
     public function whereNull(string $column, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-          'type' => 'whereNull',
-          'column' => $column,
+          'type'    => 'whereNull',
+          'column'  => $column,
           'boolean' => $boolean,
         ];
 

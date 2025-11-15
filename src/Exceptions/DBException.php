@@ -9,6 +9,8 @@ use Throwable;
 
 /**
  * Base exception for all DBLayer-related errors.
+ *
+ * All domain-specific exceptions MUST extend this class.
  */
 class DBException extends RuntimeException
 {
@@ -21,10 +23,15 @@ class DBException extends RuntimeException
     }
 
     /**
-     * Wrap a lower-level throwable into a DBException subclass.
+     * Wrap a lower-level throwable into a DBLayer exception.
+     *
+     * @param Throwable   $throwable The original error.
+     * @param string|null $prefix    Optional context prefix for the message.
      */
-    public static function fromThrowable(Throwable $throwable, ?string $prefix = null): static
-    {
+    public static function fromThrowable(
+      Throwable $throwable,
+      ?string $prefix = null
+    ): static {
         $message = $throwable->getMessage();
 
         if ($prefix !== null && $prefix !== '') {

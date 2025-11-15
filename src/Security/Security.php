@@ -19,7 +19,7 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
  *
  * All checks are controlled by SecurityMode.
  */
-class Security
+final class Security
 {
     /**
      * Dangerous SQL patterns (regex) for STRICT mode.
@@ -251,6 +251,8 @@ class Security
 
     /**
      * Generate secure token.
+     *
+     * NOTE: Output length is 2 * $length hex characters.
      */
     public static function generateToken(int $length = 32): string
     {
@@ -393,17 +395,19 @@ class Security
 
     /**
      * Log a security event (kept simple and JSON-structured).
+     *
+     * @param array<string, mixed> $context
      */
     public static function logSecurityEvent(string $type, string $message, array $context = []): void
     {
         $payload = [
-          'type'      => 'security',
-          'event'     => $type,
-          'message'   => $message,
-          'context'   => $context,
-          'timestamp' => date('Y-m-d H:i:s'),
-          'ip'        => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
-          'user_agent'=> $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
+          'type'       => 'security',
+          'event'      => $type,
+          'message'    => $message,
+          'context'    => $context,
+          'timestamp'  => date('Y-m-d H:i:s'),
+          'ip'         => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+          'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
         ];
 
         error_log(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));

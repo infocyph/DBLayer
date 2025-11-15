@@ -10,9 +10,6 @@ use Infocyph\DBLayer\Connection\Connection;
  * Query Executed Event
  *
  * Dispatched after a query has been executed.
- *
- * @package Infocyph\DBLayer\Events\DatabaseEvents
- * @author Hasan
  */
 final class QueryExecuted
 {
@@ -52,6 +49,14 @@ final class QueryExecuted
 
     /**
      * Get event data as array.
+     *
+     * @return array{
+     *   sql:string,
+     *   bindings:array<int|string,mixed>,
+     *   time:float,
+     *   connection:string,
+     *   rows_affected:int|null
+     * }
      */
     public function toArray(): array
     {

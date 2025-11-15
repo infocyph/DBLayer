@@ -10,9 +10,6 @@ use Infocyph\DBLayer\Connection\Connection;
  * Transaction Rolled Back Event
  *
  * Dispatched when a transaction is rolled back.
- *
- * @package Infocyph\DBLayer\Events\DatabaseEvents
- * @author Hasan
  */
 final class TransactionRolledBack
 {
@@ -29,6 +26,9 @@ final class TransactionRolledBack
         $this->duration   = $duration;
     }
 
+    /**
+     * @return array{connection:string,duration:float}
+     */
     public function toArray(): array
     {
         return [

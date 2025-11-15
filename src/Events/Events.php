@@ -16,9 +16,6 @@ namespace Infocyph\DBLayer\Events;
  *
  * This is intentionally minimal and static; higher-level code
  * can wrap it in an instance-based dispatcher if needed.
- *
- * @package Infocyph\DBLayer\Events
- * @author Hasan
  */
 final class Events
 {
@@ -37,7 +34,7 @@ final class Events
     /**
      * Event queue for deferred dispatch.
      *
-     * @var array<int, array{event:string,payload:array,time:float}>
+     * @var array<int, array{event:string,payload:array<int,mixed>,time:float}>
      */
     private static array $queue = [];
 
@@ -78,12 +75,16 @@ final class Events
     /**
      * Dispatch an event.
      *
-     * @param string $event   Event name (class name, "db.query.executed", etc.)
-     * @param array  $payload Arguments passed to listeners.
+     * @param string           $event   Event name (class name, "db.query.executed", etc.)
+     * @param array<int,mixed> $payload Arguments passed to listeners.
      */
     public static function dispatch(string $event, array $payload = []): void
     {
-        if (!self::$enabled) {
+        if (! self::$enabled) {
+            return;
+        }
+
+        if (self::$listeners === []) {
             return;
         }
 
@@ -102,7 +103,7 @@ final class Events
                 continue;
             }
 
-            if (!self::matchesPattern($event, $pattern)) {
+            if (! self::matchesPattern($event, $pattern)) {
                 continue;
             }
 
@@ -127,8 +128,8 @@ final class Events
     /**
      * Queue an event for later dispatch.
      *
-     * @param string $event
-     * @param array  $payload
+     * @param string           $event
+     * @param array<int,mixed> $payload
      */
     public static function queue(string $event, array $payload = []): void
     {
@@ -172,10 +173,11 @@ final class Events
     {
         if ($listener === null) {
             unset(self::$listeners[$event]);
+
             return;
         }
 
-        if (!isset(self::$listeners[$event])) {
+        if (! isset(self::$listeners[$event])) {
             return;
         }
 
@@ -197,11 +199,11 @@ final class Events
     }
 
     /**
-     * Check if event has listeners.
+     * Check if event has listeners (exact name only).
      */
     public static function hasListeners(string $event): bool
     {
-        return !empty(self::$listeners[$event]);
+        return ! empty(self::$listeners[$event]);
     }
 
     /**
@@ -234,16 +236,26 @@ final class Events
 
     /**
      * Get event statistics and some derived counts.
+     *
+     * @return array{
+     *   dispatched:int,
+     *   queued:int,
+     *   registered_events:int,
+     *   queued_events:int,
+     *   total_listeners:int
+     * }
      */
     public static function getStats(): array
     {
         $totalListeners = array_sum(array_map('count', self::$listeners));
 
-        return array_merge(self::$stats, [
+        return [
+          'dispatched'        => self::$stats['dispatched'],
+          'queued'            => self::$stats['queued'],
           'registered_events' => count(self::$listeners),
           'queued_events'     => count(self::$queue),
           'total_listeners'   => $totalListeners,
-        ]);
+        ];
     }
 
     /**
@@ -272,7 +284,7 @@ final class Events
         }
 
         // No wildcards
-        if (!str_contains($pattern, '*')) {
+        if (! str_contains($pattern, '*')) {
             return false;
         }
 

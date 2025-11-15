@@ -15,7 +15,7 @@ namespace Infocyph\DBLayer\Support;
  *
  * Kept intentionally small and framework-agnostic.
  */
-class Str
+final class Str
 {
     /**
      * Convert a string to camelCase.
@@ -163,7 +163,11 @@ class Str
         $title = mb_strtolower($title, 'UTF-8');
 
         // Remove unwanted characters (just in case).
-        $title = preg_replace('/[^' . preg_quote($separator, '/') . '\w]+/u', '', $title) ?? '';
+        $title = preg_replace(
+          '/[^' . preg_quote($separator, '/') . '\w]+/u',
+          '',
+          $title
+        ) ?? '';
 
         return $title;
     }

@@ -20,9 +20,6 @@ use Infocyph\DBLayer\Grammar\Grammar;
  * - UNION, UNION ALL
  * - Subqueries
  * - Aggregate functions
- *
- * @package Infocyph\DBLayer\Query
- * @author Hasan
  */
 class QueryBuilder
 {
@@ -36,14 +33,14 @@ class QueryBuilder
     /**
      * Query bindings.
      *
-     * @var array<int,mixed>
+     * @var list<mixed>
      */
     private array $bindings = [];
 
     /**
      * SELECT columns.
      *
-     * @var array<int,string|Expression>
+     * @var list<string|Expression>
      */
     private array $columns = ['*'];
 
@@ -75,21 +72,21 @@ class QueryBuilder
     /**
      * GROUP BY columns.
      *
-     * @var string[]
+     * @var list<string>
      */
     private array $groups = [];
 
     /**
      * HAVING clauses.
      *
-     * @var array<int,array<string,mixed>>
+     * @var list<array<string,mixed>>
      */
     private array $havings = [];
 
     /**
      * JOIN clauses.
      *
-     * @var array<int,array<string,mixed>|JoinClause>
+     * @var list<array<string,mixed>|JoinClause>
      */
     private array $joins = [];
 
@@ -111,7 +108,7 @@ class QueryBuilder
     /**
      * ORDER BY clauses.
      *
-     * @var array<int,array{column:string,direction:string}>
+     * @var list<array{column:string,direction:string}>
      */
     private array $orders = [];
 
@@ -123,14 +120,14 @@ class QueryBuilder
     /**
      * UNION queries.
      *
-     * @var array<int,array{query:QueryBuilder,all:bool}>
+     * @var list<array{query:QueryBuilder,all:bool}>
      */
     private array $unions = [];
 
     /**
      * WHERE clauses.
      *
-     * @var array<int,array<string,mixed>>
+     * @var list<array<string,mixed>>
      */
     private array $wheres = [];
 
@@ -143,16 +140,16 @@ class QueryBuilder
       Executor $executor
     ) {
         $this->connection = $connection;
-        $this->grammar = $grammar;
-        $this->executor = $executor;
+        $this->grammar    = $grammar;
+        $this->executor   = $executor;
     }
 
     /**
-     * Add a select column.
+     * Add a select column (no duplicates).
      */
     public function addSelect(string|Expression $column): self
     {
-        if (!\in_array($column, $this->columns, true)) {
+        if (! in_array($column, $this->columns, true)) {
             $this->columns[] = $column;
         }
 
@@ -169,8 +166,8 @@ class QueryBuilder
         $clone = clone $this;
 
         $clone->aggregate = [
-          'function' => \strtoupper($function),
-          'column' => $column,
+          'function' => strtoupper($function),
+          'column'   => $column,
         ];
 
         $results = $this->executor->select($clone);
@@ -214,7 +211,7 @@ class QueryBuilder
     public function crossJoin(string $table): self
     {
         $this->joins[] = [
-          'type' => 'cross',
+          'type'  => 'cross',
           'table' => $table,
         ];
 
@@ -249,6 +246,8 @@ class QueryBuilder
 
     /**
      * Execute the query and get the first result.
+     *
+     * @return array<string,mixed>|null
      */
     public function first(): ?array
     {
@@ -268,7 +267,7 @@ class QueryBuilder
     /**
      * Execute the query and get all results.
      *
-     * @return array<int,array<string,mixed>>
+     * @return list<array<string,mixed>>
      */
     public function get(): array
     {
@@ -278,7 +277,7 @@ class QueryBuilder
     /**
      * Get query bindings.
      *
-     * @return array<int,mixed>
+     * @return list<mixed>
      */
     public function getBindings(): array
     {
@@ -286,26 +285,49 @@ class QueryBuilder
     }
 
     /**
+     * Expose the connection (escape hatch for low-level usage).
+     */
+    public function getConnection(): Connection
+    {
+        return $this->connection;
+    }
+
+    /**
      * Get all query components (for Grammar).
      *
-     * @return array<string,mixed>
+     * @return array{
+     *   type:?string,
+     *   columns:list<string|Expression>,
+     *   distinct:bool,
+     *   from:?string,
+     *   joins:list<array<string,mixed>|JoinClause>,
+     *   wheres:list<array<string,mixed>>,
+     *   groups:list<string>,
+     *   havings:list<array<string,mixed>>,
+     *   orders:list<array{column:string,direction:string}>,
+     *   limit:?int,
+     *   offset:?int,
+     *   unions:list<array{query:QueryBuilder,all:bool}>,
+     *   lock:?string,
+     *   aggregate:array{function:string,column:string}|null
+     * }
      */
     public function getComponents(): array
     {
         return [
-          'type' => $this->type,
-          'columns' => $this->columns,
-          'distinct' => $this->distinct,
-          'from' => $this->from,
-          'joins' => $this->joins,
-          'wheres' => $this->wheres,
-          'groups' => $this->groups,
-          'havings' => $this->havings,
-          'orders' => $this->orders,
-          'limit' => $this->limit,
-          'offset' => $this->offset,
-          'unions' => $this->unions,
-          'lock' => $this->lock,
+          'type'      => $this->type,
+          'columns'   => $this->columns,
+          'distinct'  => $this->distinct,
+          'from'      => $this->from,
+          'joins'     => $this->joins,
+          'wheres'    => $this->wheres,
+          'groups'    => $this->groups,
+          'havings'   => $this->havings,
+          'orders'    => $this->orders,
+          'limit'     => $this->limit,
+          'offset'    => $this->offset,
+          'unions'    => $this->unions,
+          'lock'      => $this->lock,
           'aggregate' => $this->aggregate,
         ];
     }
@@ -315,7 +337,7 @@ class QueryBuilder
      */
     public function groupBy(string ...$groups): self
     {
-        $this->groups = \array_merge($this->groups, $groups);
+        $this->groups = array_merge($this->groups, $groups);
 
         return $this;
     }
@@ -329,17 +351,17 @@ class QueryBuilder
       mixed $value = null,
       string $boolean = 'and'
     ): self {
-        if (\func_num_args() === 2) {
-            $value = $operator;
+        if (func_num_args() === 2) {
+            $value    = $operator;
             $operator = '=';
         }
 
         $this->havings[] = [
-          'type' => 'basic',
-          'column' => $column,
+          'type'     => 'basic',
+          'column'   => $column,
           'operator' => $operator,
-          'value' => $value,
-          'boolean' => $boolean,
+          'value'    => $value,
+          'boolean'  => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -348,34 +370,78 @@ class QueryBuilder
     }
 
     /**
-     * Insert a new record.
+     * Insert a new record (single or multiple rows).
+     *
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
      */
     public function insert(array $values): bool
     {
-        if ($values === []) {
-            return true;
-        }
-
-        // Handle single row or multiple rows
-        if (!\is_array(\reset($values))) {
-            $values = [$values];
-        }
-
         return $this->executor->insert($this, $values);
     }
 
     /**
+     * Insert ignoring duplicate-key errors when the driver supports it.
+     *
+     * Falls back to insert() on drivers without native support.
+     *
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     */
+    public function insertIgnore(array $values): bool
+    {
+        return $this->executor->insertIgnore($this, $values);
+    }
+
+    /**
      * Insert and get the ID.
+     *
+     * Uses insertReturning() when supported to avoid extra round trips.
+     * Falls back to insert() + lastInsertId().
+     *
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
      */
     public function insertGetId(array $values, ?string $sequence = null): string
     {
+        $column = $sequence ?? 'id';
+
+        $row = $this->insertReturning($values, $column);
+
+        if ($row !== null && array_key_exists($column, $row)) {
+            return (string) $row[$column];
+        }
+
         $this->insert($values);
 
         return $this->connection->lastInsertId($sequence);
     }
 
     /**
-     * Add a JOIN clause.
+     * Insert and return generated key/row when supported.
+     *
+     * On PostgreSQL, uses INSERT ... RETURNING.
+     * On other drivers, falls back to lastInsertId() and synthesizes a row.
+     *
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @return array<string,mixed>|null
+     */
+    public function insertReturning(array $values, ?string $column = null): ?array
+    {
+        return $this->executor->insertReturning($this, $values, $column);
+    }
+
+    /**
+     * Upsert helper: INSERT ... ON DUPLICATE KEY UPDATE / ON CONFLICT.
+     *
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @param list<string>                                       $uniqueBy
+     * @param list<string>|null                                  $update
+     */
+    public function upsert(array $values, array $uniqueBy, ?array $update = null): bool
+    {
+        return $this->executor->upsert($this, $values, $uniqueBy, $update);
+    }
+
+    /**
+     * Add a simple JOIN clause.
      */
     public function join(
       string $table,
@@ -385,11 +451,11 @@ class QueryBuilder
       string $type = 'inner'
     ): self {
         $this->joins[] = [
-          'type' => $type,
-          'table' => $table,
-          'first' => $first,
+          'type'     => $type,
+          'table'    => $table,
+          'first'    => $first,
           'operator' => $operator,
-          'second' => $second,
+          'second'   => $second,
         ];
 
         return $this;
@@ -399,6 +465,8 @@ class QueryBuilder
      * Add a complex JOIN with closure.
      *
      * The callback receives a JoinClause instance.
+     *
+     * @param callable(JoinClause):void $callback
      */
     public function joinComplex(string $table, callable $callback, string $type = 'inner'): self
     {
@@ -407,8 +475,9 @@ class QueryBuilder
 
         $this->joins[] = $join;
 
-        // When JoinClause supports bound values, merge them:
-        // $this->bindings = array_merge($this->bindings, $join->getBindings());
+        if ($join->getBindings() !== []) {
+            $this->bindings = array_merge($this->bindings, $join->getBindings());
+        }
 
         return $this;
     }
@@ -488,14 +557,14 @@ class QueryBuilder
      */
     public function orderBy(string $column, string $direction = 'asc'): self
     {
-        $direction = \strtolower($direction);
+        $direction = strtolower($direction);
 
-        if (!\in_array($direction, ['asc', 'desc'], true)) {
+        if (! in_array($direction, ['asc', 'desc'], true)) {
             throw QueryException::invalidOrderDirection($direction);
         }
 
         $this->orders[] = [
-          'column' => $column,
+          'column'    => $column,
           'direction' => $direction,
         ];
 
@@ -515,8 +584,8 @@ class QueryBuilder
      */
     public function orWhere(string|callable $column, mixed $operator = null, mixed $value = null): self
     {
-        if (\func_num_args() === 2) {
-            $value = $operator;
+        if (func_num_args() === 2) {
+            $value    = $operator;
             $operator = '=';
         }
 
@@ -533,15 +602,17 @@ class QueryBuilder
 
     /**
      * Set the columns to select.
+     *
+     * @param array<int,string|Expression>|string|Expression ...$columns
      */
-    public function select(array|string ...$columns): self
+    public function select(array|string|Expression ...$columns): self
     {
         if ($columns === []) {
             return $this;
         }
 
-        $this->type = 'select';
-        $this->columns = \is_array($columns[0]) ? $columns[0] : $columns;
+        $this->type    = 'select';
+        $this->columns = is_array($columns[0]) ? $columns[0] : $columns;
 
         return $this;
     }
@@ -606,10 +677,12 @@ class QueryBuilder
 
     /**
      * Add a UNION query.
+     *
+     * @param QueryBuilder|callable(QueryBuilder):void $query
      */
     public function union(QueryBuilder|callable $query, bool $all = false): self
     {
-        if (\is_callable($query)) {
+        if (is_callable($query)) {
             $builder = $this->newQuery();
             $query($builder);
             $query = $builder;
@@ -617,16 +690,18 @@ class QueryBuilder
 
         $this->unions[] = [
           'query' => $query,
-          'all' => $all,
+          'all'   => $all,
         ];
 
-        $this->bindings = \array_merge($this->bindings, $query->getBindings());
+        $this->bindings = array_merge($this->bindings, $query->getBindings());
 
         return $this;
     }
 
     /**
      * Add a UNION ALL query.
+     *
+     * @param QueryBuilder|callable(QueryBuilder):void $query
      */
     public function unionAll(QueryBuilder|callable $query): self
     {
@@ -635,9 +710,15 @@ class QueryBuilder
 
     /**
      * Update records.
+     *
+     * @param array<string,mixed> $values
      */
     public function update(array $values): int
     {
+        if ($values === []) {
+            return 0;
+        }
+
         return $this->executor->update($this, $values);
     }
 
@@ -653,6 +734,8 @@ class QueryBuilder
 
     /**
      * Add a WHERE clause.
+     *
+     * @param callable(QueryBuilder):void|non-empty-string $column
      */
     public function where(
       string|callable $column,
@@ -660,23 +743,23 @@ class QueryBuilder
       mixed $value = null,
       string $boolean = 'and'
     ): self {
-        // Handle closure for nested where
-        if (\is_callable($column)) {
+        // Handle closure for nested where.
+        if (is_callable($column)) {
             return $this->whereNested($column, $boolean);
         }
 
-        // Handle two arguments (column, value)
-        if (\func_num_args() === 2) {
-            $value = $operator;
+        // Handle two arguments (column, value).
+        if (func_num_args() === 2) {
+            $value    = $operator;
             $operator = '=';
         }
 
         $this->wheres[] = [
-          'type' => 'basic',
-          'column' => $column,
+          'type'     => 'basic',
+          'column'   => $column,
           'operator' => $operator,
-          'value' => $value,
-          'boolean' => $boolean,
+          'value'    => $value,
+          'boolean'  => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -686,24 +769,28 @@ class QueryBuilder
 
     /**
      * Add a WHERE BETWEEN clause.
+     *
+     * @param array{0:mixed,1:mixed} $values
      */
     public function whereBetween(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type' => 'between',
-          'column' => $column,
-          'values' => $values,
+          'type'    => 'between',
+          'column'  => $column,
+          'values'  => $values,
           'boolean' => $boolean,
-          'not' => $not,
+          'not'     => $not,
         ];
 
-        $this->bindings = \array_merge($this->bindings, $values);
+        $this->bindings = array_merge($this->bindings, $values);
 
         return $this;
     }
 
     /**
      * Add a WHERE EXISTS clause.
+     *
+     * @param callable(QueryBuilder):void $callback
      */
     public function whereExists(callable $callback, string $boolean = 'and', bool $not = false): self
     {
@@ -711,37 +798,41 @@ class QueryBuilder
         $callback($query);
 
         $this->wheres[] = [
-          'type' => 'exists',
-          'query' => $query,
+          'type'    => 'exists',
+          'query'   => $query,
           'boolean' => $boolean,
-          'not' => $not,
+          'not'     => $not,
         ];
 
-        $this->bindings = \array_merge($this->bindings, $query->getBindings());
+        $this->bindings = array_merge($this->bindings, $query->getBindings());
 
         return $this;
     }
 
     /**
      * Add a WHERE IN clause.
+     *
+     * @param list<mixed> $values
      */
     public function whereIn(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type' => 'in',
-          'column' => $column,
-          'values' => $values,
+          'type'    => 'in',
+          'column'  => $column,
+          'values'  => $values,
           'boolean' => $boolean,
-          'not' => $not,
+          'not'     => $not,
         ];
 
-        $this->bindings = \array_merge($this->bindings, $values);
+        $this->bindings = array_merge($this->bindings, $values);
 
         return $this;
     }
 
     /**
      * Add a nested WHERE clause.
+     *
+     * @param callable(QueryBuilder):void $callback
      */
     public function whereNested(callable $callback, string $boolean = 'and'): self
     {
@@ -750,12 +841,12 @@ class QueryBuilder
 
         if ($query->wheres !== []) {
             $this->wheres[] = [
-              'type' => 'nested',
-              'query' => $query,
+              'type'    => 'nested',
+              'query'   => $query,
               'boolean' => $boolean,
             ];
 
-            $this->bindings = \array_merge($this->bindings, $query->getBindings());
+            $this->bindings = array_merge($this->bindings, $query->getBindings());
         }
 
         return $this;
@@ -763,6 +854,8 @@ class QueryBuilder
 
     /**
      * Add a WHERE NOT BETWEEN clause.
+     *
+     * @param array{0:mixed,1:mixed} $values
      */
     public function whereNotBetween(string $column, array $values, string $boolean = 'and'): self
     {
@@ -771,6 +864,8 @@ class QueryBuilder
 
     /**
      * Add a WHERE NOT EXISTS clause.
+     *
+     * @param callable(QueryBuilder):void $callback
      */
     public function whereNotExists(callable $callback, string $boolean = 'and'): self
     {
@@ -779,6 +874,8 @@ class QueryBuilder
 
     /**
      * Add a WHERE NOT IN clause.
+     *
+     * @param list<mixed> $values
      */
     public function whereNotIn(string $column, array $values, string $boolean = 'and'): self
     {
@@ -799,10 +896,10 @@ class QueryBuilder
     public function whereNull(string $column, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type' => 'null',
-          'column' => $column,
+          'type'    => 'null',
+          'column'  => $column,
           'boolean' => $boolean,
-          'not' => $not,
+          'not'     => $not,
         ];
 
         return $this;
@@ -810,16 +907,18 @@ class QueryBuilder
 
     /**
      * Add a raw WHERE clause.
+     *
+     * @param list<mixed> $bindings
      */
     public function whereRaw(string $sql, array $bindings = [], string $boolean = 'and'): self
     {
         $this->wheres[] = [
-          'type' => 'raw',
-          'sql' => $sql,
+          'type'    => 'raw',
+          'sql'     => $sql,
           'boolean' => $boolean,
         ];
 
-        $this->bindings = \array_merge($this->bindings, $bindings);
+        $this->bindings = array_merge($this->bindings, $bindings);
 
         return $this;
     }

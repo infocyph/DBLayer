@@ -15,68 +15,106 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
  * - Connection health checking
  * - Idle connection timeout
  * - Pool statistics
- *
- * @package Infocyph\DBLayer\Connection
- * @author Hasan
  */
-class Pool
+final class Pool
 {
     /**
-     * Default pool configuration
+     * Default pool configuration.
+     *
+     * @var array{
+     *   min_connections:int,
+     *   max_connections:int,
+     *   idle_timeout:int,
+     *   max_lifetime:int,
+     *   health_check_interval:int
+     * }
      */
     private const DEFAULTS = [
-        'min_connections' => 1,
-        'max_connections' => 10,
-        'idle_timeout' => 60,
-        'max_lifetime' => 3600,
-        'health_check_interval' => 30,
+      'min_connections'       => 1,
+      'max_connections'       => 10,
+      'idle_timeout'          => 60,
+      'max_lifetime'          => 3600,
+      'health_check_interval' => 30,
     ];
 
     /**
-     * Connection configurations
+     * Connection configurations.
+     *
+     * @var array<string, ConnectionConfig>
      */
     private array $configs = [];
+
     /**
-     * Pool of active connections
+     * Pool of active connections.
+     *
+     * @var array<string, array<int, array{connection:Connection,created_at:float}>>
      */
     private array $connections = [];
 
     /**
-     * Pool of idle connections
+     * Pool of idle connections.
+     *
+     * @var array<string, array<int, array{connection:Connection,idle_since:float}>>
      */
     private array $idle = [];
 
     /**
-     * Last health check time
+     * Last health check time.
      */
     private ?float $lastHealthCheck = null;
 
     /**
-     * Pool configuration
+     * Pool configuration.
+     *
+     * @var array{
+     *   min_connections:int,
+     *   max_connections:int,
+     *   idle_timeout:int,
+     *   max_lifetime:int,
+     *   health_check_interval:int
+     * }
      */
     private array $poolConfig;
 
     /**
-     * Pool statistics
+     * Pool statistics.
+     *
+     * @var array{
+     *   created:int,
+     *   reused:int,
+     *   closed:int,
+     *   health_checks:int,
+     *   health_failures:int
+     * }
      */
     private array $stats = [
-        'created' => 0,
-        'reused' => 0,
-        'closed' => 0,
-        'health_checks' => 0,
-        'health_failures' => 0,
+      'created'         => 0,
+      'reused'          => 0,
+      'closed'          => 0,
+      'health_checks'   => 0,
+      'health_failures' => 0,
     ];
 
     /**
-     * Create a new connection pool
+     * Create a new connection pool.
+     *
+     * @param array<string, int> $poolConfig
      */
     public function __construct(array $poolConfig = [])
     {
-        $this->poolConfig = array_merge(self::DEFAULTS, $poolConfig);
+        $merged = array_merge(self::DEFAULTS, $poolConfig);
+
+        $this->poolConfig = [
+          'min_connections'       => (int) $merged['min_connections'],
+          'max_connections'       => (int) $merged['max_connections'],
+          'idle_timeout'          => (int) $merged['idle_timeout'],
+          'max_lifetime'          => (int) $merged['max_lifetime'],
+          'health_check_interval' => (int) $merged['health_check_interval'],
+        ];
     }
 
     /**
-     * Add a connection configuration to the pool
+     * Add a connection configuration to the pool.
      */
     public function addConfig(string $name, ConnectionConfig $config): void
     {
@@ -84,28 +122,30 @@ class Pool
     }
 
     /**
-     * Close all connections in the pool
+     * Close all connections in the pool.
      */
     public function closeAll(): void
     {
-        foreach ($this->connections as $name => $connections) {
+        foreach ($this->connections as $connections) {
             foreach ($connections as $data) {
                 $data['connection']->disconnect();
             }
         }
 
-        foreach ($this->idle as $name => $connections) {
+        foreach ($this->idle as $connections) {
             foreach ($connections as $data) {
                 $data['connection']->disconnect();
             }
         }
 
         $this->connections = [];
-        $this->idle = [];
+        $this->idle        = [];
     }
 
     /**
-     * Get pool configuration
+     * Get pool configuration.
+     *
+     * @return array<string, int>
      */
     public function getConfig(): array
     {
@@ -113,31 +153,35 @@ class Pool
     }
 
     /**
-     * Get a connection from the pool
+     * Get a connection from the pool.
      */
     public function getConnection(string $name = 'default'): Connection
     {
-        if (!isset($this->configs[$name])) {
+        if (! isset($this->configs[$name])) {
             throw ConnectionException::configNotFound($name);
         }
 
-        // Try to reuse an idle connection
-        if ($connection = $this->getIdleConnection($name)) {
+        // Try to reuse an idle connection.
+        $connection = $this->getIdleConnection($name);
+        if ($connection !== null) {
             $this->stats['reused']++;
+
             return $connection;
         }
 
-        // Check if we can create a new connection
-        if ($this->canCreateConnection($name)) {
+        // Check if we can create a new connection.
+        if ($this->canCreateConnection()) {
             return $this->createConnection($name);
         }
 
-        // Wait for an available connection
+        // Pool is exhausted.
         throw ConnectionException::poolExhausted($this->poolConfig['max_connections']);
     }
 
     /**
-     * Get pool statistics
+     * Get pool statistics.
+     *
+     * @return array<string, float|int>
      */
     public function getStats(): array
     {
@@ -152,29 +196,34 @@ class Pool
             $idleCount += count($connections);
         }
 
-        $max = (int) $this->poolConfig['max_connections'];
-        $utilization = $max > 0 ? ($activeCount / $max) * 100 : 0.0;
+        $max         = $this->poolConfig['max_connections'];
+        $utilization = $max > 0 ? ($activeCount / $max) * 100.0 : 0.0;
 
-        return array_merge($this->stats, [
+        return [
+          'created'            => $this->stats['created'],
+          'reused'             => $this->stats['reused'],
+          'closed'             => $this->stats['closed'],
+          'health_checks'      => $this->stats['health_checks'],
+          'health_failures'    => $this->stats['health_failures'],
           'active_connections' => $activeCount,
           'idle_connections'   => $idleCount,
           'total_connections'  => $activeCount + $idleCount,
           'max_connections'    => $max,
           'pool_utilization'   => $utilization,
-        ]);
+        ];
     }
 
-
     /**
-     * Perform health check on all connections
+     * Perform health check on all connections.
      */
     public function healthCheck(): void
     {
         $now = microtime(true);
 
-        // Check if we need to perform health check
+        // Check if we need to perform health check.
         if ($this->lastHealthCheck !== null) {
             $elapsed = $now - $this->lastHealthCheck;
+
             if ($elapsed < $this->poolConfig['health_check_interval']) {
                 return;
             }
@@ -183,94 +232,97 @@ class Pool
         $this->lastHealthCheck = $now;
         $this->stats['health_checks']++;
 
-        // Check all active connections
+        // Check all active connections.
         foreach ($this->connections as $name => $connections) {
-            foreach ($connections as $connectionId => $data) {
-                if (!$data['connection']->isHealthy()) {
+            foreach ($connections as $data) {
+                if (! $data['connection']->isHealthy()) {
                     $this->removeConnection($name, $data['connection']);
                     $this->stats['health_failures']++;
                 }
             }
         }
 
-        // Check and remove stale idle connections
+        // Remove stale idle connections.
         $this->removeStaleIdleConnections();
     }
 
     /**
-     * Release a connection back to the pool
+     * Release a connection back to the pool.
      */
     public function releaseConnection(string $name, Connection $connection): void
     {
-        // Check if connection is healthy
-        if (!$connection->isHealthy()) {
+        // Check if connection is healthy.
+        if (! $connection->isHealthy()) {
             $this->removeConnection($name, $connection);
+
             return;
         }
 
-        // Check connection lifetime
+        // Check connection lifetime.
         $connectionId = spl_object_id($connection);
+
         if (isset($this->connections[$name][$connectionId])) {
             $createdAt = $this->connections[$name][$connectionId]['created_at'];
-            $lifetime = microtime(true) - $createdAt;
+            $lifetime  = microtime(true) - $createdAt;
 
             if ($lifetime > $this->poolConfig['max_lifetime']) {
                 $this->removeConnection($name, $connection);
+
                 return;
             }
         }
 
-        // Add to idle pool
-        if (!isset($this->idle[$name])) {
+        // Add to idle pool.
+        if (! isset($this->idle[$name])) {
             $this->idle[$name] = [];
         }
 
-        $this->idle[$name][spl_object_id($connection)] = [
-            'connection' => $connection,
-            'idle_since' => microtime(true),
+        $this->idle[$name][$connectionId] = [
+          'connection' => $connection,
+          'idle_since' => microtime(true),
         ];
     }
 
     /**
-     * Remove a connection from the pool
+     * Remove a connection from the pool.
      */
     public function removeConnection(string $name, Connection $connection): void
     {
         $connectionId = spl_object_id($connection);
 
-        // Remove from active connections
+        // Remove from active connections.
         if (isset($this->connections[$name][$connectionId])) {
             unset($this->connections[$name][$connectionId]);
         }
 
-        // Remove from idle connections
+        // Remove from idle connections.
         if (isset($this->idle[$name][$connectionId])) {
             unset($this->idle[$name][$connectionId]);
         }
 
-        // Disconnect
+        // Disconnect underlying connection.
         $connection->disconnect();
         $this->stats['closed']++;
     }
 
     /**
-     * Reset pool statistics
+     * Reset pool statistics.
      */
     public function resetStats(): void
     {
         $this->stats = [
-            'created' => 0,
-            'reused' => 0,
-            'closed' => 0,
-            'health_checks' => 0,
-            'health_failures' => 0,
+          'created'         => 0,
+          'reused'          => 0,
+          'closed'          => 0,
+          'health_checks'   => 0,
+          'health_failures' => 0,
         ];
     }
 
     /**
-     * Check if we can create a new connection
+     * Check if we can create a new connection.
      */
-    private function canCreateConnection(string $name): bool
+    private function canCreateConnection(): bool
     {
         $totalConnections = 0;
 
@@ -286,21 +338,21 @@ class Pool
     }
 
     /**
-     * Create a new connection
+     * Create a new connection.
      */
     private function createConnection(string $name): Connection
     {
-        $config = $this->configs[$name];
-        $connection = new Connection($config);
+        $config      = $this->configs[$name];
+        $connection  = new Connection($config);
+        $connectionId = spl_object_id($connection);
 
-        // Register in active connections
-        if (!isset($this->connections[$name])) {
+        if (! isset($this->connections[$name])) {
             $this->connections[$name] = [];
         }
 
-        $this->connections[$name][spl_object_id($connection)] = [
-            'connection' => $connection,
-            'created_at' => microtime(true),
+        $this->connections[$name][$connectionId] = [
+          'connection' => $connection,
+          'created_at' => microtime(true),
         ];
 
         $this->stats['created']++;
@@ -309,39 +361,47 @@ class Pool
     }
 
     /**
-     * Get an idle connection from the pool
+     * Get an idle connection from the pool.
      */
     private function getIdleConnection(string $name): ?Connection
     {
-        if (!isset($this->idle[$name]) || empty($this->idle[$name])) {
+        if (! isset($this->idle[$name]) || $this->idle[$name] === []) {
             return null;
         }
 
-        // Get the first idle connection
+        // Get the first idle connection.
         $connectionId = array_key_first($this->idle[$name]);
+        if ($connectionId === null) {
+            return null;
+        }
+
         $data = $this->idle[$name][$connectionId];
 
-        // Check idle timeout
+        // Check idle timeout.
         $idleTime = microtime(true) - $data['idle_since'];
         if ($idleTime > $this->poolConfig['idle_timeout']) {
             $this->removeConnection($name, $data['connection']);
-            return $this->getIdleConnection($name); // Try next one
+
+            // Try next one.
+            return $this->getIdleConnection($name);
         }
 
-        // Remove from idle pool
+        // Remove from idle pool.
         unset($this->idle[$name][$connectionId]);
 
-        // Check health before returning
-        if (!$data['connection']->isHealthy()) {
+        // Check health before returning.
+        if (! $data['connection']->isHealthy()) {
             $this->removeConnection($name, $data['connection']);
-            return $this->getIdleConnection($name); // Try next one
+
+            // Try next one.
+            return $this->getIdleConnection($name);
         }
 
         return $data['connection'];
     }
 
     /**
-     * Remove stale idle connections
+     * Remove stale idle connections.
      */
     private function removeStaleIdleConnections(): void
     {

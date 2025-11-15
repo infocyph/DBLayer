@@ -14,30 +14,25 @@ use Throwable;
  *
  * Intentionally minimal and opt-in; disabled by default.
  */
-class Logger
+final class Logger
 {
-    /**
-     * @var string
-     */
-    private string $logFile;
+    private readonly string $logFile;
 
-    /**
-     * @var bool
-     */
     private bool $enabled = false;
 
     /**
-     * Create a new logger instance
+     * Create a new logger instance.
      *
      * @param string|null $logFile Log file path (default: system temp directory)
      */
     public function __construct(?string $logFile = null)
     {
-        $this->logFile = $logFile ?? (rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'dblayer.log');
+        $this->logFile = $logFile
+          ?? (rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'dblayer.log');
     }
 
     /**
-     * Clear the log file
+     * Clear the log file.
      */
     public function clear(): void
     {
@@ -47,7 +42,7 @@ class Logger
     }
 
     /**
-     * Disable logging
+     * Disable logging.
      */
     public function disable(): void
     {
@@ -55,7 +50,7 @@ class Logger
     }
 
     /**
-     * Enable logging
+     * Enable logging.
      */
     public function enable(): void
     {
@@ -63,7 +58,7 @@ class Logger
     }
 
     /**
-     * Log an error message
+     * Log an error message.
      */
     public function error(string $message, ?Throwable $exception = null): void
     {
@@ -87,7 +82,7 @@ class Logger
     }
 
     /**
-     * Get log file path
+     * Get log file path.
      */
     public function getLogFile(): string
     {
@@ -95,7 +90,7 @@ class Logger
     }
 
     /**
-     * Check if logging is enabled
+     * Check if logging is enabled.
      */
     public function isEnabled(): bool
     {
@@ -103,11 +98,11 @@ class Logger
     }
 
     /**
-     * Log a query execution
+     * Log a query execution.
      *
-     * @param string $sql      The SQL statement
+     * @param string                   $sql      The SQL statement
      * @param array<int|string, mixed> $bindings Bound parameters
-     * @param float $time      Execution time in milliseconds
+     * @param float                    $time     Execution time in milliseconds
      */
     public function query(string $sql, array $bindings = [], float $time = 0.0): void
     {
@@ -116,8 +111,8 @@ class Logger
         }
 
         $context = [
-          'level'    => 'QUERY',
-          'sql'      => $sql,
+          'level' => 'QUERY',
+          'sql'   => $sql,
         ];
 
         if ($bindings !== []) {

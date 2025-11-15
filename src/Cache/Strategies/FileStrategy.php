@@ -27,7 +27,9 @@ class FileStrategy implements CacheStrategy
      */
     public function __construct(?string $directory = null)
     {
-        $this->directory = $directory ?? (rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'dblayer-cache');
+        $this->directory = $directory
+          ?? (rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'dblayer-cache');
+
         $this->ensureDirectoryExists();
     }
 

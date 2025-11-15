@@ -90,7 +90,7 @@ final class Connection
     /**
      * Optional query recorder for "pretend" mode.
      *
-     * @var null|callable(string,array):void
+     * @var null|callable(string,array<int|string,mixed>):void
      */
     private $queryRecorder = null;
 
@@ -121,6 +121,8 @@ final class Connection
 
     /**
      * Run a delete statement.
+     *
+     * @param array<int|string, mixed> $bindings
      */
     public function delete(string $sql, array $bindings = []): int
     {
@@ -138,6 +140,8 @@ final class Connection
 
     /**
      * Execute a statement with automatic reconnection on connection loss.
+     *
+     * @param array<int|string, mixed> $bindings
      */
     public function execute(string $sql, array $bindings = []): PDOStatement
     {
@@ -256,6 +260,8 @@ final class Connection
 
     /**
      * Run an insert statement.
+     *
+     * @param array<int|string, mixed> $bindings
      */
     public function insert(string $sql, array $bindings = []): bool
     {
@@ -320,17 +326,24 @@ final class Connection
     /**
      * Run a select statement.
      *
-     * @return array<int,array<string,mixed>>
+     * @param array<int|string, mixed> $bindings
+     *
+     * @return array<int, array<string, mixed>>
      */
     public function select(string $sql, array $bindings = []): array
     {
         $statement = $this->execute($sql, $bindings);
 
-        return $statement->fetchAll(PDO::FETCH_ASSOC);
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+        return $rows;
     }
 
     /**
      * Run an update statement.
+     *
+     * @param array<int|string, mixed> $bindings
      */
     public function update(string $sql, array $bindings = []): int
     {
@@ -339,6 +352,8 @@ final class Connection
 
     /**
      * Execute a general statement (INSERT, UPDATE, DELETE, DDL).
+     *
+     * @param array<int|string, mixed> $bindings
      */
     public function statement(string $sql, array $bindings = []): bool
     {
@@ -419,6 +434,8 @@ final class Connection
 
     /**
      * Execute a callback within a transaction using the Transaction manager.
+     *
+     * @param callable(self):mixed $callback
      */
     public function transaction(callable $callback, int $attempts = 1): mixed
     {
@@ -449,7 +466,9 @@ final class Connection
      * Note: for now this still executes queries; it only records them.
      * It is primarily useful for inspecting generated SQL.
      *
-     * @return array<int,array{sql:string,bindings:array}>
+     * @param callable(self):void $callback
+     *
+     * @return array<int, array{sql:string,bindings:array<int|string,mixed>}>
      */
     public function pretend(callable $callback): array
     {
@@ -474,6 +493,8 @@ final class Connection
 
     /**
      * Build DSN string for the configured driver.
+     *
+     * @param array<string, mixed>|null $config
      */
     private function buildDsn(?array $config = null): string
     {
@@ -490,6 +511,8 @@ final class Connection
 
     /**
      * Build MySQL DSN.
+     *
+     * @param array<string, mixed> $config
      */
     private function buildMySqlDsn(array $config): string
     {
@@ -508,6 +531,8 @@ final class Connection
 
     /**
      * Build PostgreSQL DSN.
+     *
+     * @param array<string, mixed> $config
      */
     private function buildPostgreSqlDsn(array $config): string
     {
@@ -522,6 +547,8 @@ final class Connection
 
     /**
      * Build SQLite DSN.
+     *
+     * @param array<string, mixed> $config
      */
     private function buildSqliteDsn(array $config): string
     {
@@ -615,6 +642,8 @@ final class Connection
 
     /**
      * Get PDO connection options.
+     *
+     * @return array<int|string, mixed>
      */
     private function getConnectionOptions(): array
     {
@@ -632,13 +661,14 @@ final class Connection
     /**
      * MySQL post-connect commands.
      *
-     * @return string[]
+     * @return list<string>
      */
     private function getMySqlPostConnectCommands(): array
     {
         $commands = [];
 
-        if ($timezone = $this->config->get('timezone')) {
+        $timezone = $this->config->get('timezone');
+        if (is_string($timezone) && $timezone !== '') {
             $commands[] = "SET time_zone = '{$timezone}'";
         }
 
@@ -652,17 +682,19 @@ final class Connection
     /**
      * PostgreSQL post-connect commands.
      *
-     * @return string[]
+     * @return list<string>
      */
     private function getPostgreSqlPostConnectCommands(): array
     {
         $commands = [];
 
-        if ($timezone = $this->config->get('timezone')) {
+        $timezone = $this->config->get('timezone');
+        if (is_string($timezone) && $timezone !== '') {
             $commands[] = "SET TIME ZONE '{$timezone}'";
         }
 
-        if ($schema = $this->config->get('schema')) {
+        $schema = $this->config->get('schema');
+        if (is_string($schema) && $schema !== '') {
             $commands[] = "SET search_path TO {$schema}";
         }
 
@@ -672,7 +704,7 @@ final class Connection
     /**
      * SQLite post-connect commands.
      *
-     * @return string[]
+     * @return list<string>
      */
     private function getSqlitePostConnectCommands(): array
     {
@@ -714,10 +746,12 @@ final class Connection
 
         $code = (string) $e->getCode();
 
+        // MySQL connection-related errors.
         if (in_array($code, ['2002', '2006', '2013'], true)) {
             return true;
         }
 
+        // PostgreSQL connection-related errors.
         if (in_array($code, ['7', '57P01', '57P02', '57P03'], true)) {
             return true;
         }
@@ -792,6 +826,8 @@ final class Connection
 
     /**
      * Execute a prepared statement on a given PDO instance.
+     *
+     * @param array<int|string, mixed> $bindings
      */
     private function runStatement(PDO $pdo, string $sql, array $bindings): PDOStatement
     {
@@ -836,6 +872,8 @@ final class Connection
 
     /**
      * Record a query for pretend mode if enabled.
+     *
+     * @param array<int|string, mixed> $bindings
      */
     private function recordPretend(string $sql, array $bindings): void
     {

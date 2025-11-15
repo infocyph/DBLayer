@@ -12,7 +12,11 @@ final class SecurityException extends DBException
     public static function sqlInjectionDetected(string $pattern, string $fragment): self
     {
         return new self(
-          'Potential SQL injection detected using pattern [' . $pattern . '] in fragment [' . $fragment . '].'
+          'Potential SQL injection detected using pattern [' .
+          $pattern .
+          '] in fragment [' .
+          $fragment .
+          '].'
         );
     }
 

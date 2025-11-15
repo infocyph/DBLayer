@@ -63,7 +63,9 @@ final class ConnectionException extends DBException
 
     public static function timeout(float $seconds): self
     {
-        return new self('Database connection timeout after ' . $seconds . ' seconds.');
+        $formatted = sprintf('%.4f', $seconds);
+
+        return new self('Database connection timeout after ' . $formatted . ' seconds.');
     }
 
     public static function invalidConfiguration(string $message): self
@@ -114,7 +116,7 @@ final class ConnectionException extends DBException
     }
 
     /**
-     * Required extension / package missing (used by Async adapters).
+     * Required extension / package missing for the selected driver.
      */
     public static function missingExtension(string $extension): self
     {
@@ -126,6 +128,7 @@ final class ConnectionException extends DBException
     public static function connectionNotFound(?string $name = null): self
     {
         $suffix = $name !== null ? " [{$name}]" : '';
+
         return new self("Database connection{$suffix} not found.");
     }
 

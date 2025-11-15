@@ -16,7 +16,7 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
  *  - query length
  *  - IN clause size
  */
-class SecurityValidator
+final class SecurityValidator
 {
     /**
      * Sanitize input value (basic guard).

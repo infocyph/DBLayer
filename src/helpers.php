@@ -5,9 +5,7 @@ declare(strict_types=1);
 /**
  * DBLayer Helper Functions
  *
- * Global helper functions for database operations.
- *
- * @package Infocyph\DBLayer
+ * Global helper functions for database operations and small utilities.
  */
 
 use ArrayAccess;
@@ -22,7 +20,7 @@ use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Support\Collection;
 
-if (!function_exists('db')) {
+if (! function_exists('db')) {
     /**
      * Get a database connection instance or query builder.
      *
@@ -39,7 +37,7 @@ if (!function_exists('db')) {
     }
 }
 
-if (!function_exists('db_transaction')) {
+if (! function_exists('db_transaction')) {
     /**
      * Execute a callback within a database transaction.
      *
@@ -51,9 +49,12 @@ if (!function_exists('db_transaction')) {
     }
 }
 
-if (!function_exists('db_select')) {
+if (! function_exists('db_select')) {
     /**
-     * Execute a select query.
+     * Execute a SELECT query.
+     *
+     * @param array<int,mixed> $bindings
+     * @return list<array<string,mixed>>
      */
     function db_select(string $query, array $bindings = [], ?string $connection = null): array
     {
@@ -61,21 +62,29 @@ if (!function_exists('db_select')) {
     }
 }
 
-if (!function_exists('db_select_one')) {
+if (! function_exists('db_select_one')) {
     /**
-     * Execute a select query and return the first result.
+     * Execute a SELECT query and return the first row.
+     *
+     * @param array<int,mixed> $bindings
+     * @return array<string,mixed>|null
      */
     function db_select_one(string $query, array $bindings = [], ?string $connection = null): mixed
     {
         $results = db_select($query, $bindings, $connection);
 
-        return $results[0] ?? null;
+        /** @var array<string,mixed>|null $first */
+        $first = $results[0] ?? null;
+
+        return $first;
     }
 }
 
-if (!function_exists('db_insert')) {
+if (! function_exists('db_insert')) {
     /**
-     * Execute an insert query.
+     * Execute an INSERT query.
+     *
+     * @param array<int,mixed> $bindings
      */
     function db_insert(string $query, array $bindings = [], ?string $connection = null): bool
     {
@@ -83,9 +92,11 @@ if (!function_exists('db_insert')) {
     }
 }
 
-if (!function_exists('db_update')) {
+if (! function_exists('db_update')) {
     /**
-     * Execute an update query.
+     * Execute an UPDATE query.
+     *
+     * @param array<int,mixed> $bindings
      */
     function db_update(string $query, array $bindings = [], ?string $connection = null): int
     {
@@ -93,9 +104,11 @@ if (!function_exists('db_update')) {
     }
 }
 
-if (!function_exists('db_delete')) {
+if (! function_exists('db_delete')) {
     /**
-     * Execute a delete query.
+     * Execute a DELETE query.
+     *
+     * @param array<int,mixed> $bindings
      */
     function db_delete(string $query, array $bindings = [], ?string $connection = null): int
     {
@@ -103,9 +116,11 @@ if (!function_exists('db_delete')) {
     }
 }
 
-if (!function_exists('db_statement')) {
+if (! function_exists('db_statement')) {
     /**
      * Execute a general statement.
+     *
+     * @param array<int,mixed> $bindings
      */
     function db_statement(string $query, array $bindings = [], ?string $connection = null): bool
     {
@@ -113,7 +128,7 @@ if (!function_exists('db_statement')) {
     }
 }
 
-if (!function_exists('db_unprepared')) {
+if (! function_exists('db_unprepared')) {
     /**
      * Execute an unprepared statement.
      */
@@ -123,9 +138,9 @@ if (!function_exists('db_unprepared')) {
     }
 }
 
-if (!function_exists('db_table')) {
+if (! function_exists('db_table')) {
     /**
-     * Get a query builder for a table.
+     * Get a QueryBuilder for a table.
      */
     function db_table(string $table, ?string $connection = null): QueryBuilder
     {
@@ -133,7 +148,7 @@ if (!function_exists('db_table')) {
     }
 }
 
-if (!function_exists('db_raw')) {
+if (! function_exists('db_raw')) {
     /**
      * Create a raw database expression.
      */
@@ -143,19 +158,29 @@ if (!function_exists('db_raw')) {
     }
 }
 
-if (!function_exists('collect')) {
+if (! function_exists('collect')) {
     /**
-     * Create a collection from the given value.
+     * Create a Collection from the given value.
+     *
+     * - If already a Collection, returns as-is.
+     * - If array, wraps it.
+     * - Otherwise, creates a single-item collection.
      */
     function collect(mixed $value = []): Collection
     {
+        if ($value instanceof Collection) {
+            return $value;
+        }
+
         return new Collection(is_array($value) ? $value : [$value]);
     }
 }
 
-if (!function_exists('value')) {
+if (! function_exists('value')) {
     /**
      * Return the default value of the given value.
+     *
+     * Evaluates closures, returns scalars/arrays as-is.
      */
     function value(mixed $value): mixed
     {
@@ -163,7 +188,7 @@ if (!function_exists('value')) {
     }
 }
 
-if (!function_exists('tap')) {
+if (! function_exists('tap')) {
     /**
      * Call the given Closure with the given value then return the value.
      */
@@ -179,7 +204,7 @@ if (!function_exists('tap')) {
     }
 }
 
-if (!function_exists('with')) {
+if (! function_exists('with')) {
     /**
      * Return the given value, optionally passed through the given callback.
      */
@@ -189,9 +214,11 @@ if (!function_exists('with')) {
     }
 }
 
-if (!function_exists('data_get')) {
+if (! function_exists('data_get')) {
     /**
      * Get an item from an array or object using "dot" notation.
+     *
+     * @param array|ArrayAccess|object $target
      */
     function data_get(mixed $target, string|array|int|null $key, mixed $default = null): mixed
     {
@@ -203,19 +230,19 @@ if (!function_exists('data_get')) {
 
         foreach ($key as $segment) {
             if (is_array($target)) {
-                if (!array_key_exists($segment, $target)) {
+                if (! array_key_exists($segment, $target)) {
                     return value($default);
                 }
 
                 $target = $target[$segment];
             } elseif ($target instanceof ArrayAccess) {
-                if (!isset($target[$segment])) {
+                if (! isset($target[$segment])) {
                     return value($default);
                 }
 
                 $target = $target[$segment];
             } elseif (is_object($target)) {
-                if (!isset($target->{$segment})) {
+                if (! isset($target->{$segment})) {
                     return value($default);
                 }
 
@@ -229,26 +256,32 @@ if (!function_exists('data_get')) {
     }
 }
 
-if (!function_exists('data_set')) {
+if (! function_exists('data_set')) {
     /**
-     * Set an item on an array or object using dot notation.
+     * Set an item on an array using "dot" notation.
+     *
+     * Note: only supports arrays (not objects / ArrayAccess) for mutation.
+     *
+     * @param array<string,mixed> $target
+     * @param string|array<int,string> $key
+     * @return array<string,mixed>
      */
     function data_set(mixed &$target, string|array $key, mixed $value, bool $overwrite = true): mixed
     {
         $segments = is_array($key) ? $key : explode('.', $key);
-        $segment = array_shift($segments);
+        $segment  = array_shift($segments);
 
         if ($segment === null) {
             return $target;
         }
 
         if ($segments === []) {
-            if (!$overwrite && is_array($target) && array_key_exists($segment, $target)) {
-                return $target;
+            if (! is_array($target)) {
+                $target = [];
             }
 
-            if (!is_array($target)) {
-                $target = [];
+            if (! $overwrite && array_key_exists($segment, $target)) {
+                return $target;
             }
 
             $target[$segment] = $value;
@@ -256,8 +289,8 @@ if (!function_exists('data_set')) {
             return $target;
         }
 
-        if (!is_array($target) || !array_key_exists($segment, $target)) {
-            if (!is_array($target)) {
+        if (! is_array($target) || ! array_key_exists($segment, $target)) {
+            if (! is_array($target)) {
                 $target = [];
             }
 
@@ -270,7 +303,7 @@ if (!function_exists('data_set')) {
     }
 }
 
-if (!function_exists('array_accessible')) {
+if (! function_exists('array_accessible')) {
     /**
      * Determine whether the given value is array accessible.
      */
@@ -280,17 +313,17 @@ if (!function_exists('array_accessible')) {
     }
 }
 
-if (!function_exists('array_all')) {
+if (! function_exists('array_all')) {
     /**
      * Determine if all items in the array pass the given truth test.
      *
-     * @param array $array
-     * @param callable $callback fn(mixed $value, mixed $key): bool
+     * @param array<mixed> $array
+     * @param callable(mixed,mixed):bool $callback
      */
     function array_all(array $array, callable $callback): bool
     {
         foreach ($array as $key => $value) {
-            if (!$callback($value, $key)) {
+            if (! $callback($value, $key)) {
                 return false;
             }
         }
@@ -299,7 +332,7 @@ if (!function_exists('array_all')) {
     }
 }
 
-if (!function_exists('class_basename')) {
+if (! function_exists('class_basename')) {
     /**
      * Get the class "basename" of the given object / class.
      */
@@ -311,9 +344,11 @@ if (!function_exists('class_basename')) {
     }
 }
 
-if (!function_exists('class_uses_recursive')) {
+if (! function_exists('class_uses_recursive')) {
     /**
      * Returns all traits used by a class, its parent classes and their traits.
+     *
+     * @return array<string,string>
      */
     function class_uses_recursive(object|string $class): array
     {
@@ -331,9 +366,11 @@ if (!function_exists('class_uses_recursive')) {
     }
 }
 
-if (!function_exists('trait_uses_recursive')) {
+if (! function_exists('trait_uses_recursive')) {
     /**
      * Returns all traits used by a trait and its traits.
+     *
+     * @return array<string,string>
      */
     function trait_uses_recursive(string $trait): array
     {
@@ -347,7 +384,7 @@ if (!function_exists('trait_uses_recursive')) {
     }
 }
 
-if (!function_exists('blank')) {
+if (! function_exists('blank')) {
     /**
      * Determine if the given value is "blank".
      */
@@ -373,17 +410,17 @@ if (!function_exists('blank')) {
     }
 }
 
-if (!function_exists('filled')) {
+if (! function_exists('filled')) {
     /**
      * Determine if a value is "filled".
      */
     function filled(mixed $value): bool
     {
-        return !blank($value);
+        return ! blank($value);
     }
 }
 
-if (!function_exists('optional')) {
+if (! function_exists('optional')) {
     /**
      * Provide access to optional objects.
      */
@@ -401,9 +438,13 @@ if (!function_exists('optional')) {
     }
 }
 
-if (!function_exists('retry')) {
+if (! function_exists('retry')) {
     /**
      * Retry an operation a given number of times.
+     *
+     * @param callable(int):mixed $callback
+     * @param int                 $sleep   Sleep time between attempts in ms
+     * @param callable(Exception):bool|null $when
      *
      * @throws Exception
      */
@@ -418,7 +459,7 @@ if (!function_exists('retry')) {
         try {
             return $callback($attempts);
         } catch (Exception $e) {
-            if ($times < 1 || ($when && !$when($e))) {
+            if ($times < 1 || ($when !== null && ! $when($e))) {
                 throw $e;
             }
 
@@ -431,9 +472,11 @@ if (!function_exists('retry')) {
     }
 }
 
-if (!function_exists('rescue')) {
+if (! function_exists('rescue')) {
     /**
      * Catch a potential exception and return a default value.
+     *
+     * @param callable():mixed $callback
      */
     function rescue(callable $callback, mixed $rescue = null, bool $report = true): mixed
     {
@@ -442,6 +485,7 @@ if (!function_exists('rescue')) {
         } catch (Throwable $e) {
             if ($report) {
                 // Hook for logging if needed.
+                // e.g. logger()->error($e);
             }
 
             return value($rescue);
@@ -449,9 +493,11 @@ if (!function_exists('rescue')) {
     }
 }
 
-if (!function_exists('transform')) {
+if (! function_exists('transform')) {
     /**
      * Transform the given value if it is present.
+     *
+     * @param callable(mixed):mixed $callback
      */
     function transform(mixed $value, callable $callback, mixed $default = null): mixed
     {
@@ -467,7 +513,7 @@ if (!function_exists('transform')) {
     }
 }
 
-if (!function_exists('windows_os')) {
+if (! function_exists('windows_os')) {
     /**
      * Determine whether the current environment is Windows based.
      */
@@ -477,7 +523,7 @@ if (!function_exists('windows_os')) {
     }
 }
 
-if (!function_exists('now')) {
+if (! function_exists('now')) {
     /**
      * Get the current date and time.
      */
@@ -492,9 +538,9 @@ if (!function_exists('now')) {
     }
 }
 
-if (!function_exists('today')) {
+if (! function_exists('today')) {
     /**
-     * Get today's date.
+     * Get today's date at midnight.
      */
     function today(DateTimeZone|string|null $tz = null): DateTime
     {

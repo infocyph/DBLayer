@@ -11,8 +11,10 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
  *
  * Lightweight, process-local rate limiting for database operations.
  * Uses integer time buckets for performance (no date() formatting).
+ *
+ * NOTE: This is per-PHP-process / worker; it is not a distributed limiter.
  */
-class RateLimiter
+final class RateLimiter
 {
     /**
      * @var array<string, int>

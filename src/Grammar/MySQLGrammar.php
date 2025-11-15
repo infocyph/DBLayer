@@ -11,65 +11,58 @@ use Infocyph\DBLayer\Query\QueryBuilder;
  *
  * MySQL-specific SQL compilation with support for:
  * - Backtick identifier quoting
- * - MySQL-specific functions
  * - INSERT IGNORE, REPLACE INTO
  * - ON DUPLICATE KEY UPDATE
- *
- * @package Infocyph\DBLayer\Grammar
- * @author Hasan
  */
-class MySQLGrammar extends Grammar
+final class MySQLGrammar extends Grammar
 {
     /**
-     * Compile an insert ignore statement
+     * Compile an INSERT IGNORE statement.
+     *
+     * @param array<int, array<string, mixed>>|array<string, mixed> $values
      */
     public function compileInsertIgnore(QueryBuilder $query, array $values): string
     {
-        $components = $query->getComponents();
-        $table = $this->wrapTable($components['from']);
-        $columns = $this->columnize(array_keys(reset($values)));
-
-        $parameters = implode(', ', array_map(function (array $record): string {
-            return '(' . $this->parameterize($record) . ')';
-        }, $values));
-
-        return "insert ignore into {$table} ({$columns}) values {$parameters}";
+        return $this->compileInsertWithVerb('insert ignore', $query, $values);
     }
 
     /**
-     * Compile an insert statement with ON DUPLICATE KEY UPDATE
+     * Compile an insert statement with ON DUPLICATE KEY UPDATE.
+     *
+     * @param array<int, array<string, mixed>>|array<string, mixed> $values
+     * @param array<string, mixed>                                  $update
      */
-    public function compileInsertOnDuplicateKeyUpdate(QueryBuilder $query, array $values, array $update): string
-    {
+    public function compileInsertOnDuplicateKeyUpdate(
+      QueryBuilder $query,
+      array $values,
+      array $update
+    ): string {
         $insert = $this->compileInsert($query, $values);
 
-        $updateColumns = implode(', ', array_map(function (string $key): string {
-            $wrapped = $this->wrap($key);
+        $updateColumns = implode(', ', array_map(
+          function (string $key): string {
+              $wrapped = $this->wrap($key);
 
-            return "{$wrapped} = VALUES({$wrapped})";
-        }, array_keys($update)));
+              return "{$wrapped} = VALUES({$wrapped})";
+          },
+          array_keys($update)
+        ));
 
         return "{$insert} on duplicate key update {$updateColumns}";
     }
 
     /**
-     * Compile a replace statement
+     * Compile a REPLACE statement.
+     *
+     * @param array<int, array<string, mixed>>|array<string, mixed> $values
      */
     public function compileReplace(QueryBuilder $query, array $values): string
     {
-        $components = $query->getComponents();
-        $table = $this->wrapTable($components['from']);
-        $columns = $this->columnize(array_keys(reset($values)));
-
-        $parameters = implode(', ', array_map(function (array $record): string {
-            return '(' . $this->parameterize($record) . ')';
-        }, $values));
-
-        return "replace into {$table} ({$columns}) values {$parameters}";
+        return $this->compileInsertWithVerb('replace', $query, $values);
     }
 
     /**
-     * Compile a truncate table statement (MySQL-specific)
+     * Compile a truncate table statement (MySQL-specific).
      */
     public function compileTruncate(QueryBuilder $query): string
     {
@@ -79,7 +72,7 @@ class MySQLGrammar extends Grammar
     }
 
     /**
-     * Get the format for database stored dates
+     * Get the format for database stored dates.
      */
     public function getDateFormat(): string
     {
@@ -87,12 +80,12 @@ class MySQLGrammar extends Grammar
     }
 
     /**
-     * Compile the "limit" portion with offset support (MySQL-specific)
+     * Compile the "limit" portion with offset support (MySQL-specific).
      */
     protected function compileLimit(QueryBuilder $query, int $limit): string
     {
         $components = $query->getComponents();
-        $offset = $components['offset'];
+        $offset     = $components['offset'];
 
         if ($offset !== null) {
             return 'limit ' . (int) $offset . ', ' . (int) $limit;
@@ -102,28 +95,32 @@ class MySQLGrammar extends Grammar
     }
 
     /**
-     * Compile the lock into SQL (MySQL-specific)
+     * Compile the lock into SQL (MySQL-specific).
      */
     protected function compileLock(QueryBuilder $query, string $lock): string
     {
+        unset($query);
+
         return match ($lock) {
             'update' => 'for update',
             'shared' => 'lock in share mode',
-            default => '',
+            default  => '',
         };
     }
 
     /**
-     * Compile the "offset" portion (handled by limit in MySQL)
+     * Compile the "offset" portion (handled by limit in MySQL).
      */
     protected function compileOffset(QueryBuilder $query, int $offset): string
     {
-        // In MySQL, offset is encoded into the LIMIT clause
+        unset($query, $offset);
+
+        // In MySQL, offset is encoded into the LIMIT clause.
         return '';
     }
 
     /**
-     * Wrap a single string in keyword identifiers
+     * Wrap a single string in keyword identifiers.
      */
     protected function wrapValue(string $value): string
     {

@@ -33,7 +33,6 @@
     "symfony/var-dumper": "^7.3"
   },
   "suggest": {
-    "ext-swoole": "For async query support with Swoole",
     "ext-pdo_mysql": "For MySQL database support",
     "ext-pdo_pgsql": "For PostgreSQL database support",
     "ext-pdo_sqlite": "For SQLite database support"

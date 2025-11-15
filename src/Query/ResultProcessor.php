@@ -11,14 +11,15 @@ use Infocyph\DBLayer\Support\Collection;
  *
  * Processes and transforms query results.
  * Separated from QueryBuilder for single responsibility.
- *
- * @package Infocyph\DBLayer\Query
- * @author Hasan
  */
 class ResultProcessor
 {
     /**
-     * Filter results using callback (reindexed)
+     * Filter results using callback (reindexed).
+     *
+     * @param list<array<string,mixed>>                $results
+     * @param callable(array<string,mixed>):bool|mixed $callback
+     * @return list<array<string,mixed>>
      */
     public function filter(array $results, callable $callback): array
     {
@@ -26,7 +27,9 @@ class ResultProcessor
     }
 
     /**
-     * Process raw results into collection
+     * Process raw results into collection.
+     *
+     * @param list<array<string,mixed>> $results
      */
     public function process(array $results): Collection
     {
@@ -34,7 +37,9 @@ class ResultProcessor
     }
 
     /**
-     * Process aggregate result
+     * Process aggregate result.
+     *
+     * @param list<array<string,mixed>> $results
      */
     public function processAggregate(array $results): mixed
     {
@@ -48,7 +53,10 @@ class ResultProcessor
     }
 
     /**
-     * Process column values
+     * Process column values.
+     *
+     * @param list<array<string,mixed>> $results
+     * @return list<mixed>
      */
     public function processColumn(array $results, string $column): array
     {
@@ -56,7 +64,10 @@ class ResultProcessor
     }
 
     /**
-     * Process grouped results
+     * Process grouped results.
+     *
+     * @param list<array<string,mixed>> $results
+     * @return array<string|int,list<array<string,mixed>>>
      */
     public function processGrouped(array $results, string $groupBy): array
     {
@@ -76,14 +87,17 @@ class ResultProcessor
     }
 
     /**
-     * Process key-value pairs
+     * Process key-value pairs.
+     *
+     * @param list<array<string,mixed>> $results
+     * @return array<int|string,mixed>
      */
     public function processKeyValue(array $results, string $key, string $value): array
     {
         $processed = [];
 
         foreach ($results as $row) {
-            if (!array_key_exists($key, $row) || !array_key_exists($value, $row)) {
+            if (! array_key_exists($key, $row) || ! array_key_exists($value, $row)) {
                 continue;
             }
 
@@ -94,7 +108,10 @@ class ResultProcessor
     }
 
     /**
-     * Process single result
+     * Process single result row.
+     *
+     * @param list<array<string,mixed>> $results
+     * @return array<string,mixed>|null
      */
     public function processSingle(array $results): mixed
     {
@@ -102,10 +119,17 @@ class ResultProcessor
     }
 
     /**
-     * Transform results using callback
+     * Transform results using callback.
+     *
+     * @param list<array<string,mixed>>                        $results
+     * @param callable(array<string,mixed>):array<string,mixed> $callback
+     * @return list<array<string,mixed>>
      */
     public function transform(array $results, callable $callback): array
     {
-        return array_map($callback, $results);
+        /** @var list<array<string,mixed>> $mapped */
+        $mapped = array_map($callback, $results);
+
+        return $mapped;
     }
 }

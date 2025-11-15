@@ -12,7 +12,7 @@ namespace Infocyph\DBLayer\Support;
  *
  * Lightweight and disabled by default; enable only when needed.
  */
-class Profiler
+final class Profiler
 {
     private bool $enabled = false;
 
