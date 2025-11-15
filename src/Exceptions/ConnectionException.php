@@ -122,4 +122,15 @@ final class ConnectionException extends DBException
           "Required database extension or package [{$extension}] is not installed or enabled."
         );
     }
+
+    public static function connectionNotFound(?string $name = null): self
+    {
+        $suffix = $name !== null ? " [{$name}]" : '';
+        return new self("Database connection{$suffix} not found.");
+    }
+
+    public static function transactionError(string $reason): self
+    {
+        return new self("Database transaction error: {$reason}");
+    }
 }

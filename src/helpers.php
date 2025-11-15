@@ -10,6 +10,13 @@ declare(strict_types=1);
  * @package Infocyph\DBLayer
  */
 
+use ArrayAccess;
+use Closure;
+use Countable;
+use DateTime;
+use DateTimeZone;
+use Exception;
+use Throwable;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
@@ -199,16 +206,19 @@ if (!function_exists('data_get')) {
                 if (!array_key_exists($segment, $target)) {
                     return value($default);
                 }
+
                 $target = $target[$segment];
             } elseif ($target instanceof ArrayAccess) {
                 if (!isset($target[$segment])) {
                     return value($default);
                 }
+
                 $target = $target[$segment];
             } elseif (is_object($target)) {
                 if (!isset($target->{$segment})) {
                     return value($default);
                 }
+
                 $target = $target->{$segment};
             } else {
                 return value($default);
@@ -233,7 +243,7 @@ if (!function_exists('data_set')) {
         }
 
         if ($segments === []) {
-            if (!$overwrite && (is_array($target) && array_key_exists($segment, $target))) {
+            if (!$overwrite && is_array($target) && array_key_exists($segment, $target)) {
                 return $target;
             }
 
@@ -247,6 +257,10 @@ if (!function_exists('data_set')) {
         }
 
         if (!is_array($target) || !array_key_exists($segment, $target)) {
+            if (!is_array($target)) {
+                $target = [];
+            }
+
             $target[$segment] = [];
         }
 

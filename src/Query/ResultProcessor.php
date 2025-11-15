@@ -18,7 +18,7 @@ use Infocyph\DBLayer\Support\Collection;
 class ResultProcessor
 {
     /**
-     * Filter results using callback
+     * Filter results using callback (reindexed)
      */
     public function filter(array $results, callable $callback): array
     {

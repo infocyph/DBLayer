@@ -5,6 +5,14 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Connection;
 
 use Infocyph\DBLayer\Exceptions\ConnectionException;
+use Infocyph\DBLayer\Grammar\Grammar;
+use Infocyph\DBLayer\Grammar\MySQLGrammar;
+use Infocyph\DBLayer\Grammar\PostgreSQLGrammar;
+use Infocyph\DBLayer\Grammar\SQLiteGrammar;
+use Infocyph\DBLayer\Query\Executor;
+use Infocyph\DBLayer\Query\Expression;
+use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Transaction\Transaction;
 use PDO;
 use PDOException;
 use PDOStatement;
@@ -14,13 +22,11 @@ use PDOStatement;
  *
  * Manages PDO connections with support for:
  * - Multiple database drivers (MySQL, PostgreSQL, SQLite)
- * - Connection pooling and reuse (via Connection\Pool)
- * - Automatic reconnection on connection loss (SQLSTATE 08* / driver errors)
- * - Health monitoring (via isHealthy / HealthCheck)
  * - Read/write splitting
- *
- * @package Infocyph\DBLayer\Connection
- * @author Hasan
+ * - Automatic reconnection on connection loss
+ * - Lightweight health checks
+ * - Query statistics
+ * - Query builder / grammar wiring
  */
 final class Connection
 {
@@ -62,15 +68,43 @@ final class Connection
     ];
 
     /**
+     * Table prefix used by the grammar.
+     */
+    private string $tablePrefix = '';
+
+    /**
+     * SQL grammar instance for this connection.
+     */
+    private ?Grammar $grammar = null;
+
+    /**
+     * Query executor for this connection.
+     */
+    private ?Executor $executor = null;
+
+    /**
+     * Transaction manager for this connection.
+     */
+    private ?Transaction $transaction = null;
+
+    /**
+     * Optional query recorder for "pretend" mode.
+     *
+     * @var null|callable(string,array):void
+     */
+    private $queryRecorder = null;
+
+    /**
      * Create a new connection instance.
      */
     public function __construct(ConnectionConfig $config)
     {
-        $this->config = $config;
+        $this->config      = $config;
+        $this->tablePrefix = (string) ($config->get('prefix') ?? '');
     }
 
     /**
-     * Begin a transaction.
+     * Begin a transaction (raw PDO-level).
      */
     public function beginTransaction(): bool
     {
@@ -78,7 +112,7 @@ final class Connection
     }
 
     /**
-     * Commit a transaction.
+     * Commit a transaction (raw PDO-level).
      */
     public function commit(): bool
     {
@@ -98,7 +132,7 @@ final class Connection
      */
     public function disconnect(): void
     {
-        $this->pdo = null;
+        $this->pdo     = null;
         $this->readPdo = null;
     }
 
@@ -113,12 +147,14 @@ final class Connection
         try {
             $statement = $this->runStatement($pdo, $sql, $bindings);
             $this->recordQuery($isWrite);
+            $this->recordPretend($sql, $bindings);
 
             return $statement;
         } catch (PDOException $e) {
-            // Check if it looks like a connection-level error; if not, fail fast.
-            if (!$this->isConnectionError($e)) {
+            if (! $this->isConnectionError($e)) {
                 $this->stats['errors']++;
+                $this->recordPretend($sql, $bindings);
+
                 throw ConnectionException::queryFailed($sql, $e->getMessage());
             }
 
@@ -131,11 +167,15 @@ final class Connection
                   $sql,
                   $bindings
                 );
+
                 $this->recordQuery($isWrite);
+                $this->recordPretend($sql, $bindings);
 
                 return $statement;
             } catch (PDOException $e2) {
                 $this->stats['errors']++;
+                $this->recordPretend($sql, $bindings);
+
                 throw ConnectionException::queryFailed($sql, $e2->getMessage());
             }
         }
@@ -158,6 +198,17 @@ final class Connection
     }
 
     /**
+     * Set database name (returns self for chaining).
+     */
+    public function setDatabaseName(string $database): self
+    {
+        $this->config = $this->config->with('database', $database);
+        $this->disconnect();
+
+        return $this;
+    }
+
+    /**
      * Get driver name.
      */
     public function getDriverName(): string
@@ -174,7 +225,6 @@ final class Connection
             $this->connect();
         }
 
-        // No ping here – we trust PDO until it throws.
         return $this->pdo;
     }
 
@@ -183,8 +233,7 @@ final class Connection
      */
     public function getReadPdo(): PDO
     {
-        // If no read config, use write connection.
-        if (!$this->config->hasReadConfig()) {
+        if (! $this->config->hasReadConfig()) {
             return $this->getPdo();
         }
 
@@ -192,8 +241,7 @@ final class Connection
             $this->connectRead();
         }
 
-        // Same rule: no ping; rely on exceptions + reconnect on demand.
-        return $this->readPdo ?? $this->getPdo(); // fallback if read connect failed.
+        return $this->readPdo ?? $this->getPdo();
     }
 
     /**
@@ -224,8 +272,6 @@ final class Connection
 
     /**
      * Check if connection is healthy (lightweight ping).
-     *
-     * This is used by HealthCheck / Pool, not on every query.
      */
     public function isHealthy(): bool
     {
@@ -235,6 +281,7 @@ final class Connection
 
         try {
             $this->pdo->query('SELECT 1');
+
             return true;
         } catch (PDOException) {
             return false;
@@ -263,7 +310,7 @@ final class Connection
     }
 
     /**
-     * Rollback a transaction.
+     * Rollback a transaction (raw PDO-level).
      */
     public function rollBack(): bool
     {
@@ -273,11 +320,12 @@ final class Connection
     /**
      * Run a select statement.
      *
-     * @return array<int, array<string,mixed>>
+     * @return array<int,array<string,mixed>>
      */
     public function select(string $sql, array $bindings = []): array
     {
         $statement = $this->execute($sql, $bindings);
+
         return $statement->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -287,6 +335,141 @@ final class Connection
     public function update(string $sql, array $bindings = []): int
     {
         return $this->execute($sql, $bindings)->rowCount();
+    }
+
+    /**
+     * Execute a general statement (INSERT, UPDATE, DELETE, DDL).
+     */
+    public function statement(string $sql, array $bindings = []): bool
+    {
+        $this->execute($sql, $bindings);
+
+        return true;
+    }
+
+    /**
+     * Execute an unprepared statement.
+     */
+    public function unprepared(string $sql): bool
+    {
+        $isWrite = $this->isWriteQuery($sql);
+        $pdo     = $isWrite ? $this->getPdo() : $this->getReadPdo();
+
+        try {
+            $pdo->exec($sql);
+            $this->recordQuery($isWrite);
+            $this->recordPretend($sql, []);
+
+            return true;
+        } catch (PDOException $e) {
+            if (! $this->isConnectionError($e)) {
+                $this->stats['errors']++;
+                $this->recordPretend($sql, []);
+
+                throw ConnectionException::queryFailed($sql, $e->getMessage());
+            }
+
+            $this->handleReconnectForPdo($pdo);
+
+            try {
+                $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
+                $pdo->exec($sql);
+                $this->recordQuery($isWrite);
+                $this->recordPretend($sql, []);
+
+                return true;
+            } catch (PDOException $e2) {
+                $this->stats['errors']++;
+                $this->recordPretend($sql, []);
+
+                throw ConnectionException::queryFailed($sql, $e2->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Get the table prefix.
+     */
+    public function getTablePrefix(): string
+    {
+        return $this->tablePrefix;
+    }
+
+    /**
+     * Set the table prefix (updates grammar if already created).
+     */
+    public function setTablePrefix(string $prefix): self
+    {
+        $this->tablePrefix = $prefix;
+
+        if ($this->grammar !== null) {
+            $this->grammar->setTablePrefix($prefix);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Create a raw SQL expression.
+     */
+    public function raw(string $value): Expression
+    {
+        return new Expression($value);
+    }
+
+    /**
+     * Execute a callback within a transaction using the Transaction manager.
+     */
+    public function transaction(callable $callback, int $attempts = 1): mixed
+    {
+        return $this->getTransactionManager()->execute($callback, $attempts);
+    }
+
+    /**
+     * Get the transaction nesting level (via Transaction manager).
+     */
+    public function transactionLevel(): int
+    {
+        return $this->getTransactionManager()->level();
+    }
+
+    /**
+     * Get a query builder for the given table.
+     */
+    public function table(string $table): QueryBuilder
+    {
+        $builder = new QueryBuilder($this, $this->getGrammar(), $this->getExecutor());
+
+        return $builder->from($table);
+    }
+
+    /**
+     * "Pretend" to execute queries and return the list of queries that would run.
+     *
+     * Note: for now this still executes queries; it only records them.
+     * It is primarily useful for inspecting generated SQL.
+     *
+     * @return array<int,array{sql:string,bindings:array}>
+     */
+    public function pretend(callable $callback): array
+    {
+        $logged           = [];
+        $previousRecorder = $this->queryRecorder;
+
+        $this->queryRecorder = static function (string $sql, array $bindings) use (&$logged): void {
+            $logged[] = [
+              'sql'      => $sql,
+              'bindings' => $bindings,
+            ];
+        };
+
+        try {
+            $callback($this);
+        } finally {
+            $this->queryRecorder = $previousRecorder;
+        }
+
+        return $logged;
     }
 
     /**
@@ -310,13 +493,13 @@ final class Connection
      */
     private function buildMySqlDsn(array $config): string
     {
-        if (!empty($config['unix_socket'])) {
+        if (! empty($config['unix_socket'])) {
             return "mysql:unix_socket={$config['unix_socket']};dbname={$config['database']}";
         }
 
         $dsn = "mysql:host={$config['host']};port={$config['port']};dbname={$config['database']}";
 
-        if (!empty($config['charset'])) {
+        if (! empty($config['charset'])) {
             $dsn .= ";charset={$config['charset']}";
         }
 
@@ -330,7 +513,7 @@ final class Connection
     {
         $dsn = "pgsql:host={$config['host']};port={$config['port']};dbname={$config['database']}";
 
-        if (!empty($config['schema'])) {
+        if (! empty($config['schema'])) {
             $dsn .= ";options='--search_path={$config['schema']}'";
         }
 
@@ -392,7 +575,7 @@ final class Connection
     /**
      * Reconnect to database with exponential backoff (write or read).
      */
-    private function reconnect(bool $isWrite): void
+    public function reconnect(bool $isWrite): void
     {
         $attempt = 0;
 
@@ -425,11 +608,9 @@ final class Connection
      */
     private function handleReconnectForPdo(PDO $pdo): void
     {
-        // If we have a read connection and it matches, reconnect read;
-        // otherwise reconnect write.
         $isRead = ($this->readPdo !== null && $pdo === $this->readPdo);
 
-        $this->reconnect(!$isRead);
+        $this->reconnect(! $isRead);
     }
 
     /**
@@ -445,7 +626,6 @@ final class Connection
           PDO::ATTR_TIMEOUT            => self::CONNECTION_TIMEOUT,
         ];
 
-        // Let user-provided options override defaults.
         return array_replace($defaults, $this->config->getOptions());
     }
 
@@ -510,10 +690,11 @@ final class Connection
         $sql       = ltrim($sql);
         $firstWord = strtoupper(substr($sql, 0, strcspn($sql, " \t\n\r")));
 
-        return in_array($firstWord, [
-          'INSERT', 'UPDATE', 'DELETE',
-          'CREATE', 'ALTER', 'DROP', 'TRUNCATE',
-        ], true);
+        return in_array(
+          $firstWord,
+          ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE'],
+          true
+        );
     }
 
     /**
@@ -521,31 +702,75 @@ final class Connection
      */
     private function isConnectionError(PDOException $e): bool
     {
-        // Prefer SQLSTATE if available.
         $info = $e->errorInfo;
+
         if (is_array($info) && isset($info[0]) && is_string($info[0])) {
             $sqlState = $info[0];
 
-            // SQLSTATE "08xxx" = connection exception (per SQL standard).
             if (str_starts_with($sqlState, '08')) {
                 return true;
             }
         }
 
-        // Fallback on vendor-specific codes (as strings).
         $code = (string) $e->getCode();
 
-        // Common MySQL connection errors.
         if (in_array($code, ['2002', '2006', '2013'], true)) {
             return true;
         }
 
-        // PostgreSQL TCP / connection errors sometimes surface as 7 / 57P01 etc.
         if (in_array($code, ['7', '57P01', '57P02', '57P03'], true)) {
             return true;
         }
 
         return false;
+    }
+
+    /**
+     * Get the grammar instance for this connection.
+     */
+    private function getGrammar(): Grammar
+    {
+        if ($this->grammar !== null) {
+            return $this->grammar;
+        }
+
+        $driver        = $this->config->getDriver();
+        $this->grammar = match ($driver) {
+            'mysql'  => new MySQLGrammar(),
+            'pgsql'  => new PostgreSQLGrammar(),
+            'sqlite' => new SQLiteGrammar(),
+            default  => throw ConnectionException::unsupportedDriver($driver),
+        };
+
+        if ($this->tablePrefix !== '') {
+            $this->grammar->setTablePrefix($this->tablePrefix);
+        }
+
+        return $this->grammar;
+    }
+
+    /**
+     * Get the query executor for this connection.
+     */
+    private function getExecutor(): Executor
+    {
+        if ($this->executor === null) {
+            $this->executor = new Executor($this, $this->getGrammar());
+        }
+
+        return $this->executor;
+    }
+
+    /**
+     * Get the Transaction manager for this connection.
+     */
+    private function getTransactionManager(): Transaction
+    {
+        if ($this->transaction === null) {
+            $this->transaction = new Transaction($this);
+        }
+
+        return $this->transaction;
     }
 
     /**
@@ -606,6 +831,16 @@ final class Connection
             $this->stats['writes']++;
         } else {
             $this->stats['reads']++;
+        }
+    }
+
+    /**
+     * Record a query for pretend mode if enabled.
+     */
+    private function recordPretend(string $sql, array $bindings): void
+    {
+        if ($this->queryRecorder !== null) {
+            ($this->queryRecorder)($sql, $bindings);
         }
     }
 }

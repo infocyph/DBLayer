@@ -90,8 +90,12 @@ final class Pool
           'wait_timeout' => 30,
         ];
 
-        $this->config  = array_merge($defaults, $config);
-        $this->factory = $factory(...);
+        $this->config = array_merge($defaults, $config);
+
+        // Normalize to Closure so we can always call ($this->factory)()
+        $this->factory = $factory instanceof \Closure
+          ? $factory
+          : \Closure::fromCallable($factory);
     }
 
     /**

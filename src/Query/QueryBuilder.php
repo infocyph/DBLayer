@@ -27,115 +27,115 @@ use Infocyph\DBLayer\Grammar\Grammar;
 class QueryBuilder
 {
     /**
-     * Aggregate function definition or null
+     * Aggregate function definition or null.
      *
-     * ['function' => string, 'column' => string]
+     * @var array{function:string,column:string}|null
      */
     private ?array $aggregate = null;
 
     /**
-     * Query bindings
+     * Query bindings.
      *
      * @var array<int,mixed>
      */
     private array $bindings = [];
 
     /**
-     * SELECT columns
+     * SELECT columns.
      *
      * @var array<int,string|Expression>
      */
     private array $columns = ['*'];
 
     /**
-     * Database connection
+     * Database connection.
      */
     private Connection $connection;
 
     /**
-     * DISTINCT flag
+     * DISTINCT flag.
      */
     private bool $distinct = false;
 
     /**
-     * Query executor
+     * Query executor.
      */
     private Executor $executor;
 
     /**
-     * FROM table
+     * FROM table.
      */
     private ?string $from = null;
 
     /**
-     * SQL grammar compiler
+     * SQL grammar compiler.
      */
     private Grammar $grammar;
 
     /**
-     * GROUP BY columns
+     * GROUP BY columns.
      *
      * @var string[]
      */
     private array $groups = [];
 
     /**
-     * HAVING clauses
+     * HAVING clauses.
      *
      * @var array<int,array<string,mixed>>
      */
     private array $havings = [];
 
     /**
-     * JOIN clauses
+     * JOIN clauses.
      *
      * @var array<int,array<string,mixed>|JoinClause>
      */
     private array $joins = [];
 
     /**
-     * LIMIT value
+     * LIMIT value.
      */
     private ?int $limit = null;
 
     /**
-     * Lock mode
+     * Lock mode.
      */
     private ?string $lock = null;
 
     /**
-     * OFFSET value
+     * OFFSET value.
      */
     private ?int $offset = null;
 
     /**
-     * ORDER BY clauses
+     * ORDER BY clauses.
      *
      * @var array<int,array{column:string,direction:string}>
      */
     private array $orders = [];
 
     /**
-     * Query type (e.g. select)
+     * Query type (e.g. "select").
      */
     private ?string $type = null;
 
     /**
-     * UNION queries
+     * UNION queries.
      *
      * @var array<int,array{query:QueryBuilder,all:bool}>
      */
     private array $unions = [];
 
     /**
-     * WHERE clauses
+     * WHERE clauses.
      *
      * @var array<int,array<string,mixed>>
      */
     private array $wheres = [];
 
     /**
-     * Create a new query builder instance
+     * Create a new query builder instance.
      */
     public function __construct(
       Connection $connection,
@@ -148,11 +148,11 @@ class QueryBuilder
     }
 
     /**
-     * Add a select column
+     * Add a select column.
      */
     public function addSelect(string|Expression $column): self
     {
-        if (!in_array($column, $this->columns, true)) {
+        if (!\in_array($column, $this->columns, true)) {
             $this->columns[] = $column;
         }
 
@@ -160,15 +160,16 @@ class QueryBuilder
     }
 
     /**
-     * Execute an aggregate function
+     * Execute an aggregate function on a cloned builder.
      *
-     * This operates on a cloned builder to avoid mutating the base query.
+     * This keeps the original query state untouched.
      */
     public function aggregate(string $function, string $column = '*'): mixed
     {
         $clone = clone $this;
+
         $clone->aggregate = [
-          'function' => strtoupper($function),
+          'function' => \strtoupper($function),
           'column' => $column,
         ];
 
@@ -184,7 +185,7 @@ class QueryBuilder
     }
 
     /**
-     * Get the average
+     * Get the average of a column.
      */
     public function avg(string $column): mixed
     {
@@ -192,7 +193,7 @@ class QueryBuilder
     }
 
     /**
-     * Clone the query builder
+     * Clone the query builder (explicit helper).
      */
     public function cloneBuilder(): self
     {
@@ -200,7 +201,7 @@ class QueryBuilder
     }
 
     /**
-     * Get the count of results
+     * Get the count of results.
      */
     public function count(string $column = '*'): int
     {
@@ -208,7 +209,7 @@ class QueryBuilder
     }
 
     /**
-     * Add a CROSS JOIN clause
+     * Add a CROSS JOIN clause.
      */
     public function crossJoin(string $table): self
     {
@@ -221,7 +222,7 @@ class QueryBuilder
     }
 
     /**
-     * Delete records
+     * Delete records.
      */
     public function delete(): int
     {
@@ -229,7 +230,7 @@ class QueryBuilder
     }
 
     /**
-     * Set DISTINCT flag
+     * Set DISTINCT flag.
      */
     public function distinct(): self
     {
@@ -239,7 +240,7 @@ class QueryBuilder
     }
 
     /**
-     * Determine if any rows exist
+     * Determine if any rows exist.
      */
     public function exists(): bool
     {
@@ -247,7 +248,7 @@ class QueryBuilder
     }
 
     /**
-     * Execute the query and get first result
+     * Execute the query and get the first result.
      */
     public function first(): ?array
     {
@@ -255,7 +256,7 @@ class QueryBuilder
     }
 
     /**
-     * Set the table
+     * Set the table.
      */
     public function from(string $table): self
     {
@@ -265,7 +266,9 @@ class QueryBuilder
     }
 
     /**
-     * Execute the query and get all results
+     * Execute the query and get all results.
+     *
+     * @return array<int,array<string,mixed>>
      */
     public function get(): array
     {
@@ -273,7 +276,9 @@ class QueryBuilder
     }
 
     /**
-     * Get query bindings
+     * Get query bindings.
+     *
+     * @return array<int,mixed>
      */
     public function getBindings(): array
     {
@@ -281,7 +286,9 @@ class QueryBuilder
     }
 
     /**
-     * Get all query components
+     * Get all query components (for Grammar).
+     *
+     * @return array<string,mixed>
      */
     public function getComponents(): array
     {
@@ -304,17 +311,17 @@ class QueryBuilder
     }
 
     /**
-     * Add a GROUP BY clause
+     * Add a GROUP BY clause.
      */
     public function groupBy(string ...$groups): self
     {
-        $this->groups = array_merge($this->groups, $groups);
+        $this->groups = \array_merge($this->groups, $groups);
 
         return $this;
     }
 
     /**
-     * Add a HAVING clause
+     * Add a HAVING clause.
      */
     public function having(
       string $column,
@@ -322,7 +329,7 @@ class QueryBuilder
       mixed $value = null,
       string $boolean = 'and'
     ): self {
-        if (func_num_args() === 2) {
+        if (\func_num_args() === 2) {
             $value = $operator;
             $operator = '=';
         }
@@ -341,7 +348,7 @@ class QueryBuilder
     }
 
     /**
-     * Insert a new record
+     * Insert a new record.
      */
     public function insert(array $values): bool
     {
@@ -350,7 +357,7 @@ class QueryBuilder
         }
 
         // Handle single row or multiple rows
-        if (!is_array(reset($values))) {
+        if (!\is_array(\reset($values))) {
             $values = [$values];
         }
 
@@ -358,7 +365,7 @@ class QueryBuilder
     }
 
     /**
-     * Insert and get the ID
+     * Insert and get the ID.
      */
     public function insertGetId(array $values, ?string $sequence = null): string
     {
@@ -368,7 +375,7 @@ class QueryBuilder
     }
 
     /**
-     * Add a JOIN clause
+     * Add a JOIN clause.
      */
     public function join(
       string $table,
@@ -389,7 +396,9 @@ class QueryBuilder
     }
 
     /**
-     * Add a complex JOIN with closure
+     * Add a complex JOIN with closure.
+     *
+     * The callback receives a JoinClause instance.
      */
     public function joinComplex(string $table, callable $callback, string $type = 'inner'): self
     {
@@ -398,14 +407,14 @@ class QueryBuilder
 
         $this->joins[] = $join;
 
-        // Merge join bindings into query bindings
-        $this->bindings = array_merge($this->bindings, $join->getBindings());
+        // When JoinClause supports bound values, merge them:
+        // $this->bindings = array_merge($this->bindings, $join->getBindings());
 
         return $this;
     }
 
     /**
-     * Add a LEFT JOIN clause
+     * Add a LEFT JOIN clause.
      */
     public function leftJoin(string $table, string $first, string $operator, string $second): self
     {
@@ -413,7 +422,7 @@ class QueryBuilder
     }
 
     /**
-     * Set the LIMIT
+     * Set the LIMIT.
      */
     public function limit(int $limit): self
     {
@@ -427,7 +436,7 @@ class QueryBuilder
     }
 
     /**
-     * Lock the selected rows for update
+     * Lock the selected rows for update.
      */
     public function lockForUpdate(): self
     {
@@ -437,7 +446,7 @@ class QueryBuilder
     }
 
     /**
-     * Get the max value
+     * Get the max value.
      */
     public function max(string $column): mixed
     {
@@ -445,7 +454,7 @@ class QueryBuilder
     }
 
     /**
-     * Get the min value
+     * Get the min value.
      */
     public function min(string $column): mixed
     {
@@ -453,7 +462,7 @@ class QueryBuilder
     }
 
     /**
-     * Create a new query instance
+     * Create a new query instance sharing the same deps.
      */
     public function newQuery(): self
     {
@@ -461,7 +470,7 @@ class QueryBuilder
     }
 
     /**
-     * Set the OFFSET
+     * Set the OFFSET.
      */
     public function offset(int $offset): self
     {
@@ -475,13 +484,13 @@ class QueryBuilder
     }
 
     /**
-     * Add an ORDER BY clause
+     * Add an ORDER BY clause.
      */
     public function orderBy(string $column, string $direction = 'asc'): self
     {
-        $direction = strtolower($direction);
+        $direction = \strtolower($direction);
 
-        if (!in_array($direction, ['asc', 'desc'], true)) {
+        if (!\in_array($direction, ['asc', 'desc'], true)) {
             throw QueryException::invalidOrderDirection($direction);
         }
 
@@ -494,7 +503,7 @@ class QueryBuilder
     }
 
     /**
-     * Add ORDER BY DESC
+     * Add ORDER BY DESC.
      */
     public function orderByDesc(string $column): self
     {
@@ -502,11 +511,11 @@ class QueryBuilder
     }
 
     /**
-     * Add an OR WHERE clause
+     * Add an OR WHERE clause.
      */
     public function orWhere(string|callable $column, mixed $operator = null, mixed $value = null): self
     {
-        if (func_num_args() === 2) {
+        if (\func_num_args() === 2) {
             $value = $operator;
             $operator = '=';
         }
@@ -515,7 +524,7 @@ class QueryBuilder
     }
 
     /**
-     * Add a RIGHT JOIN clause
+     * Add a RIGHT JOIN clause.
      */
     public function rightJoin(string $table, string $first, string $operator, string $second): self
     {
@@ -523,7 +532,7 @@ class QueryBuilder
     }
 
     /**
-     * Set the columns to select
+     * Set the columns to select.
      */
     public function select(array|string ...$columns): self
     {
@@ -532,13 +541,13 @@ class QueryBuilder
         }
 
         $this->type = 'select';
-        $this->columns = is_array($columns[0]) ? $columns[0] : $columns;
+        $this->columns = \is_array($columns[0]) ? $columns[0] : $columns;
 
         return $this;
     }
 
     /**
-     * Lock the selected rows in shared mode
+     * Lock the selected rows in shared mode.
      */
     public function sharedLock(): self
     {
@@ -548,7 +557,7 @@ class QueryBuilder
     }
 
     /**
-     * Set OFFSET
+     * Set OFFSET (alias for offset).
      */
     public function skip(int $offset): self
     {
@@ -556,7 +565,7 @@ class QueryBuilder
     }
 
     /**
-     * Get the sum
+     * Get the sum of a column.
      */
     public function sum(string $column): mixed
     {
@@ -564,7 +573,7 @@ class QueryBuilder
     }
 
     /**
-     * Set the table (alias for from)
+     * Set the table (alias for from).
      */
     public function table(string $table): self
     {
@@ -572,7 +581,7 @@ class QueryBuilder
     }
 
     /**
-     * Set LIMIT (alias for limit, typically used for pagination)
+     * Set LIMIT (alias for limit, typically used for pagination).
      */
     public function take(int $limit): self
     {
@@ -580,7 +589,7 @@ class QueryBuilder
     }
 
     /**
-     * Get the SQL query
+     * Get the SQL query string.
      */
     public function toSql(): string
     {
@@ -588,7 +597,7 @@ class QueryBuilder
     }
 
     /**
-     * Truncate the table
+     * Truncate the table.
      */
     public function truncate(): bool
     {
@@ -596,11 +605,11 @@ class QueryBuilder
     }
 
     /**
-     * Add a UNION query
+     * Add a UNION query.
      */
     public function union(QueryBuilder|callable $query, bool $all = false): self
     {
-        if (is_callable($query)) {
+        if (\is_callable($query)) {
             $builder = $this->newQuery();
             $query($builder);
             $query = $builder;
@@ -611,13 +620,13 @@ class QueryBuilder
           'all' => $all,
         ];
 
-        $this->bindings = array_merge($this->bindings, $query->getBindings());
+        $this->bindings = \array_merge($this->bindings, $query->getBindings());
 
         return $this;
     }
 
     /**
-     * Add a UNION ALL query
+     * Add a UNION ALL query.
      */
     public function unionAll(QueryBuilder|callable $query): self
     {
@@ -625,7 +634,7 @@ class QueryBuilder
     }
 
     /**
-     * Update records
+     * Update records.
      */
     public function update(array $values): int
     {
@@ -633,7 +642,7 @@ class QueryBuilder
     }
 
     /**
-     * Get a single column value from the first result
+     * Get a single column value from the first result.
      */
     public function value(string $column): mixed
     {
@@ -643,7 +652,7 @@ class QueryBuilder
     }
 
     /**
-     * Add a WHERE clause
+     * Add a WHERE clause.
      */
     public function where(
       string|callable $column,
@@ -652,12 +661,12 @@ class QueryBuilder
       string $boolean = 'and'
     ): self {
         // Handle closure for nested where
-        if (is_callable($column)) {
+        if (\is_callable($column)) {
             return $this->whereNested($column, $boolean);
         }
 
         // Handle two arguments (column, value)
-        if (func_num_args() === 2) {
+        if (\func_num_args() === 2) {
             $value = $operator;
             $operator = '=';
         }
@@ -676,7 +685,7 @@ class QueryBuilder
     }
 
     /**
-     * Add a WHERE BETWEEN clause
+     * Add a WHERE BETWEEN clause.
      */
     public function whereBetween(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
@@ -688,13 +697,13 @@ class QueryBuilder
           'not' => $not,
         ];
 
-        $this->bindings = array_merge($this->bindings, $values);
+        $this->bindings = \array_merge($this->bindings, $values);
 
         return $this;
     }
 
     /**
-     * Add a WHERE EXISTS clause
+     * Add a WHERE EXISTS clause.
      */
     public function whereExists(callable $callback, string $boolean = 'and', bool $not = false): self
     {
@@ -708,13 +717,13 @@ class QueryBuilder
           'not' => $not,
         ];
 
-        $this->bindings = array_merge($this->bindings, $query->getBindings());
+        $this->bindings = \array_merge($this->bindings, $query->getBindings());
 
         return $this;
     }
 
     /**
-     * Add a WHERE IN clause
+     * Add a WHERE IN clause.
      */
     public function whereIn(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
@@ -726,13 +735,13 @@ class QueryBuilder
           'not' => $not,
         ];
 
-        $this->bindings = array_merge($this->bindings, $values);
+        $this->bindings = \array_merge($this->bindings, $values);
 
         return $this;
     }
 
     /**
-     * Add a nested WHERE clause
+     * Add a nested WHERE clause.
      */
     public function whereNested(callable $callback, string $boolean = 'and'): self
     {
@@ -746,14 +755,14 @@ class QueryBuilder
               'boolean' => $boolean,
             ];
 
-            $this->bindings = array_merge($this->bindings, $query->getBindings());
+            $this->bindings = \array_merge($this->bindings, $query->getBindings());
         }
 
         return $this;
     }
 
     /**
-     * Add a WHERE NOT BETWEEN clause
+     * Add a WHERE NOT BETWEEN clause.
      */
     public function whereNotBetween(string $column, array $values, string $boolean = 'and'): self
     {
@@ -761,7 +770,7 @@ class QueryBuilder
     }
 
     /**
-     * Add a WHERE NOT EXISTS clause
+     * Add a WHERE NOT EXISTS clause.
      */
     public function whereNotExists(callable $callback, string $boolean = 'and'): self
     {
@@ -769,7 +778,7 @@ class QueryBuilder
     }
 
     /**
-     * Add a WHERE NOT IN clause
+     * Add a WHERE NOT IN clause.
      */
     public function whereNotIn(string $column, array $values, string $boolean = 'and'): self
     {
@@ -777,7 +786,7 @@ class QueryBuilder
     }
 
     /**
-     * Add a WHERE NOT NULL clause
+     * Add a WHERE NOT NULL clause.
      */
     public function whereNotNull(string $column, string $boolean = 'and'): self
     {
@@ -785,7 +794,7 @@ class QueryBuilder
     }
 
     /**
-     * Add a WHERE NULL clause
+     * Add a WHERE NULL clause.
      */
     public function whereNull(string $column, string $boolean = 'and', bool $not = false): self
     {
@@ -800,7 +809,7 @@ class QueryBuilder
     }
 
     /**
-     * Add a raw WHERE clause
+     * Add a raw WHERE clause.
      */
     public function whereRaw(string $sql, array $bindings = [], string $boolean = 'and'): self
     {
@@ -810,7 +819,7 @@ class QueryBuilder
           'boolean' => $boolean,
         ];
 
-        $this->bindings = array_merge($this->bindings, $bindings);
+        $this->bindings = \array_merge($this->bindings, $bindings);
 
         return $this;
     }

@@ -41,17 +41,17 @@ abstract class Grammar
     ];
 
     /**
-     * The grammar table prefix
+     * The grammar table prefix.
      */
     protected string $tablePrefix = '';
 
     /**
-     * Wrap a single string in keyword identifiers
+     * Wrap a single string in keyword identifiers.
      */
     abstract protected function wrapValue(string $value): string;
 
     /**
-     * Convert an array of column names into a delimited string
+     * Convert an array of column names into a delimited string.
      */
     public function columnize(array $columns): string
     {
@@ -59,25 +59,25 @@ abstract class Grammar
     }
 
     /**
-     * Compile a delete statement
+     * Compile a delete statement.
      */
     public function compileDelete(QueryBuilder $query): string
     {
         $components = $query->getComponents();
-        $table = $this->wrapTable($components['from']);
-        $where = $this->compileWheres($query, $components['wheres']);
+        $table      = $this->wrapTable($components['from']);
+        $where      = $this->compileWheres($query, $components['wheres']);
 
         return trim("delete from {$table} {$where}");
     }
 
     /**
-     * Compile an insert statement
+     * Compile an insert statement.
      */
     public function compileInsert(QueryBuilder $query, array $values): string
     {
         $components = $query->getComponents();
-        $table = $this->wrapTable($components['from']);
-        $columns = $this->columnize(array_keys(reset($values)));
+        $table      = $this->wrapTable($components['from']);
+        $columns    = $this->columnize(array_keys(reset($values)));
 
         $parameters = implode(', ', array_map(function (array $record): string {
             return '(' . $this->parameterize($record) . ')';
@@ -87,7 +87,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile a select query
+     * Compile a select query.
      */
     public function compileSelect(QueryBuilder $query): string
     {
@@ -107,7 +107,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile a truncate table statement
+     * Compile a truncate table statement.
      */
     public function compileTruncate(QueryBuilder $query): string
     {
@@ -117,12 +117,12 @@ abstract class Grammar
     }
 
     /**
-     * Compile an update statement
+     * Compile an update statement.
      */
     public function compileUpdate(QueryBuilder $query, array $values): string
     {
         $components = $query->getComponents();
-        $table = $this->wrapTable($components['from']);
+        $table      = $this->wrapTable($components['from']);
 
         $columns = implode(', ', array_map(function ($value, string $key): string {
             return $this->wrap($key) . ' = ?';
@@ -134,7 +134,7 @@ abstract class Grammar
     }
 
     /**
-     * Get the format for database stored dates
+     * Get the format for database stored dates.
      */
     public function getDateFormat(): string
     {
@@ -142,7 +142,7 @@ abstract class Grammar
     }
 
     /**
-     * Get the table prefix
+     * Get the table prefix.
      */
     public function getTablePrefix(): string
     {
@@ -150,7 +150,7 @@ abstract class Grammar
     }
 
     /**
-     * Create query parameter placeholders for an array
+     * Create query parameter placeholders for an array.
      */
     public function parameterize(array $values): string
     {
@@ -162,7 +162,7 @@ abstract class Grammar
     }
 
     /**
-     * Set the table prefix
+     * Set the table prefix.
      */
     public function setTablePrefix(string $prefix): void
     {
@@ -170,7 +170,7 @@ abstract class Grammar
     }
 
     /**
-     * Wrap a value in keyword identifiers
+     * Wrap a value in keyword identifiers.
      */
     public function wrap(string|Expression $value): string
     {
@@ -192,12 +192,12 @@ abstract class Grammar
     }
 
     /**
-     * Compile an aggregated select clause
+     * Compile an aggregated select clause.
      */
     protected function compileAggregate(QueryBuilder $query): string
     {
         $components = $query->getComponents();
-        $aggregate = $components['aggregate'];
+        $aggregate  = $components['aggregate'];
 
         $column = $aggregate['column'] === '*'
           ? '*'
@@ -232,7 +232,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile the "select *" portion of the query
+     * Compile the "select *" portion of the query.
      */
     protected function compileColumns(QueryBuilder $query, array $columns): string
     {
@@ -244,13 +244,13 @@ abstract class Grammar
     }
 
     /**
-     * Compile the components necessary for a select clause
+     * Compile the components necessary for a select clause.
      *
      * @return array<string,string>
      */
     protected function compileComponents(QueryBuilder $query): array
     {
-        $sql = [];
+        $sql        = [];
         $components = $query->getComponents();
 
         foreach ($this->selectComponents as $component) {
@@ -269,6 +269,7 @@ abstract class Grammar
             if (method_exists($this, $method)) {
                 /** @var string $compiled */
                 $compiled = $this->$method($query, $value);
+
                 if ($compiled !== '') {
                     $sql[$component] = $compiled;
                 }
@@ -279,7 +280,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile the "from" portion of the query
+     * Compile the "from" portion of the query.
      */
     protected function compileFrom(QueryBuilder $query, string $table): string
     {
@@ -287,7 +288,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile the "group by" portion of the query
+     * Compile the "group by" portion of the query.
      */
     protected function compileGroups(QueryBuilder $query, array $groups): string
     {
@@ -295,29 +296,31 @@ abstract class Grammar
     }
 
     /**
-     * Compile the "having" portions of the query
+     * Compile the "having" portions of the query.
      */
     protected function compileHavings(QueryBuilder $query, array $havings): string
     {
         $sql = implode(' ', array_map(function (array $having, int $i): string {
             $boolean = $i === 0 ? '' : $having['boolean'] . ' ';
 
-            return $boolean . $this->wrap($having['column']) . ' ' . $having['operator'] . ' ?';
+            return $boolean
+              . $this->wrap($having['column'])
+              . ' ' . $having['operator'] . ' ?';
         }, $havings, array_keys($havings)));
 
         return 'having ' . $this->removeLeadingBoolean($sql);
     }
 
     /**
-     * Compile a single join clause
+     * Compile a single join clause.
      */
     protected function compileJoinClause(JoinClause $join): string
     {
-        $table = $this->wrapTable($join->getTable());
-        $type = strtoupper($join->getType());
+        $table      = $this->wrapTable($join->getTable());
+        $type       = strtoupper($join->getType());
         $conditions = $join->getConditions();
 
-        if (empty($conditions)) {
+        if ($conditions === []) {
             return "{$type} join {$table}";
         }
 
@@ -342,7 +345,7 @@ abstract class Grammar
 
                 case 'whereIn':
                     $placeholders = $this->parameterize($condition['values']);
-                    $clauses[] = $boolean
+                    $clauses[]    = $boolean
                       . $this->wrap($condition['column'])
                       . ' in (' . $placeholders . ')';
                     break;
@@ -365,7 +368,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile the "join" portions of the query
+     * Compile the "join" portions of the query.
      */
     protected function compileJoins(QueryBuilder $query, array $joins): string
     {
@@ -375,7 +378,7 @@ abstract class Grammar
             }
 
             $table = $this->wrapTable($join['table']);
-            $type = strtoupper($join['type']);
+            $type  = strtoupper($join['type']);
 
             if (isset($join['first'])) {
                 return "{$type} join {$table} on {$this->wrap($join['first'])} {$join['operator']} {$this->wrap($join['second'])}";
@@ -386,7 +389,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile the "limit" portion of the query
+     * Compile the "limit" portion of the query.
      */
     protected function compileLimit(QueryBuilder $query, int $limit): string
     {
@@ -394,7 +397,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile the lock into SQL
+     * Compile the lock into SQL.
      */
     protected function compileLock(QueryBuilder $query, string $lock): string
     {
@@ -402,7 +405,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile the "offset" portion of the query
+     * Compile the "offset" portion of the query.
      */
     protected function compileOffset(QueryBuilder $query, int $offset): string
     {
@@ -410,7 +413,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile the "order by" portion of the query
+     * Compile the "order by" portion of the query.
      */
     protected function compileOrders(QueryBuilder $query, array $orders): string
     {
@@ -422,7 +425,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile a single union statement
+     * Compile a single union statement.
      */
     protected function compileUnion(array $union): string
     {
@@ -432,7 +435,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile the union queries
+     * Compile the union queries.
      */
     protected function compileUnions(QueryBuilder $query): string
     {
@@ -446,7 +449,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile the "where" portions of the query
+     * Compile the "where" portions of the query.
      */
     protected function compileWheres(QueryBuilder $query, array $wheres): string
     {
@@ -460,7 +463,7 @@ abstract class Grammar
     }
 
     /**
-     * Concatenate an array of segments, removing empties
+     * Concatenate an array of segments, removing empties.
      */
     protected function concatenate(array $segments): string
     {
@@ -468,7 +471,7 @@ abstract class Grammar
     }
 
     /**
-     * Concatenate where clauses
+     * Concatenate where clauses.
      */
     protected function concatenateWhereClauses(QueryBuilder $query, array $wheres): string
     {
@@ -480,7 +483,7 @@ abstract class Grammar
     }
 
     /**
-     * Remove the leading boolean from a statement
+     * Remove the leading boolean from a statement.
      */
     protected function removeLeadingBoolean(string $value): string
     {
@@ -488,7 +491,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile a basic where clause
+     * Compile a basic where clause.
      */
     protected function whereBasic(QueryBuilder $query, array $where): string
     {
@@ -496,7 +499,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile a "where between" clause
+     * Compile a "where between" clause.
      */
     protected function whereBetween(QueryBuilder $query, array $where): string
     {
@@ -506,7 +509,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile a "where exists" clause
+     * Compile a "where exists" clause.
      */
     protected function whereExists(QueryBuilder $query, array $where): string
     {
@@ -516,18 +519,18 @@ abstract class Grammar
     }
 
     /**
-     * Compile a "where in" clause
+     * Compile a "where in" clause.
      */
     protected function whereIn(QueryBuilder $query, array $where): string
     {
         $values = $this->parameterize($where['values']);
-        $not = $where['not'] ? 'not ' : '';
+        $not    = $where['not'] ? 'not ' : '';
 
         return $this->wrap($where['column']) . ' ' . $not . 'in (' . $values . ')';
     }
 
     /**
-     * Compile a nested where clause
+     * Compile a nested where clause.
      */
     protected function whereNested(QueryBuilder $query, array $where): string
     {
@@ -538,7 +541,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile a "where null" clause
+     * Compile a "where null" clause.
      */
     protected function whereNull(QueryBuilder $query, array $where): string
     {
@@ -548,7 +551,7 @@ abstract class Grammar
     }
 
     /**
-     * Compile a raw where clause
+     * Compile a raw where clause.
      */
     protected function whereRaw(QueryBuilder $query, array $where): string
     {
@@ -556,7 +559,7 @@ abstract class Grammar
     }
 
     /**
-     * Wrap the given value segments
+     * Wrap the given value segments.
      */
     protected function wrapSegments(array $segments): string
     {
@@ -566,7 +569,7 @@ abstract class Grammar
     }
 
     /**
-     * Wrap table name
+     * Wrap table name.
      */
     protected function wrapTable(string|Expression $table): string
     {
@@ -578,7 +581,7 @@ abstract class Grammar
     }
 
     /**
-     * Wrap a union subquery in parentheses
+     * Wrap a union subquery in parentheses.
      */
     protected function wrapUnion(string $sql): string
     {
