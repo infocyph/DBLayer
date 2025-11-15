@@ -22,8 +22,9 @@ class ResultProcessor
      */
     public function filter(array $results, callable $callback): array
     {
-        return array_filter($results, $callback);
+        return array_values(array_filter($results, $callback));
     }
+
     /**
      * Process raw results into collection
      */
@@ -37,13 +38,13 @@ class ResultProcessor
      */
     public function processAggregate(array $results): mixed
     {
-        if (empty($results)) {
+        if ($results === []) {
             return null;
         }
 
         $result = $results[0];
 
-        return $result['aggregate'] ?? $result[array_key_first($result)] ?? null;
+        return $result['aggregate'] ?? ($result[array_key_first($result)] ?? null);
     }
 
     /**
@@ -62,7 +63,12 @@ class ResultProcessor
         $grouped = [];
 
         foreach ($results as $row) {
-            $groupKey = $row[$groupBy];
+            $groupKey = $row[$groupBy] ?? null;
+
+            if ($groupKey === null) {
+                continue;
+            }
+
             $grouped[$groupKey][] = $row;
         }
 
@@ -77,6 +83,10 @@ class ResultProcessor
         $processed = [];
 
         foreach ($results as $row) {
+            if (!array_key_exists($key, $row) || !array_key_exists($value, $row)) {
+                continue;
+            }
+
             $processed[$row[$key]] = $row[$value];
         }
 

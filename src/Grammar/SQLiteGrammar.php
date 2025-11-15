@@ -25,10 +25,11 @@ class SQLiteGrammar extends Grammar
      */
     public function compileInsertOrIgnore(QueryBuilder $query, array $values): string
     {
-        $table = $this->wrapTable($query->getComponents()['from']);
+        $components = $query->getComponents();
+        $table = $this->wrapTable($components['from']);
         $columns = $this->columnize(array_keys(reset($values)));
 
-        $parameters = implode(', ', array_map(function ($record) {
+        $parameters = implode(', ', array_map(function (array $record): string {
             return '(' . $this->parameterize($record) . ')';
         }, $values));
 
@@ -48,10 +49,11 @@ class SQLiteGrammar extends Grammar
      */
     public function compileReplace(QueryBuilder $query, array $values): string
     {
-        $table = $this->wrapTable($query->getComponents()['from']);
+        $components = $query->getComponents();
+        $table = $this->wrapTable($components['from']);
         $columns = $this->columnize(array_keys(reset($values)));
 
-        $parameters = implode(', ', array_map(function ($record) {
+        $parameters = implode(', ', array_map(function (array $record): string {
             return '(' . $this->parameterize($record) . ')';
         }, $values));
 
@@ -63,7 +65,8 @@ class SQLiteGrammar extends Grammar
      */
     public function compileTruncate(QueryBuilder $query): string
     {
-        $table = $this->wrapTable($query->getComponents()['from']);
+        $components = $query->getComponents();
+        $table = $this->wrapTable($components['from']);
 
         // SQLite doesn't have TRUNCATE, use DELETE instead
         return "delete from {$table}";
@@ -82,7 +85,8 @@ class SQLiteGrammar extends Grammar
      */
     public function whereDate(QueryBuilder $query, array $where): string
     {
-        return "date({$this->wrap($where['column'])}) {$where['operator']} date(?)";
+        return 'date(' . $this->wrap($where['column']) . ') '
+          . $where['operator'] . ' date(?)';
     }
 
     /**
@@ -90,7 +94,8 @@ class SQLiteGrammar extends Grammar
      */
     public function whereDay(QueryBuilder $query, array $where): string
     {
-        return "cast(strftime('%d', {$this->wrap($where['column'])}) as integer) {$where['operator']} cast(? as integer)";
+        return "cast(strftime('%d', {$this->wrap($where['column'])}) as integer) "
+          . $where['operator'] . ' cast(? as integer)';
     }
 
     /**
@@ -98,7 +103,8 @@ class SQLiteGrammar extends Grammar
      */
     public function whereMonth(QueryBuilder $query, array $where): string
     {
-        return "cast(strftime('%m', {$this->wrap($where['column'])}) as integer) {$where['operator']} cast(? as integer)";
+        return "cast(strftime('%m', {$this->wrap($where['column'])}) as integer) "
+          . $where['operator'] . ' cast(? as integer)';
     }
 
     /**
@@ -106,7 +112,8 @@ class SQLiteGrammar extends Grammar
      */
     public function whereYear(QueryBuilder $query, array $where): string
     {
-        return "cast(strftime('%Y', {$this->wrap($where['column'])}) as integer) {$where['operator']} cast(? as integer)";
+        return "cast(strftime('%Y', {$this->wrap($where['column'])}) as integer) "
+          . $where['operator'] . ' cast(? as integer)';
     }
 
     /**
@@ -114,7 +121,7 @@ class SQLiteGrammar extends Grammar
      */
     protected function compileLimit(QueryBuilder $query, int $limit): string
     {
-        return "limit {$limit}";
+        return 'limit ' . (int) $limit;
     }
 
     /**
@@ -131,8 +138,9 @@ class SQLiteGrammar extends Grammar
      */
     protected function compileOffset(QueryBuilder $query, int $offset): string
     {
-        return "offset {$offset}";
+        return 'offset ' . (int) $offset;
     }
+
     /**
      * Wrap a single string in keyword identifiers
      */

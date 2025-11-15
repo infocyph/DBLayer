@@ -15,49 +15,55 @@ namespace Infocyph\DBLayer\Schema;
  * @package Infocyph\DBLayer\Schema
  * @author Hasan
  */
-class ForeignKey
+final class ForeignKey
 {
     /**
-     * The local columns
+     * The local columns.
+     *
+     * @var list<string>
      */
     private array $columns;
 
     /**
-     * The constraint name
+     * The constraint name.
      */
     private ?string $name;
 
     /**
-     * The ON DELETE action
+     * The ON DELETE action.
      */
     private ?string $onDelete = null;
 
     /**
-     * The ON UPDATE action
+     * The ON UPDATE action.
      */
     private ?string $onUpdate = null;
 
     /**
-     * The reference columns
+     * The reference columns.
+     *
+     * @var list<string>
      */
     private array $referenceColumns = ['id'];
 
     /**
-     * The reference table
+     * The reference table.
      */
     private ?string $referenceTable = null;
 
     /**
-     * Create a new foreign key instance
+     * Create a new foreign key instance.
+     *
+     * @param list<string> $columns
      */
     public function __construct(array $columns, ?string $name = null)
     {
         $this->columns = $columns;
-        $this->name = $name;
+        $this->name    = $name;
     }
 
     /**
-     * Set ON DELETE CASCADE
+     * Set ON DELETE CASCADE.
      */
     public function cascadeOnDelete(): self
     {
@@ -65,7 +71,7 @@ class ForeignKey
     }
 
     /**
-     * Set ON UPDATE CASCADE
+     * Set ON UPDATE CASCADE.
      */
     public function cascadeOnUpdate(): self
     {
@@ -73,20 +79,25 @@ class ForeignKey
     }
 
     /**
-     * Constrained - shorthand for common pattern
+     * Constrained - shorthand for common pattern.
      */
     public function constrained(?string $table = null, string $column = 'id'): self
     {
         if ($table === null) {
-            // Infer table name from column name
-            $table = str_replace('_id', '', $this->columns[0]) . 's';
+            // Infer table name from first local column: user_id → users
+            $first = $this->columns[0] ?? '';
+            $table = str_ends_with($first, '_id')
+              ? substr($first, 0, -3) . 's'
+              : $first . 's';
         }
 
         return $this->references($column)->on($table);
     }
 
     /**
-     * Get the local columns
+     * Get the local columns.
+     *
+     * @return list<string>
      */
     public function getColumns(): array
     {
@@ -94,7 +105,7 @@ class ForeignKey
     }
 
     /**
-     * Get the constraint name
+     * Get the constraint name.
      */
     public function getName(): ?string
     {
@@ -102,7 +113,7 @@ class ForeignKey
     }
 
     /**
-     * Get ON DELETE action
+     * Get ON DELETE action.
      */
     public function getOnDelete(): ?string
     {
@@ -110,7 +121,7 @@ class ForeignKey
     }
 
     /**
-     * Get ON UPDATE action
+     * Get ON UPDATE action.
      */
     public function getOnUpdate(): ?string
     {
@@ -118,7 +129,9 @@ class ForeignKey
     }
 
     /**
-     * Get the reference columns
+     * Get the reference columns.
+     *
+     * @return list<string>
      */
     public function getReferenceColumns(): array
     {
@@ -126,7 +139,7 @@ class ForeignKey
     }
 
     /**
-     * Get the reference table
+     * Get the reference table.
      */
     public function getReferenceTable(): ?string
     {
@@ -134,26 +147,27 @@ class ForeignKey
     }
 
     /**
-     * Check if foreign key is valid
+     * Check if foreign key is valid.
      */
     public function isValid(): bool
     {
-        return !empty($this->columns) &&
-               !empty($this->referenceTable) &&
-               !empty($this->referenceColumns);
+        return $this->columns !== []
+          && $this->referenceTable !== null
+          && $this->referenceColumns !== [];
     }
 
     /**
-     * Set constraint name
+     * Set constraint name.
      */
     public function name(string $name): self
     {
         $this->name = $name;
+
         return $this;
     }
 
     /**
-     * Set ON DELETE NO ACTION
+     * Set ON DELETE NO ACTION.
      */
     public function noActionOnDelete(): self
     {
@@ -161,7 +175,7 @@ class ForeignKey
     }
 
     /**
-     * Set ON UPDATE NO ACTION
+     * Set ON UPDATE NO ACTION.
      */
     public function noActionOnUpdate(): self
     {
@@ -169,7 +183,7 @@ class ForeignKey
     }
 
     /**
-     * Set ON DELETE SET NULL
+     * Set ON DELETE SET NULL.
      */
     public function nullOnDelete(): self
     {
@@ -177,7 +191,7 @@ class ForeignKey
     }
 
     /**
-     * Set ON UPDATE SET NULL
+     * Set ON UPDATE SET NULL.
      */
     public function nullOnUpdate(): self
     {
@@ -185,43 +199,49 @@ class ForeignKey
     }
 
     /**
-     * Set the reference table
+     * Set the reference table.
      */
     public function on(string $table): self
     {
         $this->referenceTable = $table;
+
         return $this;
     }
 
     /**
-     * Set ON DELETE action
+     * Set ON DELETE action.
      */
     public function onDelete(string $action): self
     {
         $this->onDelete = strtoupper($action);
+
         return $this;
     }
 
     /**
-     * Set ON UPDATE action
+     * Set ON UPDATE action.
      */
     public function onUpdate(string $action): self
     {
         $this->onUpdate = strtoupper($action);
+
         return $this;
     }
 
     /**
-     * Set the reference table
+     * Set the reference columns.
+     *
+     * @param string|list<string> $columns
      */
     public function references(string|array $columns): self
     {
         $this->referenceColumns = (array) $columns;
+
         return $this;
     }
 
     /**
-     * Set ON DELETE RESTRICT
+     * Set ON DELETE RESTRICT.
      */
     public function restrictOnDelete(): self
     {
@@ -229,7 +249,7 @@ class ForeignKey
     }
 
     /**
-     * Set ON UPDATE RESTRICT
+     * Set ON UPDATE RESTRICT.
      */
     public function restrictOnUpdate(): self
     {

@@ -13,7 +13,7 @@ namespace Infocyph\DBLayer\Query;
  * @package Infocyph\DBLayer\Query
  * @author Hasan
  */
-class Expression
+final class Expression
 {
     /**
      * The value of the expression

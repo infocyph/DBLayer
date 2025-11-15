@@ -69,4 +69,24 @@ final class TransactionException extends DBException
     {
         return new self('Transaction attempted write in read-only mode.');
     }
+
+    /**
+     * No active transaction when commit/rollback/savepoint is attempted.
+     */
+    public static function notActive(): self
+    {
+        return new self('No active transaction is currently in progress.');
+    }
+
+    /**
+     * Transaction exceeded configured time limit.
+     */
+    public static function timeout(float $elapsedSeconds, int $maxSeconds): self
+    {
+        $elapsed = sprintf('%.4f', $elapsedSeconds);
+
+        return new self(
+          "Transaction timeout after {$elapsed} seconds (max allowed: {$maxSeconds} seconds)."
+        );
+    }
 }

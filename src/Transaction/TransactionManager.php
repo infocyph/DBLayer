@@ -15,25 +15,36 @@ use Infocyph\DBLayer\Connection\Connection;
  * @package Infocyph\DBLayer\Transaction
  * @author Hasan
  */
-class TransactionManager
+final class TransactionManager
 {
     /**
-     * Global statistics
+     * Global statistics.
+     *
+     * @var array{
+     *   total_transactions:int,
+     *   active_transactions:int,
+     *   total_commits:int,
+     *   total_rollbacks:int,
+     *   total_deadlocks:int
+     * }
      */
     private array $globalStats = [
-        'total_transactions' => 0,
-        'active_transactions' => 0,
-        'total_commits' => 0,
-        'total_rollbacks' => 0,
-        'total_deadlocks' => 0,
+      'total_transactions'  => 0,
+      'active_transactions' => 0,
+      'total_commits'       => 0,
+      'total_rollbacks'     => 0,
+      'total_deadlocks'     => 0,
     ];
+
     /**
-     * Transaction instances by connection
+     * Transaction instances keyed by connection object id.
+     *
+     * @var array<int,Transaction>
      */
     private array $transactions = [];
 
     /**
-     * Get active transaction count
+     * Get number of active (top-level) transactions.
      */
     public function activeCount(): int
     {
@@ -41,7 +52,7 @@ class TransactionManager
     }
 
     /**
-     * Begin transaction on connection
+     * Begin a transaction on a specific connection.
      */
     public function begin(Connection $connection): void
     {
@@ -55,16 +66,16 @@ class TransactionManager
     }
 
     /**
-     * Clear all transaction instances
+     * Clear all transaction instances and stats.
      */
     public function clear(): void
     {
         $this->transactions = [];
-        $this->resetStats();
+        this->resetStats();
     }
 
     /**
-     * Commit transaction on connection
+     * Commit transaction on a specific connection.
      */
     public function commit(Connection $connection): void
     {
@@ -78,21 +89,25 @@ class TransactionManager
     }
 
     /**
-     * Commit all active transactions
+     * Commit all active transactions.
+     *
+     * Uses commit() so global stats stay consistent.
      */
     public function commitAll(): void
     {
         foreach ($this->transactions as $transaction) {
             if ($transaction->inTransaction()) {
-                $transaction->commit();
+                $this->commit($transaction->getConnection());
             }
         }
-
-        $this->globalStats['active_transactions'] = 0;
     }
 
     /**
-     * Execute callback in transaction
+     * Execute callback in a transaction on given connection.
+     *
+     * @template T
+     * @param callable(Connection):T $callback
+     * @return T
      */
     public function execute(Connection $connection, callable $callback, int $attempts = 1): mixed
     {
@@ -103,12 +118,13 @@ class TransactionManager
         } catch (\Throwable $e) {
             $stats = $transaction->getStats();
             $this->globalStats['total_deadlocks'] += $stats['deadlocks'] ?? 0;
+
             throw $e;
         }
     }
 
     /**
-     * Get or create transaction for connection
+     * Get or create a Transaction wrapper for the given connection.
      */
     public function forConnection(Connection $connection): Transaction
     {
@@ -123,7 +139,7 @@ class TransactionManager
     }
 
     /**
-     * Get global statistics
+     * Get global statistics.
      */
     public function getGlobalStats(): array
     {
@@ -131,7 +147,7 @@ class TransactionManager
     }
 
     /**
-     * Get statistics for specific connection
+     * Get statistics for a specific connection.
      */
     public function getStats(Connection $connection): array
     {
@@ -145,7 +161,7 @@ class TransactionManager
     }
 
     /**
-     * Check if connection has active transaction
+     * Check if a connection has an active transaction.
      */
     public function inTransaction(Connection $connection): bool
     {
@@ -159,7 +175,7 @@ class TransactionManager
     }
 
     /**
-     * Get transaction level for connection
+     * Get transaction nesting level for a connection.
      */
     public function level(Connection $connection): int
     {
@@ -173,16 +189,16 @@ class TransactionManager
     }
 
     /**
-     * Reset all statistics
+     * Reset global and per-connection statistics.
      */
     public function resetStats(): void
     {
         $this->globalStats = [
-            'total_transactions' => 0,
-            'active_transactions' => 0,
-            'total_commits' => 0,
-            'total_rollbacks' => 0,
-            'total_deadlocks' => 0,
+          'total_transactions'  => 0,
+          'active_transactions' => 0,
+          'total_commits'       => 0,
+          'total_rollbacks'     => 0,
+          'total_deadlocks'     => 0,
         ];
 
         foreach ($this->transactions as $transaction) {
@@ -191,7 +207,7 @@ class TransactionManager
     }
 
     /**
-     * Rollback transaction on connection
+     * Rollback transaction on a specific connection.
      */
     public function rollback(Connection $connection): void
     {
@@ -205,21 +221,21 @@ class TransactionManager
     }
 
     /**
-     * Rollback all active transactions
+     * Rollback all active transactions.
+     *
+     * Uses rollback() so global stats stay consistent.
      */
     public function rollbackAll(): void
     {
         foreach ($this->transactions as $transaction) {
             if ($transaction->inTransaction()) {
-                $transaction->rollback();
+                $this->rollback($transaction->getConnection());
             }
         }
-
-        $this->globalStats['active_transactions'] = 0;
     }
 
     /**
-     * Get total transaction count
+     * Get total number of tracked connections.
      */
     public function totalCount(): int
     {

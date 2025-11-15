@@ -6,24 +6,21 @@ declare(strict_types=1);
  * DBLayer Helper Functions
  *
  * Global helper functions for database operations.
- * These functions provide convenient shortcuts for common database tasks.
  *
  * @package Infocyph\DBLayer
- * @author Hasan
  */
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
-use Infocyph\DBLayer\ORM\Collection;
 use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Support\Collection;
 
 if (!function_exists('db')) {
     /**
-     * Get a database connection instance or query builder
+     * Get a database connection instance or query builder.
      *
-     * @param string|null $table Table name for query builder
-     * @param string|null $connection Connection name
-     * @return Connection|QueryBuilder
+     * - db() → Connection
+     * - db('users') → QueryBuilder on "users" table
      */
     function db(?string $table = null, ?string $connection = null): Connection|QueryBuilder
     {
@@ -37,12 +34,8 @@ if (!function_exists('db')) {
 
 if (!function_exists('db_transaction')) {
     /**
-     * Execute a callback within a database transaction
+     * Execute a callback within a database transaction.
      *
-     * @param callable $callback Callback to execute
-     * @param int $attempts Number of attempts for deadlock recovery
-     * @param string|null $connection Connection name
-     * @return mixed
      * @throws Throwable
      */
     function db_transaction(callable $callback, int $attempts = 1, ?string $connection = null): mixed
@@ -53,12 +46,7 @@ if (!function_exists('db_transaction')) {
 
 if (!function_exists('db_select')) {
     /**
-     * Execute a select query
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return array
+     * Execute a select query.
      */
     function db_select(string $query, array $bindings = [], ?string $connection = null): array
     {
@@ -68,28 +56,19 @@ if (!function_exists('db_select')) {
 
 if (!function_exists('db_select_one')) {
     /**
-     * Execute a select query and return the first result
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return mixed
+     * Execute a select query and return the first result.
      */
     function db_select_one(string $query, array $bindings = [], ?string $connection = null): mixed
     {
         $results = db_select($query, $bindings, $connection);
+
         return $results[0] ?? null;
     }
 }
 
 if (!function_exists('db_insert')) {
     /**
-     * Execute an insert query
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return bool
+     * Execute an insert query.
      */
     function db_insert(string $query, array $bindings = [], ?string $connection = null): bool
     {
@@ -99,12 +78,7 @@ if (!function_exists('db_insert')) {
 
 if (!function_exists('db_update')) {
     /**
-     * Execute an update query
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return int Number of affected rows
+     * Execute an update query.
      */
     function db_update(string $query, array $bindings = [], ?string $connection = null): int
     {
@@ -114,12 +88,7 @@ if (!function_exists('db_update')) {
 
 if (!function_exists('db_delete')) {
     /**
-     * Execute a delete query
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return int Number of affected rows
+     * Execute a delete query.
      */
     function db_delete(string $query, array $bindings = [], ?string $connection = null): int
     {
@@ -129,12 +98,7 @@ if (!function_exists('db_delete')) {
 
 if (!function_exists('db_statement')) {
     /**
-     * Execute a general statement
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return bool
+     * Execute a general statement.
      */
     function db_statement(string $query, array $bindings = [], ?string $connection = null): bool
     {
@@ -144,11 +108,7 @@ if (!function_exists('db_statement')) {
 
 if (!function_exists('db_unprepared')) {
     /**
-     * Execute an unprepared statement
-     *
-     * @param string $query SQL query
-     * @param string|null $connection Connection name
-     * @return bool
+     * Execute an unprepared statement.
      */
     function db_unprepared(string $query, ?string $connection = null): bool
     {
@@ -158,11 +118,7 @@ if (!function_exists('db_unprepared')) {
 
 if (!function_exists('db_table')) {
     /**
-     * Get a query builder for a table
-     *
-     * @param string $table Table name
-     * @param string|null $connection Connection name
-     * @return QueryBuilder
+     * Get a query builder for a table.
      */
     function db_table(string $table, ?string $connection = null): QueryBuilder
     {
@@ -172,10 +128,7 @@ if (!function_exists('db_table')) {
 
 if (!function_exists('db_raw')) {
     /**
-     * Create a raw database expression
-     *
-     * @param mixed $value Raw value
-     * @return mixed
+     * Create a raw database expression.
      */
     function db_raw(mixed $value): mixed
     {
@@ -185,10 +138,7 @@ if (!function_exists('db_raw')) {
 
 if (!function_exists('collect')) {
     /**
-     * Create a collection from the given value
-     *
-     * @param mixed $value
-     * @return Collection
+     * Create a collection from the given value.
      */
     function collect(mixed $value = []): Collection
     {
@@ -198,10 +148,7 @@ if (!function_exists('collect')) {
 
 if (!function_exists('value')) {
     /**
-     * Return the default value of the given value
-     *
-     * @param mixed $value
-     * @return mixed
+     * Return the default value of the given value.
      */
     function value(mixed $value): mixed
     {
@@ -211,15 +158,11 @@ if (!function_exists('value')) {
 
 if (!function_exists('tap')) {
     /**
-     * Call the given Closure with the given value then return the value
-     *
-     * @param mixed $value
-     * @param callable|null $callback
-     * @return mixed
+     * Call the given Closure with the given value then return the value.
      */
     function tap(mixed $value, ?callable $callback = null): mixed
     {
-        if (is_null($callback)) {
+        if ($callback === null) {
             return $value;
         }
 
@@ -231,30 +174,21 @@ if (!function_exists('tap')) {
 
 if (!function_exists('with')) {
     /**
-     * Return the given value, optionally passed through the given callback
-     *
-     * @param mixed $value
-     * @param callable|null $callback
-     * @return mixed
+     * Return the given value, optionally passed through the given callback.
      */
     function with(mixed $value, ?callable $callback = null): mixed
     {
-        return is_null($callback) ? $value : $callback($value);
+        return $callback === null ? $value : $callback($value);
     }
 }
 
 if (!function_exists('data_get')) {
     /**
-     * Get an item from an array or object using "dot" notation
-     *
-     * @param mixed $target
-     * @param string|array|int|null $key
-     * @param mixed $default
-     * @return mixed
+     * Get an item from an array or object using "dot" notation.
      */
     function data_get(mixed $target, string|array|int|null $key, mixed $default = null): mixed
     {
-        if (is_null($key)) {
+        if ($key === null) {
             return $target;
         }
 
@@ -287,32 +221,36 @@ if (!function_exists('data_get')) {
 
 if (!function_exists('data_set')) {
     /**
-     * Set an item on an array or object using dot notation
-     *
-     * @param mixed $target
-     * @param string|array $key
-     * @param mixed $value
-     * @param bool $overwrite
-     * @return mixed
+     * Set an item on an array or object using dot notation.
      */
     function data_set(mixed &$target, string|array $key, mixed $value, bool $overwrite = true): mixed
     {
         $segments = is_array($key) ? $key : explode('.', $key);
         $segment = array_shift($segments);
 
-        if (empty($segments)) {
-            if (!$overwrite && isset($target[$segment])) {
+        if ($segment === null) {
+            return $target;
+        }
+
+        if ($segments === []) {
+            if (!$overwrite && (is_array($target) && array_key_exists($segment, $target))) {
                 return $target;
             }
 
-            $target[$segment] = $value;
-        } else {
-            if (!isset($target[$segment])) {
-                $target[$segment] = [];
+            if (!is_array($target)) {
+                $target = [];
             }
 
-            data_set($target[$segment], $segments, $value, $overwrite);
+            $target[$segment] = $value;
+
+            return $target;
         }
+
+        if (!is_array($target) || !array_key_exists($segment, $target)) {
+            $target[$segment] = [];
+        }
+
+        data_set($target[$segment], $segments, $value, $overwrite);
 
         return $target;
     }
@@ -320,10 +258,7 @@ if (!function_exists('data_set')) {
 
 if (!function_exists('array_accessible')) {
     /**
-     * Determine whether the given value is array accessible
-     *
-     * @param mixed $value
-     * @return bool
+     * Determine whether the given value is array accessible.
      */
     function array_accessible(mixed $value): bool
     {
@@ -331,12 +266,28 @@ if (!function_exists('array_accessible')) {
     }
 }
 
+if (!function_exists('array_all')) {
+    /**
+     * Determine if all items in the array pass the given truth test.
+     *
+     * @param array $array
+     * @param callable $callback fn(mixed $value, mixed $key): bool
+     */
+    function array_all(array $array, callable $callback): bool
+    {
+        foreach ($array as $key => $value) {
+            if (!$callback($value, $key)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
 if (!function_exists('class_basename')) {
     /**
-     * Get the class "basename" of the given object / class
-     *
-     * @param string|object $class
-     * @return string
+     * Get the class "basename" of the given object / class.
      */
     function class_basename(string|object $class): string
     {
@@ -348,10 +299,7 @@ if (!function_exists('class_basename')) {
 
 if (!function_exists('class_uses_recursive')) {
     /**
-     * Returns all traits used by a class, its parent classes and trait of their traits
-     *
-     * @param object|string $class
-     * @return array
+     * Returns all traits used by a class, its parent classes and their traits.
      */
     function class_uses_recursive(object|string $class): array
     {
@@ -361,8 +309,8 @@ if (!function_exists('class_uses_recursive')) {
 
         $results = [];
 
-        foreach (array_reverse(class_parents($class)) + [$class => $class] as $class) {
-            $results += trait_uses_recursive($class);
+        foreach (array_reverse(class_parents($class)) + [$class => $class] as $cls) {
+            $results += trait_uses_recursive($cls);
         }
 
         return array_unique($results);
@@ -371,17 +319,14 @@ if (!function_exists('class_uses_recursive')) {
 
 if (!function_exists('trait_uses_recursive')) {
     /**
-     * Returns all traits used by a trait and its traits
-     *
-     * @param string $trait
-     * @return array
+     * Returns all traits used by a trait and its traits.
      */
     function trait_uses_recursive(string $trait): array
     {
         $traits = class_uses($trait);
 
-        foreach ($traits as $trait) {
-            $traits += trait_uses_recursive($trait);
+        foreach ($traits as $used) {
+            $traits += trait_uses_recursive($used);
         }
 
         return $traits;
@@ -390,14 +335,11 @@ if (!function_exists('trait_uses_recursive')) {
 
 if (!function_exists('blank')) {
     /**
-     * Determine if the given value is "blank"
-     *
-     * @param mixed $value
-     * @return bool
+     * Determine if the given value is "blank".
      */
     function blank(mixed $value): bool
     {
-        if (is_null($value)) {
+        if ($value === null) {
             return true;
         }
 
@@ -419,10 +361,7 @@ if (!function_exists('blank')) {
 
 if (!function_exists('filled')) {
     /**
-     * Determine if a value is "filled"
-     *
-     * @param mixed $value
-     * @return bool
+     * Determine if a value is "filled".
      */
     function filled(mixed $value): bool
     {
@@ -432,19 +371,15 @@ if (!function_exists('filled')) {
 
 if (!function_exists('optional')) {
     /**
-     * Provide access to optional objects
-     *
-     * @param mixed $value
-     * @param callable|null $callback
-     * @return mixed
+     * Provide access to optional objects.
      */
     function optional(mixed $value = null, ?callable $callback = null): mixed
     {
-        if (is_null($callback)) {
+        if ($callback === null) {
             return $value;
         }
 
-        if (!is_null($value)) {
+        if ($value !== null) {
             return $callback($value);
         }
 
@@ -454,13 +389,8 @@ if (!function_exists('optional')) {
 
 if (!function_exists('retry')) {
     /**
-     * Retry an operation a given number of times
+     * Retry an operation a given number of times.
      *
-     * @param int $times
-     * @param callable $callback
-     * @param int $sleep Milliseconds to sleep between attempts
-     * @param callable|null $when
-     * @return mixed
      * @throws Exception
      */
     function retry(int $times, callable $callback, int $sleep = 0, ?callable $when = null): mixed
@@ -478,7 +408,7 @@ if (!function_exists('retry')) {
                 throw $e;
             }
 
-            if ($sleep) {
+            if ($sleep > 0) {
                 usleep($sleep * 1000);
             }
 
@@ -489,12 +419,7 @@ if (!function_exists('retry')) {
 
 if (!function_exists('rescue')) {
     /**
-     * Catch a potential exception and return a default value
-     *
-     * @param callable $callback
-     * @param mixed $rescue
-     * @param bool $report
-     * @return mixed
+     * Catch a potential exception and return a default value.
      */
     function rescue(callable $callback, mixed $rescue = null, bool $report = true): mixed
     {
@@ -502,7 +427,7 @@ if (!function_exists('rescue')) {
             return $callback();
         } catch (Throwable $e) {
             if ($report) {
-                // Could log here if logger is available
+                // Hook for logging if needed.
             }
 
             return value($rescue);
@@ -512,12 +437,7 @@ if (!function_exists('rescue')) {
 
 if (!function_exists('transform')) {
     /**
-     * Transform the given value if it is present
-     *
-     * @param mixed $value
-     * @param callable $callback
-     * @param mixed $default
-     * @return mixed
+     * Transform the given value if it is present.
      */
     function transform(mixed $value, callable $callback, mixed $default = null): mixed
     {
@@ -535,9 +455,7 @@ if (!function_exists('transform')) {
 
 if (!function_exists('windows_os')) {
     /**
-     * Determine whether the current environment is Windows based
-     *
-     * @return bool
+     * Determine whether the current environment is Windows based.
      */
     function windows_os(): bool
     {
@@ -547,23 +465,22 @@ if (!function_exists('windows_os')) {
 
 if (!function_exists('now')) {
     /**
-     * Get the current date and time
-     *
-     * @param DateTimeZone|string|null $tz
-     * @return DateTime
+     * Get the current date and time.
      */
     function now(DateTimeZone|string|null $tz = null): DateTime
     {
-        return new DateTime('now', $tz instanceof DateTimeZone ? $tz : new DateTimeZone($tz ?? date_default_timezone_get()));
+        return new DateTime(
+          'now',
+          $tz instanceof DateTimeZone
+            ? $tz
+            : new DateTimeZone($tz ?? date_default_timezone_get())
+        );
     }
 }
 
 if (!function_exists('today')) {
     /**
-     * Get today's date
-     *
-     * @param DateTimeZone|string|null $tz
-     * @return DateTime
+     * Get today's date.
      */
     function today(DateTimeZone|string|null $tz = null): DateTime
     {

@@ -16,49 +16,56 @@ namespace Infocyph\DBLayer\Schema;
  * @package Infocyph\DBLayer\Schema
  * @author Hasan
  */
-class Blueprint
+final class Blueprint
 {
     /**
-     * The table charset
+     * The table charset.
      */
     private ?string $charset = null;
 
     /**
-     * The table collation
+     * The table collation.
      */
     private ?string $collation = null;
 
     /**
-     * The columns to add
+     * The columns to add.
+     *
+     * @var list<Column>
      */
     private array $columns = [];
 
     /**
-     * The commands to execute
+     * The commands to execute.
+     *
+     * Each command is an array with at least a 'name' key.
+     *
+     * @var list<array<string, mixed>>
      */
     private array $commands = [];
 
     /**
-     * The table engine
+     * The table engine (MySQL).
      */
     private ?string $engine = null;
 
     /**
-     * Whether to add soft deletes
+     * Whether to add soft deletes.
      */
     private bool $softDeletes = false;
+
     /**
-     * The table name
+     * The table name.
      */
     private string $table;
 
     /**
-     * Whether to add timestamps
+     * Whether to add timestamps.
      */
     private bool $timestamps = false;
 
     /**
-     * Create a new blueprint instance
+     * Create a new blueprint instance.
      */
     public function __construct(string $table)
     {
@@ -66,18 +73,19 @@ class Blueprint
     }
 
     /**
-     * Add an auto-incrementing big integer column
+     * Add an auto-incrementing big integer column.
      */
     public function bigIncrements(string $column): Column
     {
         $col = $this->addColumn('bigIncrements', $column);
         $col->autoIncrement()->unsigned();
         $this->primary($column);
+
         return $col;
     }
 
     /**
-     * Add a big integer column
+     * Add a big integer column.
      */
     public function bigInteger(string $column): Column
     {
@@ -85,7 +93,7 @@ class Blueprint
     }
 
     /**
-     * Add a binary column
+     * Add a binary column.
      */
     public function binary(string $column): Column
     {
@@ -93,7 +101,7 @@ class Blueprint
     }
 
     /**
-     * Add a boolean column
+     * Add a boolean column.
      */
     public function boolean(string $column): Column
     {
@@ -101,7 +109,7 @@ class Blueprint
     }
 
     /**
-     * Add a char column
+     * Add a char column.
      */
     public function char(string $column, int $length = 255): Column
     {
@@ -109,7 +117,7 @@ class Blueprint
     }
 
     /**
-     * Set table charset
+     * Set table charset.
      */
     public function charset(string $charset): void
     {
@@ -117,7 +125,7 @@ class Blueprint
     }
 
     /**
-     * Set table collation
+     * Set table collation.
      */
     public function collation(string $collation): void
     {
@@ -125,7 +133,7 @@ class Blueprint
     }
 
     /**
-     * Create the table
+     * Create the table.
      */
     public function create(): void
     {
@@ -133,7 +141,7 @@ class Blueprint
     }
 
     /**
-     * Add a date column
+     * Add a date column.
      */
     public function date(string $column): Column
     {
@@ -141,7 +149,7 @@ class Blueprint
     }
 
     /**
-     * Add a datetime column
+     * Add a datetime column.
      */
     public function dateTime(string $column, int $precision = 0): Column
     {
@@ -149,23 +157,29 @@ class Blueprint
     }
 
     /**
-     * Add a decimal column
+     * Add a decimal column.
      */
     public function decimal(string $column, int $precision = 10, int $scale = 2): Column
     {
-        return $this->addColumn('decimal', $column, ['precision' => $precision, 'scale' => $scale]);
+        return $this->addColumn('decimal', $column, [
+          'precision' => $precision,
+          'scale'     => $scale,
+        ]);
     }
 
     /**
-     * Add a double column
+     * Add a double column.
      */
     public function double(string $column, int $precision = 15, int $scale = 8): Column
     {
-        return $this->addColumn('double', $column, ['precision' => $precision, 'scale' => $scale]);
+        return $this->addColumn('double', $column, [
+          'precision' => $precision,
+          'scale'     => $scale,
+        ]);
     }
 
     /**
-     * Drop the table
+     * Drop the table.
      */
     public function drop(): void
     {
@@ -173,27 +187,31 @@ class Blueprint
     }
 
     /**
-     * Drop a column
+     * Drop a column.
+     *
+     * @param string|array<int,string> $columns
      */
     public function dropColumn(string|array $columns): void
     {
         $this->addCommand('dropColumn', [
-            'columns' => (array) $columns,
+          'columns' => (array) $columns,
         ]);
     }
 
     /**
-     * Drop a foreign key
+     * Drop a foreign key.
+     *
+     * @param string|array<int,string> $columns
      */
     public function dropForeign(string|array $columns): void
     {
         $this->addCommand('dropForeign', [
-            'columns' => (array) $columns,
+          'columns' => (array) $columns,
         ]);
     }
 
     /**
-     * Drop the table if it exists
+     * Drop the table if it exists.
      */
     public function dropIfExists(): void
     {
@@ -201,17 +219,19 @@ class Blueprint
     }
 
     /**
-     * Drop an index
+     * Drop an index.
+     *
+     * @param string|array<int,string> $columns
      */
     public function dropIndex(string|array $columns): void
     {
         $this->addCommand('dropIndex', [
-            'columns' => (array) $columns,
+          'columns' => (array) $columns,
         ]);
     }
 
     /**
-     * Drop a primary key
+     * Drop a primary key.
      */
     public function dropPrimary(?string $name = null): void
     {
@@ -219,17 +239,19 @@ class Blueprint
     }
 
     /**
-     * Drop a unique index
+     * Drop a unique index.
+     *
+     * @param string|array<int,string> $columns
      */
     public function dropUnique(string|array $columns): void
     {
         $this->addCommand('dropUnique', [
-            'columns' => (array) $columns,
+          'columns' => (array) $columns,
         ]);
     }
 
     /**
-     * Set table engine
+     * Set table engine (MySQL).
      */
     public function engine(string $engine): void
     {
@@ -237,7 +259,9 @@ class Blueprint
     }
 
     /**
-     * Add an enum column
+     * Add an enum column.
+     *
+     * @param array<int,string> $allowed
      */
     public function enum(string $column, array $allowed): Column
     {
@@ -245,29 +269,34 @@ class Blueprint
     }
 
     /**
-     * Add a float column
+     * Add a float column.
      */
     public function float(string $column, int $precision = 8, int $scale = 2): Column
     {
-        return $this->addColumn('float', $column, ['precision' => $precision, 'scale' => $scale]);
+        return $this->addColumn('float', $column, [
+          'precision' => $precision,
+          'scale'     => $scale,
+        ]);
     }
 
     /**
-     * Add a foreign key
+     * Add a foreign key.
+     *
+     * @param string|array<int,string> $columns
      */
     public function foreign(string|array $columns, ?string $name = null): ForeignKey
     {
         $foreignKey = new ForeignKey((array) $columns, $name);
 
         $this->addCommand('foreign', [
-            'foreignKey' => $foreignKey,
+          'foreignKey' => $foreignKey,
         ]);
 
         return $foreignKey;
     }
 
     /**
-     * Add a foreign key column
+     * Add a foreign key column (unsigned big integer).
      */
     public function foreignId(string $column): Column
     {
@@ -275,29 +304,34 @@ class Blueprint
     }
 
     /**
-     * Add a foreign key with constrained relationship
+     * Add a foreign key with constrained relationship.
+     *
+     * @param class-string $model
      */
     public function foreignIdFor(string $model, ?string $column = null): ForeignKey
     {
-        $column = $column ?? strtolower(class_basename($model)) . '_id';
-        $this->unsignedBigInteger($column);
+        $columnName = $this->inferForeignKeyColumn($model, $column);
 
-        return $this->foreign($column);
+        $this->unsignedBigInteger($columnName);
+
+        return $this->foreign($columnName);
     }
 
     /**
-     * Add a fulltext index
+     * Add a fulltext index (MySQL).
+     *
+     * @param string|array<int,string> $columns
      */
     public function fulltext(string|array $columns, ?string $name = null): void
     {
         $this->addCommand('fulltext', [
-            'columns' => (array) $columns,
-            'name' => $name,
+          'columns' => (array) $columns,
+          'name'    => $name,
         ]);
     }
 
     /**
-     * Get table charset
+     * Get table charset.
      */
     public function getCharset(): ?string
     {
@@ -305,7 +339,7 @@ class Blueprint
     }
 
     /**
-     * Get table collation
+     * Get table collation.
      */
     public function getCollation(): ?string
     {
@@ -313,7 +347,9 @@ class Blueprint
     }
 
     /**
-     * Get all columns
+     * Get all columns.
+     *
+     * @return list<Column>
      */
     public function getColumns(): array
     {
@@ -321,7 +357,9 @@ class Blueprint
     }
 
     /**
-     * Get all commands
+     * Get all commands.
+     *
+     * @return list<array<string,mixed>>
      */
     public function getCommands(): array
     {
@@ -329,7 +367,7 @@ class Blueprint
     }
 
     /**
-     * Get table engine
+     * Get table engine.
      */
     public function getEngine(): ?string
     {
@@ -337,7 +375,7 @@ class Blueprint
     }
 
     /**
-     * Get table name
+     * Get table name.
      */
     public function getTable(): string
     {
@@ -345,7 +383,7 @@ class Blueprint
     }
 
     /**
-     * Check if using soft deletes
+     * Check if using soft deletes.
      */
     public function hasSoftDeletes(): bool
     {
@@ -353,7 +391,7 @@ class Blueprint
     }
 
     /**
-     * Check if using timestamps
+     * Check if using timestamps.
      */
     public function hasTimestamps(): bool
     {
@@ -361,7 +399,7 @@ class Blueprint
     }
 
     /**
-     * Add an incrementing ID column
+     * Add an incrementing ID column.
      */
     public function id(string $column = 'id'): Column
     {
@@ -369,29 +407,32 @@ class Blueprint
     }
 
     /**
-     * Add an auto-incrementing integer column
+     * Add an auto-incrementing integer column.
      */
     public function increments(string $column): Column
     {
         $col = $this->addColumn('increments', $column);
         $col->autoIncrement()->unsigned();
         $this->primary($column);
+
         return $col;
     }
 
     /**
-     * Add an index
+     * Add an index.
+     *
+     * @param string|array<int,string> $columns
      */
     public function index(string|array $columns, ?string $name = null): void
     {
         $this->addCommand('index', [
-            'columns' => (array) $columns,
-            'name' => $name,
+          'columns' => (array) $columns,
+          'name'    => $name,
         ]);
     }
 
     /**
-     * Add an integer column
+     * Add an integer column.
      */
     public function integer(string $column): Column
     {
@@ -399,7 +440,7 @@ class Blueprint
     }
 
     /**
-     * Add an IP address column
+     * Add an IP address column.
      */
     public function ipAddress(string $column): Column
     {
@@ -407,7 +448,7 @@ class Blueprint
     }
 
     /**
-     * Add a JSON column
+     * Add a JSON column.
      */
     public function json(string $column): Column
     {
@@ -415,7 +456,7 @@ class Blueprint
     }
 
     /**
-     * Add a JSONB column (PostgreSQL)
+     * Add a JSONB column (PostgreSQL).
      */
     public function jsonb(string $column): Column
     {
@@ -423,7 +464,7 @@ class Blueprint
     }
 
     /**
-     * Add a long text column
+     * Add a long text column.
      */
     public function longText(string $column): Column
     {
@@ -431,7 +472,7 @@ class Blueprint
     }
 
     /**
-     * Add a MAC address column
+     * Add a MAC address column.
      */
     public function macAddress(string $column): Column
     {
@@ -439,7 +480,7 @@ class Blueprint
     }
 
     /**
-     * Add a medium integer column
+     * Add a medium integer column.
      */
     public function mediumInteger(string $column): Column
     {
@@ -447,7 +488,7 @@ class Blueprint
     }
 
     /**
-     * Add a medium text column
+     * Add a medium text column.
      */
     public function mediumText(string $column): Column
     {
@@ -455,18 +496,20 @@ class Blueprint
     }
 
     /**
-     * Add a primary key
+     * Add a primary key.
+     *
+     * @param string|array<int,string> $columns
      */
     public function primary(string|array $columns, ?string $name = null): void
     {
         $this->addCommand('primary', [
-            'columns' => (array) $columns,
-            'name' => $name,
+          'columns' => (array) $columns,
+          'name'    => $name,
         ]);
     }
 
     /**
-     * Add remember_token column
+     * Add remember_token column.
      */
     public function rememberToken(): Column
     {
@@ -474,7 +517,7 @@ class Blueprint
     }
 
     /**
-     * Rename the table
+     * Rename the table.
      */
     public function rename(string $to): void
     {
@@ -482,29 +525,30 @@ class Blueprint
     }
 
     /**
-     * Rename a column
+     * Rename a column.
      */
     public function renameColumn(string $from, string $to): void
     {
         $this->addCommand('renameColumn', [
-            'from' => $from,
-            'to' => $to,
+          'from' => $from,
+          'to'   => $to,
         ]);
     }
 
     /**
-     * Add a small auto-incrementing integer column
+     * Add a small auto-incrementing integer column.
      */
     public function smallIncrements(string $column): Column
     {
         $col = $this->addColumn('smallIncrements', $column);
         $col->autoIncrement()->unsigned();
         $this->primary($column);
+
         return $col;
     }
 
     /**
-     * Add a small integer column
+     * Add a small integer column.
      */
     public function smallInteger(string $column): Column
     {
@@ -512,16 +556,17 @@ class Blueprint
     }
 
     /**
-     * Add a deleted_at column for soft deletes
+     * Add a deleted_at column for soft deletes.
      */
     public function softDeletes(string $column = 'deleted_at', int $precision = 0): Column
     {
         $this->softDeletes = true;
+
         return $this->timestamp($column, $precision)->nullable();
     }
 
     /**
-     * Add a string column
+     * Add a string column.
      */
     public function string(string $column, int $length = 255): Column
     {
@@ -529,7 +574,7 @@ class Blueprint
     }
 
     /**
-     * Add a text column
+     * Add a text column.
      */
     public function text(string $column): Column
     {
@@ -537,7 +582,7 @@ class Blueprint
     }
 
     /**
-     * Add a time column
+     * Add a time column.
      */
     public function time(string $column, int $precision = 0): Column
     {
@@ -545,7 +590,7 @@ class Blueprint
     }
 
     /**
-     * Add a timestamp column
+     * Add a timestamp column.
      */
     public function timestamp(string $column, int $precision = 0): Column
     {
@@ -553,7 +598,7 @@ class Blueprint
     }
 
     /**
-     * Add created_at and updated_at columns
+     * Add created_at and updated_at columns.
      */
     public function timestamps(int $precision = 0): void
     {
@@ -563,7 +608,7 @@ class Blueprint
     }
 
     /**
-     * Add a tiny integer column
+     * Add a tiny integer column.
      */
     public function tinyInteger(string $column): Column
     {
@@ -571,18 +616,20 @@ class Blueprint
     }
 
     /**
-     * Add a unique index
+     * Add a unique index.
+     *
+     * @param string|array<int,string> $columns
      */
     public function unique(string|array $columns, ?string $name = null): void
     {
         $this->addCommand('unique', [
-            'columns' => (array) $columns,
-            'name' => $name,
+          'columns' => (array) $columns,
+          'name'    => $name,
         ]);
     }
 
     /**
-     * Add an unsigned big integer column
+     * Add an unsigned big integer column.
      */
     public function unsignedBigInteger(string $column): Column
     {
@@ -590,7 +637,7 @@ class Blueprint
     }
 
     /**
-     * Add an unsigned integer column
+     * Add an unsigned integer column.
      */
     public function unsignedInteger(string $column): Column
     {
@@ -598,17 +645,18 @@ class Blueprint
     }
 
     /**
-     * Add a UUID column
+     * Add a UUID column and mark as primary key.
      */
     public function uuid(string $column = 'id'): Column
     {
         $col = $this->addColumn('uuid', $column);
-        $col->primary();
+        $this->primary($column);
+
         return $col;
     }
 
     /**
-     * Add a UUID column (binary or string based on driver)
+     * Add a UUID column (binary or string based on driver).
      */
     public function uuidColumn(string $column): Column
     {
@@ -616,7 +664,7 @@ class Blueprint
     }
 
     /**
-     * Add a year column
+     * Add a year column.
      */
     public function year(string $column): Column
     {
@@ -624,21 +672,44 @@ class Blueprint
     }
 
     /**
-     * Add a new column
+     * Add a new column.
+     *
+     * @param array<string,mixed> $parameters
      */
     private function addColumn(string $type, string $name, array $parameters = []): Column
     {
-        $column = new Column($type, $name, $parameters);
+        $column        = new Column($type, $name, $parameters);
         $this->columns[] = $column;
 
         return $column;
     }
 
     /**
-     * Add a command
+     * Add a command.
+     *
+     * @param array<string,mixed> $parameters
      */
     private function addCommand(string $name, array $parameters = []): void
     {
         $this->commands[] = array_merge(['name' => $name], $parameters);
+    }
+
+    /**
+     * Infer foreign key column name from model class and optional column.
+     *
+     * @param class-string $model
+     */
+    private function inferForeignKeyColumn(string $model, ?string $column): string
+    {
+        if ($column !== null) {
+            return $column;
+        }
+
+        // Strip namespace from FQCN.
+        $pos     = strrpos($model, '\\');
+        $base    = $pos === false ? $model : substr($model, $pos + 1);
+        $base    = strtolower($base);
+
+        return $base . '_id';
     }
 }

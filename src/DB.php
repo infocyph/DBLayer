@@ -6,8 +6,6 @@ namespace Infocyph\DBLayer;
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
-use Infocyph\DBLayer\Query\QueryBuilder;
-use Infocyph\DBLayer\Transaction\Transaction;
 
 /**
  * DB Static Facade
@@ -16,59 +14,42 @@ use Infocyph\DBLayer\Transaction\Transaction;
  * Acts as a facade to the underlying Connection and QueryBuilder classes.
  *
  * @package Infocyph\DBLayer
- * @author Hasan
- *
- * @method static QueryBuilder table(string $table, ?string $connection = null)
- * @method static array select(string $query, array $bindings = [], ?string $connection = null)
- * @method static bool insert(string $query, array $bindings = [], ?string $connection = null)
- * @method static int update(string $query, array $bindings = [], ?string $connection = null)
- * @method static int delete(string $query, array $bindings = [], ?string $connection = null)
- * @method static bool statement(string $query, array $bindings = [], ?string $connection = null)
- * @method static bool unprepared(string $query, ?string $connection = null)
- * @method static mixed transaction(callable $callback, int $attempts = 1, ?string $connection = null)
- * @method static void beginTransaction(?string $connection = null)
- * @method static void commit(?string $connection = null)
- * @method static void rollBack(?string $connection = null)
- * @method static int transactionLevel(?string $connection = null)
- * @method static void listen(callable $callback)
- * @method static void enableQueryLog()
- * @method static void disableQueryLog()
- * @method static array getQueryLog()
- * @method static void flushQueryLog()
  */
 class DB
 {
     /**
-     * The database connections
+     * The database connections.
+     *
+     * @var array<string,Connection>
      */
     protected static array $connections = [];
 
     /**
-     * The default connection name
+     * The default connection name.
      */
     protected static ?string $defaultConnection = 'default';
 
     /**
-     * Query event listeners
+     * Query event listeners.
+     *
+     * @var array<int,callable>
      */
     protected static array $listeners = [];
 
     /**
-     * Query logging enabled state
+     * Query logging enabled state.
      */
     protected static bool $loggingQueries = false;
 
     /**
-     * Query log
+     * Query log.
+     *
+     * @var array<int,array<string,mixed>>
      */
     protected static array $queryLog = [];
 
     /**
-     * Dynamically pass methods to the default connection
-     *
-     * @param string $method Method name
-     * @param array $parameters Method parameters
-     * @return mixed
+     * Dynamically pass methods to the default connection.
      */
     public static function __callStatic(string $method, array $parameters): mixed
     {
@@ -76,11 +57,7 @@ class DB
     }
 
     /**
-     * Add a database connection
-     *
-     * @param array $config Connection configuration
-     * @param string $name Connection name
-     * @return Connection
+     * Add a database connection.
      */
     public static function addConnection(array $config, string $name = 'default'): Connection
     {
@@ -94,11 +71,9 @@ class DB
     }
 
     /**
-     * Execute multiple queries in sequence
+     * Execute multiple queries in sequence.
      *
-     * @param array $queries Array of [query, bindings] pairs
-     * @param string|null $connection Connection name
-     * @return array Results from all queries
+     * @param array<int,array{0:string,1:array|null}> $queries
      */
     public static function batch(array $queries, ?string $connection = null): array
     {
@@ -113,10 +88,7 @@ class DB
     }
 
     /**
-     * Begin a transaction
-     *
-     * @param string|null $connection Connection name
-     * @return void
+     * Begin a transaction.
      */
     public static function beginTransaction(?string $connection = null): void
     {
@@ -124,10 +96,7 @@ class DB
     }
 
     /**
-     * Commit the active transaction
-     *
-     * @param string|null $connection Connection name
-     * @return void
+     * Commit the active transaction.
      */
     public static function commit(?string $connection = null): void
     {
@@ -135,30 +104,23 @@ class DB
     }
 
     /**
-     * Get a database connection instance
+     * Get a database connection instance.
      *
-     * @param string|null $name Connection name
-     * @return Connection
      * @throws ConnectionException
      */
     public static function connection(?string $name = null): Connection
     {
         $name = $name ?? static::$defaultConnection;
 
-        if (!isset(static::$connections[$name])) {
-            throw ConnectionException::connectionNotFound($name);
+        if ($name === null || !isset(static::$connections[$name])) {
+            throw ConnectionException::connectionNotFound($name ?? 'null');
         }
 
         return static::$connections[$name];
     }
 
     /**
-     * Execute a delete statement
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return int
+     * Execute a delete statement.
      */
     public static function delete(string $query, array $bindings = [], ?string $connection = null): int
     {
@@ -166,9 +128,7 @@ class DB
     }
 
     /**
-     * Disable the query log
-     *
-     * @return void
+     * Disable the query log.
      */
     public static function disableQueryLog(): void
     {
@@ -176,22 +136,15 @@ class DB
     }
 
     /**
-     * Remove a connection from the registry
-     *
-     * @param string $name Connection name
-     * @return void
+     * Remove a connection from the registry.
      */
     public static function disconnect(string $name): void
     {
-        if (isset(static::$connections[$name])) {
-            unset(static::$connections[$name]);
-        }
+        unset(static::$connections[$name]);
     }
 
     /**
-     * Enable the query log
-     *
-     * @return void
+     * Enable the query log.
      */
     public static function enableQueryLog(): void
     {
@@ -199,20 +152,17 @@ class DB
     }
 
     /**
-     * Fire the query event for listeners
+     * Fire the query event for listeners.
      *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param float $time Execution time
-     * @return void
+     * Intended to be called by the Connection / Executor layer.
      */
-    public static function fireQueryEvent(string $query, array $bindings, float $time): void
+    public static function fireQueryEvent(string $query, array $bindings, float $time, ?string $connection = null): void
     {
         $event = [
-            'query' => $query,
-            'bindings' => $bindings,
-            'time' => $time,
-            'connection' => static::$defaultConnection,
+          'query' => $query,
+          'bindings' => $bindings,
+          'time' => $time,
+          'connection' => $connection ?? static::$defaultConnection,
         ];
 
         foreach (static::$listeners as $listener) {
@@ -225,9 +175,7 @@ class DB
     }
 
     /**
-     * Flush the query log
-     *
-     * @return void
+     * Flush the query log.
      */
     public static function flushQueryLog(): void
     {
@@ -235,9 +183,9 @@ class DB
     }
 
     /**
-     * Get all registered connections
+     * Get all registered connections.
      *
-     * @return array
+     * @return array<string,Connection>
      */
     public static function getConnections(): array
     {
@@ -245,10 +193,7 @@ class DB
     }
 
     /**
-     * Get the database name
-     *
-     * @param string|null $connection Connection name
-     * @return string
+     * Get the database name.
      */
     public static function getDatabaseName(?string $connection = null): string
     {
@@ -256,9 +201,7 @@ class DB
     }
 
     /**
-     * Get the default connection name
-     *
-     * @return string|null
+     * Get the default connection name.
      */
     public static function getDefaultConnection(): ?string
     {
@@ -266,10 +209,7 @@ class DB
     }
 
     /**
-     * Get the database driver name
-     *
-     * @param string|null $connection Connection name
-     * @return string
+     * Get the database driver name.
      */
     public static function getDriverName(?string $connection = null): string
     {
@@ -277,10 +217,7 @@ class DB
     }
 
     /**
-     * Get the PDO instance
-     *
-     * @param string|null $connection Connection name
-     * @return PDO
+     * Get the PDO instance.
      */
     public static function getPdo(?string $connection = null): \PDO
     {
@@ -288,9 +225,9 @@ class DB
     }
 
     /**
-     * Get the query log
+     * Get the query log.
      *
-     * @return array
+     * @return array<int,array<string,mixed>>
      */
     public static function getQueryLog(): array
     {
@@ -298,10 +235,7 @@ class DB
     }
 
     /**
-     * Get the table prefix
-     *
-     * @param string|null $connection Connection name
-     * @return string
+     * Get the table prefix.
      */
     public static function getTablePrefix(?string $connection = null): string
     {
@@ -309,10 +243,7 @@ class DB
     }
 
     /**
-     * Determine if a connection has been registered
-     *
-     * @param string $name Connection name
-     * @return bool
+     * Determine if a connection has been registered.
      */
     public static function hasConnection(string $name): bool
     {
@@ -320,12 +251,7 @@ class DB
     }
 
     /**
-     * Execute an insert statement
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return bool
+     * Execute an insert statement.
      */
     public static function insert(string $query, array $bindings = [], ?string $connection = null): bool
     {
@@ -333,11 +259,7 @@ class DB
     }
 
     /**
-     * Get last insert ID
-     *
-     * @param string|null $name Sequence name (for PostgreSQL)
-     * @param string|null $connection Connection name
-     * @return string|false
+     * Get last insert ID.
      */
     public static function lastInsertId(?string $name = null, ?string $connection = null): string|false
     {
@@ -345,10 +267,7 @@ class DB
     }
 
     /**
-     * Register a query event listener
-     *
-     * @param callable $callback Event callback
-     * @return void
+     * Register a query event listener.
      */
     public static function listen(callable $callback): void
     {
@@ -356,9 +275,7 @@ class DB
     }
 
     /**
-     * Determine if query logging is enabled
-     *
-     * @return bool
+     * Determine if query logging is enabled.
      */
     public static function logging(): bool
     {
@@ -366,27 +283,20 @@ class DB
     }
 
     /**
-     * Check if connection is alive
-     *
-     * @param string|null $connection Connection name
-     * @return bool
+     * Check if connection is alive.
      */
     public static function ping(?string $connection = null): bool
     {
         try {
             static::select('SELECT 1', [], $connection);
             return true;
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
             return false;
         }
     }
 
     /**
-     * Pretend to execute a query (for testing)
-     *
-     * @param callable $callback Callback to execute
-     * @param string|null $connection Connection name
-     * @return array
+     * Pretend to execute a query (for testing).
      */
     public static function pretend(callable $callback, ?string $connection = null): array
     {
@@ -394,23 +304,17 @@ class DB
     }
 
     /**
-     * Purge all connections
-     *
-     * @return void
+     * Purge all connections.
      */
     public static function purge(): void
     {
         static::$connections = [];
         static::$defaultConnection = null;
+        static::$queryLog = [];
     }
 
     /**
-     * Quote a value for use in a query
-     *
-     * @param string $value Value to quote
-     * @param int $type PDO parameter type
-     * @param string|null $connection Connection name
-     * @return string
+     * Quote a value for use in a query.
      */
     public static function quote(string $value, int $type = \PDO::PARAM_STR, ?string $connection = null): string
     {
@@ -418,10 +322,7 @@ class DB
     }
 
     /**
-     * Create a raw database expression
-     *
-     * @param mixed $value Raw value
-     * @return mixed
+     * Create a raw database expression.
      */
     public static function raw(mixed $value): mixed
     {
@@ -429,29 +330,25 @@ class DB
     }
 
     /**
-     * Reconnect to the given database
+     * Reconnect to the given database.
      *
-     * @param string|null $name Connection name
-     * @return Connection
+     * Delegates to the Connection implementation.
      */
     public static function reconnect(?string $name = null): Connection
     {
         $name = $name ?? static::$defaultConnection;
 
-        static::disconnect($name);
-
-        if (!static::hasConnection($name)) {
-            throw ConnectionException::connectionNotFound($name);
+        if ($name === null || !isset(static::$connections[$name])) {
+            throw ConnectionException::connectionNotFound($name ?? 'null');
         }
 
-        return static::connection($name);
+        static::$connections[$name]->reconnect();
+
+        return static::$connections[$name];
     }
 
     /**
-     * Rollback the active transaction
-     *
-     * @param string|null $connection Connection name
-     * @return void
+     * Rollback the active transaction.
      */
     public static function rollBack(?string $connection = null): void
     {
@@ -459,12 +356,7 @@ class DB
     }
 
     /**
-     * Execute a select statement
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return array
+     * Execute a select statement.
      */
     public static function select(string $query, array $bindings = [], ?string $connection = null): array
     {
@@ -472,12 +364,7 @@ class DB
     }
 
     /**
-     * Execute a select statement and return the first result
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return mixed
+     * Execute a select statement and return the first result.
      */
     public static function selectOne(string $query, array $bindings = [], ?string $connection = null): mixed
     {
@@ -487,11 +374,7 @@ class DB
     }
 
     /**
-     * Set the database name
-     *
-     * @param string $database Database name
-     * @param string|null $connection Connection name
-     * @return Connection
+     * Set the database name.
      */
     public static function setDatabaseName(string $database, ?string $connection = null): Connection
     {
@@ -499,10 +382,7 @@ class DB
     }
 
     /**
-     * Set the default connection name
-     *
-     * @param string $name Connection name
-     * @return void
+     * Set the default connection name.
      */
     public static function setDefaultConnection(string $name): void
     {
@@ -510,11 +390,7 @@ class DB
     }
 
     /**
-     * Set the table prefix
-     *
-     * @param string $prefix Table prefix
-     * @param string|null $connection Connection name
-     * @return Connection
+     * Set the table prefix.
      */
     public static function setTablePrefix(string $prefix, ?string $connection = null): Connection
     {
@@ -522,12 +398,7 @@ class DB
     }
 
     /**
-     * Execute a statement
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return bool
+     * Execute a statement.
      */
     public static function statement(string $query, array $bindings = [], ?string $connection = null): bool
     {
@@ -535,44 +406,33 @@ class DB
     }
 
     /**
-     * Get connection statistics
-     *
-     * @param string|null $connection Connection name
-     * @return array
+     * Get connection statistics.
      */
     public static function stats(?string $connection = null): array
     {
         $conn = static::connection($connection);
 
         return [
-            'driver' => $conn->getDriverName(),
-            'database' => $conn->getDatabaseName(),
-            'prefix' => $conn->getTablePrefix(),
-            'transaction_level' => $conn->transactionLevel(),
-            'total_queries' => count(static::$queryLog),
+          'driver' => $conn->getDriverName(),
+          'database' => $conn->getDatabaseName(),
+          'prefix' => $conn->getTablePrefix(),
+          'transaction_level' => $conn->transactionLevel(),
+          'total_queries' => count(static::$queryLog),
         ];
     }
 
     /**
-     * Get a query builder for a table
-     *
-     * @param string $table Table name
-     * @param string|null $connection Connection name
-     * @return QueryBuilder
+     * Get a query builder for a table.
      */
-    public static function table(string $table, ?string $connection = null): QueryBuilder
+    public static function table(string $table, ?string $connection = null): \Infocyph\DBLayer\Query\QueryBuilder
     {
         return static::connection($connection)->table($table);
     }
 
     /**
-     * Execute a callback within a transaction
+     * Execute a callback within a transaction.
      *
-     * @param callable $callback Callback to execute
-     * @param int $attempts Number of attempts
-     * @param string|null $connection Connection name
-     * @return mixed
-     * @throws Throwable
+     * @throws \Throwable
      */
     public static function transaction(callable $callback, int $attempts = 1, ?string $connection = null): mixed
     {
@@ -580,10 +440,7 @@ class DB
     }
 
     /**
-     * Get the transaction nesting level
-     *
-     * @param string|null $connection Connection name
-     * @return int
+     * Get the transaction nesting level.
      */
     public static function transactionLevel(?string $connection = null): int
     {
@@ -591,11 +448,7 @@ class DB
     }
 
     /**
-     * Execute an unprepared statement
-     *
-     * @param string $query SQL query
-     * @param string|null $connection Connection name
-     * @return bool
+     * Execute an unprepared statement.
      */
     public static function unprepared(string $query, ?string $connection = null): bool
     {
@@ -603,12 +456,7 @@ class DB
     }
 
     /**
-     * Execute an update statement
-     *
-     * @param string $query SQL query
-     * @param array $bindings Query bindings
-     * @param string|null $connection Connection name
-     * @return int
+     * Execute an update statement.
      */
     public static function update(string $query, array $bindings = [], ?string $connection = null): int
     {
@@ -616,13 +464,10 @@ class DB
     }
 
     /**
-     * Get server version
-     *
-     * @param string|null $connection Connection name
-     * @return string
+     * Get server version.
      */
     public static function version(?string $connection = null): string
     {
-        return static::connection($connection)->getPdo()->getAttribute(\PDO::ATTR_SERVER_VERSION);
+        return (string) static::connection($connection)->getPdo()->getAttribute(\PDO::ATTR_SERVER_VERSION);
     }
 }

@@ -18,12 +18,12 @@ use Infocyph\DBLayer\Connection\Connection;
 abstract class SchemaBuilder
 {
     /**
-     * Database connection
+     * Database connection.
      */
     protected Connection $connection;
 
     /**
-     * Create a new schema builder instance
+     * Create a new schema builder instance.
      */
     public function __construct(Connection $connection)
     {
@@ -31,57 +31,65 @@ abstract class SchemaBuilder
     }
 
     /**
-     * Compile the blueprint to SQL statements
+     * Compile the blueprint to SQL statements.
+     *
+     * @return list<string>
      */
     abstract public function compile(Blueprint $blueprint): array;
 
     /**
-     * Disable foreign key constraints
+     * Disable foreign key constraints.
      */
     abstract public function disableForeignKeyConstraints(): void;
 
     /**
-     * Drop a view
+     * Drop a view.
      */
     abstract public function dropView(string $view): void;
 
     /**
-     * Enable foreign key constraints
+     * Enable foreign key constraints.
      */
     abstract public function enableForeignKeyConstraints(): void;
 
     /**
-     * Get all tables
+     * Get all tables.
+     *
+     * @return list<string>
      */
     abstract public function getAllTables(): array;
 
     /**
-     * Get all views
+     * Get all views.
+     *
+     * @return list<string>
      */
     abstract public function getAllViews(): array;
 
     /**
-     * Get column listing for a table
+     * Get column listing for a table.
+     *
+     * @return list<string>
      */
     abstract public function getColumnListing(string $table): array;
 
     /**
-     * Get column type
+     * Get column type.
      */
     abstract public function getColumnType(string $table, string $column): string;
 
     /**
-     * Check if a column exists
+     * Check if a column exists.
      */
     abstract public function hasColumn(string $table, string $column): bool;
 
     /**
-     * Check if a table exists
+     * Check if a table exists.
      */
     abstract public function hasTable(string $table): bool;
 
     /**
-     * Get the connection
+     * Get the connection.
      */
     public function getConnection(): Connection
     {

@@ -7,6 +7,9 @@ namespace Infocyph\DBLayer\Schema;
 use Closure;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Exceptions\SchemaException;
+use Infocyph\DBLayer\Schema\Drivers\MySQLSchemaBuilder;
+use Infocyph\DBLayer\Schema\Drivers\PostgreSQLSchemaBuilder;
+use Infocyph\DBLayer\Schema\Drivers\SQLiteSchemaBuilder;
 
 /**
  * Schema Builder
@@ -20,28 +23,29 @@ use Infocyph\DBLayer\Exceptions\SchemaException;
  * @package Infocyph\DBLayer\Schema
  * @author Hasan
  */
-class Schema
+final class Schema
 {
     /**
-     * Schema builder for the specific driver
+     * Schema builder for the specific driver.
      */
     private SchemaBuilder $builder;
+
     /**
-     * Database connection
+     * Database connection.
      */
     private Connection $connection;
 
     /**
-     * Create a new schema instance
+     * Create a new schema instance.
      */
     public function __construct(Connection $connection)
     {
         $this->connection = $connection;
-        $this->builder = $this->resolveSchemaBuilder();
+        $this->builder    = $this->resolveSchemaBuilder();
     }
 
     /**
-     * Create a new table
+     * Create a new table.
      */
     public function create(string $table, Closure $callback): void
     {
@@ -54,7 +58,7 @@ class Schema
     }
 
     /**
-     * Disable foreign key constraints
+     * Disable foreign key constraints.
      */
     public function disableForeignKeyConstraints(): void
     {
@@ -62,7 +66,7 @@ class Schema
     }
 
     /**
-     * Drop a table
+     * Drop a table.
      */
     public function drop(string $table): void
     {
@@ -73,7 +77,7 @@ class Schema
     }
 
     /**
-     * Drop all tables
+     * Drop all tables.
      */
     public function dropAllTables(): void
     {
@@ -85,7 +89,7 @@ class Schema
     }
 
     /**
-     * Drop all views
+     * Drop all views.
      */
     public function dropAllViews(): void
     {
@@ -97,7 +101,7 @@ class Schema
     }
 
     /**
-     * Drop a table if it exists
+     * Drop a table if it exists.
      */
     public function dropIfExists(string $table): void
     {
@@ -108,7 +112,7 @@ class Schema
     }
 
     /**
-     * Enable foreign key constraints
+     * Enable foreign key constraints.
      */
     public function enableForeignKeyConstraints(): void
     {
@@ -116,7 +120,9 @@ class Schema
     }
 
     /**
-     * Get all tables
+     * Get all tables.
+     *
+     * @return list<string>
      */
     public function getAllTables(): array
     {
@@ -124,7 +130,9 @@ class Schema
     }
 
     /**
-     * Get all views
+     * Get all views.
+     *
+     * @return list<string>
      */
     public function getAllViews(): array
     {
@@ -132,7 +140,9 @@ class Schema
     }
 
     /**
-     * Get column listing for a table
+     * Get column listing for a table.
+     *
+     * @return list<string>
      */
     public function getColumnListing(string $table): array
     {
@@ -140,7 +150,7 @@ class Schema
     }
 
     /**
-     * Get column type
+     * Get column type.
      */
     public function getColumnType(string $table, string $column): string
     {
@@ -148,7 +158,7 @@ class Schema
     }
 
     /**
-     * Get the connection
+     * Get the connection.
      */
     public function getConnection(): Connection
     {
@@ -156,7 +166,7 @@ class Schema
     }
 
     /**
-     * Check if a column exists
+     * Check if a column exists.
      */
     public function hasColumn(string $table, string $column): bool
     {
@@ -164,15 +174,23 @@ class Schema
     }
 
     /**
-     * Check if columns exist
+     * Check if multiple columns exist.
+     *
+     * @param list<string> $columns
      */
     public function hasColumns(string $table, array $columns): bool
     {
-        return array_all($columns, fn ($column) => $this->hasColumn($table, $column));
+        foreach ($columns as $column) {
+            if (!$this->hasColumn($table, $column)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
-     * Check if a table exists
+     * Check if a table exists.
      */
     public function hasTable(string $table): bool
     {
@@ -180,7 +198,7 @@ class Schema
     }
 
     /**
-     * Rename a table
+     * Rename a table.
      */
     public function rename(string $from, string $to): void
     {
@@ -191,16 +209,16 @@ class Schema
     }
 
     /**
-     * Set the connection
+     * Set the connection.
      */
     public function setConnection(Connection $connection): void
     {
         $this->connection = $connection;
-        $this->builder = $this->resolveSchemaBuilder();
+        $this->builder    = $this->resolveSchemaBuilder();
     }
 
     /**
-     * Modify an existing table
+     * Modify an existing table.
      */
     public function table(string $table, Closure $callback): void
     {
@@ -212,7 +230,7 @@ class Schema
     }
 
     /**
-     * Execute the blueprint to build / modify the table
+     * Execute the blueprint to build / modify the table.
      */
     protected function build(Blueprint $blueprint): void
     {
@@ -224,17 +242,17 @@ class Schema
     }
 
     /**
-     * Resolve the schema builder for the connection driver
+     * Resolve the schema builder for the connection driver.
      */
     private function resolveSchemaBuilder(): SchemaBuilder
     {
         $driver = $this->connection->getDriverName();
 
         return match ($driver) {
-            'mysql' => new MySQLSchemaBuilder($this->connection),
-            'pgsql' => new PostgreSQLSchemaBuilder($this->connection),
+            'mysql'  => new MySQLSchemaBuilder($this->connection),
+            'pgsql'  => new PostgreSQLSchemaBuilder($this->connection),
             'sqlite' => new SQLiteSchemaBuilder($this->connection),
-            default => throw SchemaException::unsupportedDriver($driver),
+            default  => throw SchemaException::unsupportedDriver($driver),
         };
     }
 }

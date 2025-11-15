@@ -25,10 +25,11 @@ class MySQLGrammar extends Grammar
      */
     public function compileInsertIgnore(QueryBuilder $query, array $values): string
     {
-        $table = $this->wrapTable($query->getComponents()['from']);
+        $components = $query->getComponents();
+        $table = $this->wrapTable($components['from']);
         $columns = $this->columnize(array_keys(reset($values)));
 
-        $parameters = implode(', ', array_map(function ($record) {
+        $parameters = implode(', ', array_map(function (array $record): string {
             return '(' . $this->parameterize($record) . ')';
         }, $values));
 
@@ -42,8 +43,10 @@ class MySQLGrammar extends Grammar
     {
         $insert = $this->compileInsert($query, $values);
 
-        $updateColumns = implode(', ', array_map(function ($key) {
-            return $this->wrap($key) . ' = VALUES(' . $this->wrap($key) . ')';
+        $updateColumns = implode(', ', array_map(function (string $key): string {
+            $wrapped = $this->wrap($key);
+
+            return "{$wrapped} = VALUES({$wrapped})";
         }, array_keys($update)));
 
         return "{$insert} on duplicate key update {$updateColumns}";
@@ -54,10 +57,11 @@ class MySQLGrammar extends Grammar
      */
     public function compileReplace(QueryBuilder $query, array $values): string
     {
-        $table = $this->wrapTable($query->getComponents()['from']);
+        $components = $query->getComponents();
+        $table = $this->wrapTable($components['from']);
         $columns = $this->columnize(array_keys(reset($values)));
 
-        $parameters = implode(', ', array_map(function ($record) {
+        $parameters = implode(', ', array_map(function (array $record): string {
             return '(' . $this->parameterize($record) . ')';
         }, $values));
 
@@ -69,7 +73,9 @@ class MySQLGrammar extends Grammar
      */
     public function compileTruncate(QueryBuilder $query): string
     {
-        return 'truncate table ' . $this->wrapTable($query->getComponents()['from']);
+        $components = $query->getComponents();
+
+        return 'truncate table ' . $this->wrapTable($components['from']);
     }
 
     /**
@@ -85,13 +91,14 @@ class MySQLGrammar extends Grammar
      */
     protected function compileLimit(QueryBuilder $query, int $limit): string
     {
-        $offset = $query->getComponents()['offset'];
+        $components = $query->getComponents();
+        $offset = $components['offset'];
 
         if ($offset !== null) {
-            return "limit {$offset}, {$limit}";
+            return 'limit ' . (int) $offset . ', ' . (int) $limit;
         }
 
-        return "limit {$limit}";
+        return 'limit ' . (int) $limit;
     }
 
     /**
@@ -111,9 +118,10 @@ class MySQLGrammar extends Grammar
      */
     protected function compileOffset(QueryBuilder $query, int $offset): string
     {
-        // In MySQL, offset is handled in the limit clause
+        // In MySQL, offset is encoded into the LIMIT clause
         return '';
     }
+
     /**
      * Wrap a single string in keyword identifiers
      */

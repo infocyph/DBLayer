@@ -47,7 +47,8 @@ class PostgreSQLGrammar extends Grammar
      */
     public function compileTruncate(QueryBuilder $query): string
     {
-        $table = $this->wrapTable($query->getComponents()['from']);
+        $components = $query->getComponents();
+        $table = $this->wrapTable($components['from']);
 
         return "truncate table {$table} restart identity cascade";
     }
@@ -76,7 +77,7 @@ class PostgreSQLGrammar extends Grammar
             return "{$insert} on conflict ({$conflict}) do nothing";
         }
 
-        $updateColumns = implode(', ', array_map(function ($key) {
+        $updateColumns = implode(', ', array_map(function (string $key): string {
             return $this->wrap($key) . ' = excluded.' . $this->wrap($key);
         }, array_keys($update)));
 
@@ -96,7 +97,7 @@ class PostgreSQLGrammar extends Grammar
      */
     protected function compileLimit(QueryBuilder $query, int $limit): string
     {
-        return "limit {$limit}";
+        return 'limit ' . (int) $limit;
     }
 
     /**
@@ -116,8 +117,9 @@ class PostgreSQLGrammar extends Grammar
      */
     protected function compileOffset(QueryBuilder $query, int $offset): string
     {
-        return "offset {$offset}";
+        return 'offset ' . (int) $offset;
     }
+
     /**
      * Wrap a single string in keyword identifiers
      */

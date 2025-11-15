@@ -10,7 +10,7 @@ namespace Infocyph\DBLayer\Query;
  * Builds complex JOIN clauses with multiple conditions:
  * - Multiple ON conditions
  * - OR conditions
- * - Nested conditions
+ * - Nested conditions (via where* variants)
  * - WHERE conditions within JOIN
  *
  * @package Infocyph\DBLayer\Query
@@ -20,8 +20,18 @@ class JoinClause
 {
     /**
      * The join conditions
+     *
+     * @var array<int,array<string,mixed>>
      */
     private array $conditions = [];
+
+    /**
+     * Bound values for where/whereIn conditions
+     *
+     * @var array<int,mixed>
+     */
+    private array $bindings = [];
+
     /**
      * The table being joined
      */
@@ -50,6 +60,14 @@ class JoinClause
     }
 
     /**
+     * Get bindings for this join
+     */
+    public function getBindings(): array
+    {
+        return $this->bindings;
+    }
+
+    /**
      * Get the table being joined
      */
     public function getTable(): string
@@ -70,7 +88,7 @@ class JoinClause
      */
     public function hasConditions(): bool
     {
-        return !empty($this->conditions);
+        return $this->conditions !== [];
     }
 
     /**
@@ -79,11 +97,11 @@ class JoinClause
     public function on(string $first, string $operator, string $second, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-            'type' => 'basic',
-            'first' => $first,
-            'operator' => $operator,
-            'second' => $second,
-            'boolean' => $boolean,
+          'type' => 'basic',
+          'first' => $first,
+          'operator' => $operator,
+          'second' => $second,
+          'boolean' => $boolean,
         ];
 
         return $this;
@@ -111,12 +129,14 @@ class JoinClause
     public function where(string $column, string $operator, mixed $value, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-            'type' => 'where',
-            'column' => $column,
-            'operator' => $operator,
-            'value' => $value,
-            'boolean' => $boolean,
+          'type' => 'where',
+          'column' => $column,
+          'operator' => $operator,
+          'value' => $value,
+          'boolean' => $boolean,
         ];
+
+        $this->bindings[] = $value;
 
         return $this;
     }
@@ -127,11 +147,15 @@ class JoinClause
     public function whereIn(string $column, array $values, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-            'type' => 'whereIn',
-            'column' => $column,
-            'values' => $values,
-            'boolean' => $boolean,
+          'type' => 'whereIn',
+          'column' => $column,
+          'values' => $values,
+          'boolean' => $boolean,
         ];
+
+        foreach ($values as $value) {
+            $this->bindings[] = $value;
+        }
 
         return $this;
     }
@@ -142,9 +166,9 @@ class JoinClause
     public function whereNotNull(string $column, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-            'type' => 'whereNotNull',
-            'column' => $column,
-            'boolean' => $boolean,
+          'type' => 'whereNotNull',
+          'column' => $column,
+          'boolean' => $boolean,
         ];
 
         return $this;
@@ -156,9 +180,9 @@ class JoinClause
     public function whereNull(string $column, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-            'type' => 'whereNull',
-            'column' => $column,
-            'boolean' => $boolean,
+          'type' => 'whereNull',
+          'column' => $column,
+          'boolean' => $boolean,
         ];
 
         return $this;

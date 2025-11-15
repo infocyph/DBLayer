@@ -21,20 +21,25 @@ abstract class Grammar
 {
     /**
      * The components that make up a select clause
+     *
+     * Order matters for generated SQL.
+     *
+     * @var string[]
      */
     protected array $selectComponents = [
-        'aggregate',
-        'columns',
-        'from',
-        'joins',
-        'wheres',
-        'groups',
-        'havings',
-        'orders',
-        'limit',
-        'offset',
-        'lock',
+      'aggregate',
+      'columns',
+      'from',
+      'joins',
+      'wheres',
+      'groups',
+      'havings',
+      'orders',
+      'limit',
+      'offset',
+      'lock',
     ];
+
     /**
      * The grammar table prefix
      */
@@ -58,8 +63,9 @@ abstract class Grammar
      */
     public function compileDelete(QueryBuilder $query): string
     {
-        $table = $this->wrapTable($query->getComponents()['from']);
-        $where = $this->compileWheres($query, $query->getComponents()['wheres']);
+        $components = $query->getComponents();
+        $table = $this->wrapTable($components['from']);
+        $where = $this->compileWheres($query, $components['wheres']);
 
         return trim("delete from {$table} {$where}");
     }
@@ -69,10 +75,11 @@ abstract class Grammar
      */
     public function compileInsert(QueryBuilder $query, array $values): string
     {
-        $table = $this->wrapTable($query->getComponents()['from']);
+        $components = $query->getComponents();
+        $table = $this->wrapTable($components['from']);
         $columns = $this->columnize(array_keys(reset($values)));
 
-        $parameters = implode(', ', array_map(function ($record) {
+        $parameters = implode(', ', array_map(function (array $record): string {
             return '(' . $this->parameterize($record) . ')';
         }, $values));
 
@@ -84,13 +91,15 @@ abstract class Grammar
      */
     public function compileSelect(QueryBuilder $query): string
     {
-        if ($query->getComponents()['aggregate'] !== null) {
+        $components = $query->getComponents();
+
+        if ($components['aggregate'] !== null) {
             return $this->compileAggregate($query);
         }
 
         $sql = $this->concatenate($this->compileComponents($query));
 
-        if ($unions = $query->getComponents()['unions']) {
+        if ($components['unions']) {
             $sql = $this->wrapUnion($sql) . ' ' . $this->compileUnions($query);
         }
 
@@ -102,7 +111,9 @@ abstract class Grammar
      */
     public function compileTruncate(QueryBuilder $query): string
     {
-        return 'truncate table ' . $this->wrapTable($query->getComponents()['from']);
+        $components = $query->getComponents();
+
+        return 'truncate table ' . $this->wrapTable($components['from']);
     }
 
     /**
@@ -110,13 +121,14 @@ abstract class Grammar
      */
     public function compileUpdate(QueryBuilder $query, array $values): string
     {
-        $table = $this->wrapTable($query->getComponents()['from']);
+        $components = $query->getComponents();
+        $table = $this->wrapTable($components['from']);
 
-        $columns = implode(', ', array_map(function ($value, $key) {
+        $columns = implode(', ', array_map(function ($value, string $key): string {
             return $this->wrap($key) . ' = ?';
         }, array_values($values), array_keys($values)));
 
-        $where = $this->compileWheres($query, $query->getComponents()['wheres']);
+        $where = $this->compileWheres($query, $components['wheres']);
 
         return trim("update {$table} set {$columns} {$where}");
     }
@@ -138,11 +150,15 @@ abstract class Grammar
     }
 
     /**
-     * Create query parameter place-holders for an array
+     * Create query parameter placeholders for an array
      */
     public function parameterize(array $values): string
     {
-        return implode(', ', array_map(fn ($value) => '?', $values));
+        if ($values === []) {
+            return '';
+        }
+
+        return implode(', ', array_fill(0, count($values), '?'));
     }
 
     /**
@@ -167,7 +183,7 @@ abstract class Grammar
             return $this->wrapSegments(explode('.', $value));
         }
 
-        // Handle raw values with * or AS
+        // Handle raw values with * or AS (already full SQL fragments)
         if (str_contains($value, '*') || str_contains(strtolower($value), ' as ')) {
             return $value;
         }
@@ -182,11 +198,17 @@ abstract class Grammar
     {
         $components = $query->getComponents();
         $aggregate = $components['aggregate'];
-        $column = $aggregate['column'] === '*' ? '*' : $this->wrap($aggregate['column']);
 
-        $sql = $this->compileColumns($query, [new Expression("{$aggregate['function']}({$column}) as aggregate")]);
+        $column = $aggregate['column'] === '*'
+          ? '*'
+          : $this->wrap($aggregate['column']);
 
-        if (isset($components['from'])) {
+        $sql = $this->compileColumns(
+          $query,
+          [new Expression("{$aggregate['function']}({$column}) as aggregate")]
+        );
+
+        if (isset($components['from']) && $components['from'] !== null) {
             $sql .= ' ' . $this->compileFrom($query, $components['from']);
         }
 
@@ -214,17 +236,17 @@ abstract class Grammar
      */
     protected function compileColumns(QueryBuilder $query, array $columns): string
     {
-        if ($query->getComponents()['distinct']) {
-            $select = 'select distinct ';
-        } else {
-            $select = 'select ';
-        }
+        $components = $query->getComponents();
+
+        $select = $components['distinct'] ? 'select distinct ' : 'select ';
 
         return $select . $this->columnize($columns);
     }
 
     /**
      * Compile the components necessary for a select clause
+     *
+     * @return array<string,string>
      */
     protected function compileComponents(QueryBuilder $query): array
     {
@@ -232,11 +254,23 @@ abstract class Grammar
         $components = $query->getComponents();
 
         foreach ($this->selectComponents as $component) {
-            if (isset($components[$component]) && $components[$component] !== null && $components[$component] !== []) {
-                $method = 'compile' . ucfirst($component);
+            if (!array_key_exists($component, $components)) {
+                continue;
+            }
 
-                if (method_exists($this, $method)) {
-                    $sql[$component] = $this->$method($query, $components[$component]);
+            $value = $components[$component];
+
+            if ($value === null || $value === [] || $value === '') {
+                continue;
+            }
+
+            $method = 'compile' . ucfirst($component);
+
+            if (method_exists($this, $method)) {
+                /** @var string $compiled */
+                $compiled = $this->$method($query, $value);
+                if ($compiled !== '') {
+                    $sql[$component] = $compiled;
                 }
             }
         }
@@ -265,7 +299,7 @@ abstract class Grammar
      */
     protected function compileHavings(QueryBuilder $query, array $havings): string
     {
-        $sql = implode(' ', array_map(function ($having, $i) {
+        $sql = implode(' ', array_map(function (array $having, int $i): string {
             $boolean = $i === 0 ? '' : $having['boolean'] . ' ';
 
             return $boolean . $this->wrap($having['column']) . ' ' . $having['operator'] . ' ?';
@@ -290,12 +324,40 @@ abstract class Grammar
         $clauses = [];
 
         foreach ($conditions as $i => $condition) {
-            $boolean = $i === 0 ? '' : " {$condition['boolean']} ";
+            $boolean = $i === 0 ? '' : ' ' . $condition['boolean'] . ' ';
 
-            if ($condition['type'] === 'basic') {
-                $clauses[] = $boolean . "{$this->wrap($condition['first'])} {$condition['operator']} {$this->wrap($condition['second'])}";
-            } elseif ($condition['type'] === 'where') {
-                $clauses[] = $boolean . "{$this->wrap($condition['column'])} {$condition['operator']} ?";
+            switch ($condition['type']) {
+                case 'basic':
+                    $clauses[] = $boolean
+                      . $this->wrap($condition['first'])
+                      . ' ' . $condition['operator'] . ' '
+                      . $this->wrap($condition['second']);
+                    break;
+
+                case 'where':
+                    $clauses[] = $boolean
+                      . $this->wrap($condition['column'])
+                      . ' ' . $condition['operator'] . ' ?';
+                    break;
+
+                case 'whereIn':
+                    $placeholders = $this->parameterize($condition['values']);
+                    $clauses[] = $boolean
+                      . $this->wrap($condition['column'])
+                      . ' in (' . $placeholders . ')';
+                    break;
+
+                case 'whereNull':
+                    $clauses[] = $boolean
+                      . $this->wrap($condition['column'])
+                      . ' is null';
+                    break;
+
+                case 'whereNotNull':
+                    $clauses[] = $boolean
+                      . $this->wrap($condition['column'])
+                      . ' is not null';
+                    break;
             }
         }
 
@@ -307,7 +369,7 @@ abstract class Grammar
      */
     protected function compileJoins(QueryBuilder $query, array $joins): string
     {
-        return implode(' ', array_map(function ($join) {
+        return implode(' ', array_map(function ($join): string {
             if ($join instanceof JoinClause) {
                 return $this->compileJoinClause($join);
             }
@@ -352,7 +414,7 @@ abstract class Grammar
      */
     protected function compileOrders(QueryBuilder $query, array $orders): string
     {
-        $sql = implode(', ', array_map(function ($order) {
+        $sql = implode(', ', array_map(function (array $order): string {
             return $this->wrap($order['column']) . ' ' . strtoupper($order['direction']);
         }, $orders));
 
@@ -388,7 +450,7 @@ abstract class Grammar
      */
     protected function compileWheres(QueryBuilder $query, array $wheres): string
     {
-        if (empty($wheres)) {
+        if ($wheres === []) {
             return '';
         }
 
@@ -402,7 +464,7 @@ abstract class Grammar
      */
     protected function concatenate(array $segments): string
     {
-        return implode(' ', array_filter($segments, fn ($value) => $value !== ''));
+        return implode(' ', array_filter($segments, static fn ($value) => $value !== ''));
     }
 
     /**
@@ -410,7 +472,7 @@ abstract class Grammar
      */
     protected function concatenateWhereClauses(QueryBuilder $query, array $wheres): string
     {
-        return implode(' ', array_map(function ($where, $i) use ($query) {
+        return implode(' ', array_map(function (array $where, int $i) use ($query): string {
             $boolean = $i === 0 ? '' : $where['boolean'] . ' ';
 
             return $boolean . $this->{'where' . ucfirst($where['type'])}($query, $where);
@@ -422,7 +484,7 @@ abstract class Grammar
      */
     protected function removeLeadingBoolean(string $value): string
     {
-        return preg_replace('/and |or /i', '', $value, 1);
+        return (string) preg_replace('/^(and |or )/i', '', $value, 1);
     }
 
     /**
@@ -471,6 +533,7 @@ abstract class Grammar
     {
         $nested = $this->compileWheres($where['query'], $where['query']->getComponents()['wheres']);
 
+        // strip leading "where "
         return '(' . substr($nested, 6) . ')';
     }
 
@@ -497,7 +560,7 @@ abstract class Grammar
      */
     protected function wrapSegments(array $segments): string
     {
-        return implode('.', array_map(function ($segment) {
+        return implode('.', array_map(function (string $segment): string {
             return $segment === '*' ? $segment : $this->wrapValue($segment);
         }, $segments));
     }
@@ -505,7 +568,7 @@ abstract class Grammar
     /**
      * Wrap table name
      */
-    protected function wrapTable(string $table): string
+    protected function wrapTable(string|Expression $table): string
     {
         if ($table instanceof Expression) {
             return $table->getValue();
