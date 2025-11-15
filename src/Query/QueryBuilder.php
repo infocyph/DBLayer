@@ -20,6 +20,8 @@ use Infocyph\DBLayer\Grammar\Grammar;
  * - UNION, UNION ALL
  * - Subqueries
  * - Aggregate functions
+ * - Conditional clauses (when / unless)
+ * - Pagination helpers (forPage / chunk / cursor)
  */
 class QueryBuilder
 {
@@ -921,5 +923,136 @@ class QueryBuilder
         $this->bindings = array_merge($this->bindings, $bindings);
 
         return $this;
+    }
+
+    /**
+     * Conditionally apply query modifications.
+     *
+     * Example:
+     *  $builder
+     *      ->when($search, fn ($q, $search) => $q->where('name', 'like', "%$search%"))
+     *      ->when($active, fn ($q) => $q->where('active', 1));
+     *
+     * @param mixed                                  $value
+     * @param callable(self,mixed):void              $callback
+     * @param callable(self,mixed):void|null         $default
+     */
+    public function when(mixed $value, callable $callback, ?callable $default = null): self
+    {
+        if ($value) {
+            $callback($this, $value);
+        } elseif ($default !== null) {
+            $default($this, $value);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Inverse of when(): apply callback only if the value is "falsey".
+     *
+     * @param mixed                                  $value
+     * @param callable(self,mixed):void              $callback
+     * @param callable(self,mixed):void|null         $default
+     */
+    public function unless(mixed $value, callable $callback, ?callable $default = null): self
+    {
+        if (! $value) {
+            $callback($this, $value);
+        } elseif ($default !== null) {
+            $default($this, $value);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Apply pagination offsets based on page and per-page values.
+     *
+     * This mutates the current builder (like skip/take) and returns it.
+     */
+    public function forPage(int $page, int $perPage = 15): self
+    {
+        if ($perPage <= 0) {
+            throw QueryException::invalidLimit($perPage);
+        }
+
+        $page = max(1, $page);
+
+        $this->offset(($page - 1) * $perPage);
+        $this->limit($perPage);
+
+        return $this;
+    }
+
+    /**
+     * Process the query results in chunks.
+     *
+     * The callback receives (list<row>, pageNumber) and may return false to stop.
+     *
+     * @param int                                    $count
+     * @param callable(list<array<string,mixed>>,int):bool|null $callback
+     */
+    public function chunk(int $count, callable $callback): bool
+    {
+        if ($count <= 0) {
+            throw QueryException::invalidLimit($count);
+        }
+
+        $page = 1;
+
+        do {
+            $clone   = $this->cloneBuilder();
+            $results = $clone->forPage($page, $count)->get();
+            $num     = count($results);
+
+            if ($num === 0) {
+                break;
+            }
+
+            if ($callback($results, $page) === false) {
+                return false;
+            }
+
+            $page++;
+        } while ($num === $count);
+
+        return true;
+    }
+
+    /**
+     * Iterate over the results using a simple cursor based on LIMIT/OFFSET.
+     *
+     * This keeps memory usage bounded by $chunkSize.
+     *
+     * @return \Generator<array<string,mixed>>
+     */
+    public function cursor(int $chunkSize = 1000): \Generator
+    {
+        if ($chunkSize <= 0) {
+            throw QueryException::invalidLimit($chunkSize);
+        }
+
+        $page = 1;
+
+        while (true) {
+            $clone   = $this->cloneBuilder();
+            $results = $clone->forPage($page, $chunkSize)->get();
+            $num     = count($results);
+
+            if ($num === 0) {
+                break;
+            }
+
+            foreach ($results as $row) {
+                yield $row;
+            }
+
+            if ($num < $chunkSize) {
+                break;
+            }
+
+            $page++;
+        }
     }
 }

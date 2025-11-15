@@ -18,16 +18,29 @@ use Throwable;
  * Provides a convenient static interface for database operations.
  * Acts as a facade to the underlying Connection and QueryBuilder classes.
  *
+ * Design goals:
+ * - One shared Connection instance per DB name for the whole process lifetime.
+ * - Ability to opt-in to a fresh Connection instance on demand (no caching).
+ *
  * @package Infocyph\DBLayer
  */
 class DB
 {
     /**
-     * The database connections keyed by name.
+     * The database connections keyed by name (shared singletons).
      *
      * @var array<string,Connection>
      */
     protected static array $connections = [];
+
+    /**
+     * Original configuration arrays keyed by connection name.
+     *
+     * Used to build fresh Connection instances when requested.
+     *
+     * @var array<string,array<string,mixed>>
+     */
+    protected static array $connectionConfigs = [];
 
     /**
      * The default connection name.
@@ -74,13 +87,14 @@ class DB
     }
 
     /**
-     * Add a database connection.
+     * Add a database connection configuration (and instantiate shared Connection).
      *
      * @param array<string,mixed> $config
      */
     public static function addConnection(array $config, string $name = 'default'): Connection
     {
-        static::$connections[$name] = new Connection($config);
+        static::$connectionConfigs[$name] = $config;
+        static::$connections[$name]       = new Connection($config);
 
         if (static::$defaultConnection === null) {
             static::$defaultConnection = $name;
@@ -101,7 +115,7 @@ class DB
 
         foreach ($queries as $query) {
             [$sql, $bindings] = $query;
-            $results[] = static::select($sql, $bindings ?? [], $connection);
+            $results[]        = static::select($sql, $bindings ?? [], $connection);
         }
 
         return $results;
@@ -130,17 +144,46 @@ class DB
     /**
      * Get a database connection instance.
      *
+     * Default behavior:
+     *  - Returns a shared singleton Connection per DB name for the process lifetime.
+     *
+     * When $fresh = true:
+     *  - Returns a new Connection instance built from the stored config.
+     *  - The new instance is NOT stored in the shared registry.
+     *
      * @throws ConnectionException
      */
-    public static function connection(?string $name = null): Connection
+    public static function connection(?string $name = null, bool $fresh = false): Connection
     {
         $name = $name ?? static::$defaultConnection;
 
-        if ($name === null || ! isset(static::$connections[$name])) {
+        if ($name === null || ! isset(static::$connectionConfigs[$name])) {
             throw ConnectionException::connectionNotFound($name ?? 'null');
         }
 
+        if ($fresh) {
+            // Fresh, non-cached Connection for this DB config.
+            return new Connection(static::$connectionConfigs[$name]);
+        }
+
+        // Shared singleton: lazily (re)instantiate if missing.
+        if (! isset(static::$connections[$name])) {
+            static::$connections[$name] = new Connection(static::$connectionConfigs[$name]);
+        }
+
         return static::$connections[$name];
+    }
+
+    /**
+     * Convenience shortcut for an uncached Connection instance.
+     *
+     * Equivalent to connection($name, true).
+     *
+     * @throws ConnectionException
+     */
+    public static function freshConnection(?string $name = null): Connection
+    {
+        return static::connection($name, true);
     }
 
     /**
@@ -164,7 +207,9 @@ class DB
     }
 
     /**
-     * Remove a connection from the registry.
+     * Remove a shared connection instance from the registry.
+     *
+     * The configuration is kept so the connection can be lazily re-created.
      */
     public static function disconnect(string $name): void
     {
@@ -189,7 +234,7 @@ class DB
     }
 
     /**
-     * Get all registered connections.
+     * Get all shared connection instances.
      *
      * @return array<string,Connection>
      */
@@ -257,11 +302,11 @@ class DB
     }
 
     /**
-     * Determine if a connection has been registered.
+     * Determine if a connection configuration has been registered.
      */
     public static function hasConnection(string $name): bool
     {
-        return isset(static::$connections[$name]);
+        return isset(static::$connectionConfigs[$name]);
     }
 
     /**
@@ -334,6 +379,7 @@ class DB
     public static function purge(): void
     {
         static::$connections        = [];
+        static::$connectionConfigs  = [];
         static::$defaultConnection  = null;
         static::$queryLog           = [];
         static::$listeners          = [];
@@ -365,7 +411,7 @@ class DB
     }
 
     /**
-     * Reconnect to the given database.
+     * Reconnect the shared Connection for the given database.
      *
      * Delegates to the Connection implementation.
      *
@@ -375,11 +421,12 @@ class DB
     {
         $name = $name ?? static::$defaultConnection;
 
-        if ($name === null || ! isset(static::$connections[$name])) {
+        if ($name === null || ! isset(static::$connectionConfigs[$name])) {
             throw ConnectionException::connectionNotFound($name ?? 'null');
         }
 
-        static::$connections[$name]->reconnect();
+        // Drop existing shared instance (if any) and create a new one.
+        static::$connections[$name] = new Connection(static::$connectionConfigs[$name]);
 
         return static::$connections[$name];
     }
@@ -481,11 +528,11 @@ class DB
         $conn = static::connection($connection);
 
         return [
-          'driver'             => $conn->getDriverName(),
-          'database'           => $conn->getDatabaseName(),
-          'prefix'             => $conn->getTablePrefix(),
-          'transaction_level'  => $conn->transactionLevel(),
-          'total_queries'      => count(static::$queryLog),
+          'driver'            => $conn->getDriverName(),
+          'database'          => $conn->getDatabaseName(),
+          'prefix'            => $conn->getTablePrefix(),
+          'transaction_level' => $conn->transactionLevel(),
+          'total_queries'     => count(static::$queryLog),
         ];
     }
 

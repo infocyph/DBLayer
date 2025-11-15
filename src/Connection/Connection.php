@@ -455,9 +455,11 @@ final class Connection
      */
     public function table(string $table): QueryBuilder
     {
-        $builder = new QueryBuilder($this, $this->getGrammar(), $this->getExecutor());
-
-        return $builder->from($table);
+        return new QueryBuilder(
+          $this,
+          $this->getGrammar(),
+          $this->getExecutor()
+        )->from($table);
     }
 
     /**

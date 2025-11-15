@@ -58,4 +58,40 @@ final class QueryException extends DBException
     {
         return new self("Invalid query parameter [{$name}]: {$reason}");
     }
+
+    /**
+     * Invalid LIMIT value.
+     *
+     * Used by QueryBuilder::limit(), forPage(), chunk(), cursor(), etc.
+     */
+    public static function invalidLimit(int $limit): self
+    {
+        return new self(
+          "Invalid LIMIT value [{$limit}]. LIMIT must be a non-negative integer greater than zero for pagination."
+        );
+    }
+
+    /**
+     * Invalid OFFSET value.
+     *
+     * Used by QueryBuilder::offset().
+     */
+    public static function invalidOffset(int $offset): self
+    {
+        return new self(
+          "Invalid OFFSET value [{$offset}]. OFFSET must be a non-negative integer."
+        );
+    }
+
+    /**
+     * Invalid ORDER BY direction.
+     *
+     * Used by QueryBuilder::orderBy().
+     */
+    public static function invalidOrderDirection(string $direction): self
+    {
+        return new self(
+          "Invalid ORDER BY direction [{$direction}]. Use 'asc' or 'desc'."
+        );
+    }
 }
