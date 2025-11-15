@@ -14,48 +14,41 @@ use Infocyph\DBLayer\Connection\Connection;
  * @package Infocyph\DBLayer\Events\DatabaseEvents
  * @author Hasan
  */
-class QueryExecuting
+final class QueryExecuting
 {
-    /**
-     * Query bindings
-     */
-    public array $bindings;
+    public readonly string $sql;
+
+    /** @var array<int|string, mixed> */
+    public readonly array $bindings;
+
+    public readonly Connection $connection;
 
     /**
-     * Database connection
+     * Event timestamp (microtime(true)).
      */
-    public Connection $connection;
-    /**
-     * SQL query
-     */
-    public string $sql;
+    public readonly float $time;
 
     /**
-     * Event timestamp
+     * @param array<int|string, mixed> $bindings
      */
-    public float $time;
-
-    /**
-     * Create a new event instance
-     */
-    public function __construct(string $sql, array $bindings, Connection $connection): void
+    public function __construct(string $sql, array $bindings, Connection $connection, ?float $time = null)
     {
-        $this->sql = $sql;
-        $this->bindings = $bindings;
+        $this->sql        = $sql;
+        $this->bindings   = $bindings;
         $this->connection = $connection;
-        $this->time = microtime(true);
+        $this->time       = $time ?? microtime(true);
     }
 
     /**
-     * Get event data as array
+     * Get event data as array.
      */
     public function toArray(): array
     {
         return [
-            'sql' => $this->sql,
-            'bindings' => $this->bindings,
-            'connection' => $this->connection->getDriverName(),
-            'time' => $this->time,
+          'sql'        => $this->sql,
+          'bindings'   => $this->bindings,
+          'connection' => $this->connection->getDriverName(),
+          'time'       => $this->time,
         ];
     }
 }

@@ -14,35 +14,26 @@ use Infocyph\DBLayer\Connection\Connection;
  * @package Infocyph\DBLayer\Events\DatabaseEvents
  * @author Hasan
  */
-class TransactionBeginning
+final class TransactionBeginning
 {
-    /**
-     * Database connection
-     */
-    public Connection $connection;
+    public readonly Connection $connection;
 
     /**
-     * Event timestamp
+     * Event timestamp (microtime(true)).
      */
-    public float $time;
+    public readonly float $time;
 
-    /**
-     * Create a new event instance
-     */
-    public function __construct(Connection $connection): void
+    public function __construct(Connection $connection, ?float $time = null)
     {
         $this->connection = $connection;
-        $this->time = microtime(true);
+        $this->time       = $time ?? microtime(true);
     }
 
-    /**
-     * Get event data as array
-     */
     public function toArray(): array
     {
         return [
           'connection' => $this->connection->getDriverName(),
-          'time' => $this->time,
+          'time'       => $this->time,
         ];
     }
 }

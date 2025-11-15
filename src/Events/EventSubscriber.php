@@ -16,9 +16,9 @@ namespace Infocyph\DBLayer\Events;
 interface EventSubscriber
 {
     /**
-     * Get event subscriptions
+     * Get event subscriptions.
      *
-     * @return array<string, string|callable> Array of event => handler
+     * @return array<string, callable|string> Array of event => handler
      */
     public function subscribe(): array;
 }

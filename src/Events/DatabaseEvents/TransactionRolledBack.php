@@ -14,35 +14,26 @@ use Infocyph\DBLayer\Connection\Connection;
  * @package Infocyph\DBLayer\Events\DatabaseEvents
  * @author Hasan
  */
-class TransactionRolledBack
+final class TransactionRolledBack
 {
-    /**
-     * Database connection
-     */
-    public Connection $connection;
+    public readonly Connection $connection;
 
     /**
-     * Transaction duration
+     * Transaction duration in milliseconds.
      */
-    public float $duration;
+    public readonly float $duration;
 
-    /**
-     * Create a new event instance
-     */
-    public function __construct(Connection $connection, float $duration = 0)
+    public function __construct(Connection $connection, float $duration = 0.0)
     {
         $this->connection = $connection;
-        $this->duration = $duration;
+        $this->duration   = $duration;
     }
 
-    /**
-     * Get event data as array
-     */
     public function toArray(): array
     {
         return [
           'connection' => $this->connection->getDriverName(),
-          'duration' => $this->duration,
+          'duration'   => $this->duration,
         ];
     }
 }

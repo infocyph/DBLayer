@@ -14,60 +14,53 @@ use Infocyph\DBLayer\Connection\Connection;
  * @package Infocyph\DBLayer\Events\DatabaseEvents
  * @author Hasan
  */
-class QueryExecuted
+final class QueryExecuted
 {
-    /**
-     * Query bindings
-     */
-    public array $bindings;
+    public readonly string $sql;
+
+    /** @var array<int|string, mixed> */
+    public readonly array $bindings;
 
     /**
-     * Database connection
+     * Execution time in milliseconds.
      */
-    public Connection $connection;
+    public readonly float $time;
+
+    public readonly Connection $connection;
 
     /**
-     * Rows affected (for INSERT/UPDATE/DELETE)
+     * Rows affected (for INSERT/UPDATE/DELETE); null for SELECT etc.
      */
-    public ?int $rowsAffected;
-    /**
-     * SQL query
-     */
-    public string $sql;
+    public readonly ?int $rowsAffected;
 
     /**
-     * Execution time in milliseconds
-     */
-    public float $time;
-
-    /**
-     * Create a new event instance
+     * @param array<int|string, mixed> $bindings
      */
     public function __construct(
-        string $sql,
-        array $bindings,
-        float $time,
-        Connection $connection,
-        ?int $rowsAffected = null
-    ): void {
-        $this->sql = $sql;
-        $this->bindings = $bindings;
-        $this->time = $time;
-        $this->connection = $connection;
+      string $sql,
+      array $bindings,
+      float $time,
+      Connection $connection,
+      ?int $rowsAffected = null
+    ) {
+        $this->sql          = $sql;
+        $this->bindings     = $bindings;
+        $this->time         = $time;
+        $this->connection   = $connection;
         $this->rowsAffected = $rowsAffected;
     }
 
     /**
-     * Get event data as array
+     * Get event data as array.
      */
     public function toArray(): array
     {
         return [
-            'sql' => $this->sql,
-            'bindings' => $this->bindings,
-            'time' => $this->time,
-            'connection' => $this->connection->getDriverName(),
-            'rows_affected' => $this->rowsAffected,
+          'sql'           => $this->sql,
+          'bindings'      => $this->bindings,
+          'time'          => $this->time,
+          'connection'    => $this->connection->getDriverName(),
+          'rows_affected' => $this->rowsAffected,
         ];
     }
 }

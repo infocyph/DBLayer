@@ -14,35 +14,45 @@ namespace Infocyph\DBLayer\Events;
  * - Event queuing
  * - Event statistics
  *
+ * This is intentionally minimal and static; higher-level code
+ * can wrap it in an instance-based dispatcher if needed.
+ *
  * @package Infocyph\DBLayer\Events
  * @author Hasan
  */
-class Events
+final class Events
 {
     /**
-     * Enable/disable event dispatching
+     * Enable/disable event dispatching globally.
      */
     private static bool $enabled = true;
+
     /**
-     * Registered event listeners
+     * Registered event listeners.
+     *
+     * @var array<string, array<int, callable>>
      */
     private static array $listeners = [];
 
     /**
-     * Event queue for deferred dispatch
+     * Event queue for deferred dispatch.
+     *
+     * @var array<int, array{event:string,payload:array,time:float}>
      */
     private static array $queue = [];
 
     /**
-     * Event statistics
+     * Event statistics.
+     *
+     * @var array{dispatched:int,queued:int}
      */
     private static array $stats = [
-        'dispatched' => 0,
-        'queued' => 0,
+      'dispatched' => 0,
+      'queued'     => 0,
     ];
 
     /**
-     * Clear queued events without dispatching
+     * Clear queued events without dispatching.
      */
     public static function clearQueue(): void
     {
@@ -50,7 +60,7 @@ class Events
     }
 
     /**
-     * Disable event dispatching
+     * Disable event dispatching.
      */
     public static function disable(): void
     {
@@ -58,7 +68,18 @@ class Events
     }
 
     /**
-     * Dispatch an event
+     * Enable event dispatching.
+     */
+    public static function enable(): void
+    {
+        self::$enabled = true;
+    }
+
+    /**
+     * Dispatch an event.
+     *
+     * @param string $event   Event name (class name, "db.query.executed", etc.)
+     * @param array  $payload Arguments passed to listeners.
      */
     public static function dispatch(string $event, array $payload = []): void
     {
@@ -68,33 +89,31 @@ class Events
 
         self::$stats['dispatched']++;
 
-        // Dispatch to exact listeners
+        // 1) Exact listeners
         if (isset(self::$listeners[$event])) {
             foreach (self::$listeners[$event] as $listener) {
                 $listener(...$payload);
             }
         }
 
-        // Dispatch to wildcard listeners
+        // 2) Wildcard listeners (skip exact key to avoid double-dispatch)
         foreach (self::$listeners as $pattern => $listeners) {
-            if (self::matchesPattern($event, $pattern)) {
-                foreach ($listeners as $listener) {
-                    $listener(...$payload);
-                }
+            if ($pattern === $event) {
+                continue;
+            }
+
+            if (!self::matchesPattern($event, $pattern)) {
+                continue;
+            }
+
+            foreach ($listeners as $listener) {
+                $listener(...$payload);
             }
         }
     }
 
     /**
-     * Enable event dispatching
-     */
-    public static function enable(): void
-    {
-        self::$enabled = true;
-    }
-
-    /**
-     * Flush queued events
+     * Flush queued events (dispatch them in FIFO order).
      */
     public static function flush(): void
     {
@@ -106,7 +125,48 @@ class Events
     }
 
     /**
-     * Remove event listener
+     * Queue an event for later dispatch.
+     *
+     * @param string $event
+     * @param array  $payload
+     */
+    public static function queue(string $event, array $payload = []): void
+    {
+        self::$queue[] = [
+          'event'   => $event,
+          'payload' => $payload,
+          'time'    => microtime(true),
+        ];
+
+        self::$stats['queued']++;
+    }
+
+    /**
+     * Register an event listener.
+     */
+    public static function listen(string $event, callable $listener): void
+    {
+        self::$listeners[$event][] = $listener;
+    }
+
+    /**
+     * Subscribe to multiple events using a subscriber.
+     */
+    public static function subscribe(EventSubscriber $subscriber): void
+    {
+        foreach ($subscriber->subscribe() as $event => $listener) {
+            if (is_string($listener)) {
+                $listener = [$subscriber, $listener];
+            }
+
+            self::listen($event, $listener);
+        }
+    }
+
+    /**
+     * Remove event listener(s).
+     *
+     * If $listener is null, all listeners for the event are removed.
      */
     public static function forget(string $event, ?callable $listener = null): void
     {
@@ -129,7 +189,7 @@ class Events
     }
 
     /**
-     * Remove all event listeners
+     * Remove all event listeners.
      */
     public static function forgetAll(): void
     {
@@ -137,35 +197,7 @@ class Events
     }
 
     /**
-     * Get all registered events
-     */
-    public static function getEvents(): array
-    {
-        return array_keys(self::$listeners);
-    }
-
-    /**
-     * Get registered listeners for event
-     */
-    public static function getListeners(string $event): array
-    {
-        return self::$listeners[$event] ?? [];
-    }
-
-    /**
-     * Get event statistics
-     */
-    public static function getStats(): array
-    {
-        return array_merge(self::$stats, [
-            'registered_events' => count(self::$listeners),
-            'queued_events' => count(self::$queue),
-            'total_listeners' => array_sum(array_map('count', self::$listeners)),
-        ]);
-    }
-
-    /**
-     * Check if event has listeners
+     * Check if event has listeners.
      */
     public static function hasListeners(string $event): bool
     {
@@ -173,7 +205,7 @@ class Events
     }
 
     /**
-     * Check if events are enabled
+     * Check if events are enabled.
      */
     public static function isEnabled(): bool
     {
@@ -181,58 +213,56 @@ class Events
     }
 
     /**
-     * Register an event listener
+     * Get all registered event names.
+     *
+     * @return list<string>
      */
-    public static function listen(string $event, callable $listener): void
+    public static function getEvents(): array
     {
-        if (!isset(self::$listeners[$event])) {
-            self::$listeners[$event] = [];
-        }
-
-        self::$listeners[$event][] = $listener;
+        return array_keys(self::$listeners);
     }
 
     /**
-     * Queue an event for later dispatch
+     * Get registered listeners for an event.
+     *
+     * @return list<callable>
      */
-    public static function queue(string $event, array $payload = []): void
+    public static function getListeners(string $event): array
     {
-        self::$queue[] = [
-            'event' => $event,
-            'payload' => $payload,
-            'time' => microtime(true),
-        ];
-
-        self::$stats['queued']++;
+        return self::$listeners[$event] ?? [];
     }
 
     /**
-     * Reset statistics
+     * Get event statistics and some derived counts.
+     */
+    public static function getStats(): array
+    {
+        $totalListeners = array_sum(array_map('count', self::$listeners));
+
+        return array_merge(self::$stats, [
+          'registered_events' => count(self::$listeners),
+          'queued_events'     => count(self::$queue),
+          'total_listeners'   => $totalListeners,
+        ]);
+    }
+
+    /**
+     * Reset statistics counters.
      */
     public static function resetStats(): void
     {
         self::$stats = [
-            'dispatched' => 0,
-            'queued' => 0,
+          'dispatched' => 0,
+          'queued'     => 0,
         ];
     }
 
     /**
-     * Subscribe to multiple events
-     */
-    public static function subscribe(EventSubscriber $subscriber): void
-    {
-        foreach ($subscriber->subscribe() as $event => $listener) {
-            if (is_string($listener)) {
-                $listener = [$subscriber, $listener];
-            }
-
-            self::listen($event, $listener);
-        }
-    }
-
-    /**
-     * Check if event matches pattern
+     * Check if event name matches a wildcard pattern.
+     *
+     * Examples:
+     *   pattern "db.*"       matches "db.query.executed"
+     *   pattern "db.query.*" matches "db.query.executed"
      */
     private static function matchesPattern(string $event, string $pattern): bool
     {
