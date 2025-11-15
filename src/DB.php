@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer;
 
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
+use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use PDO;
@@ -13,10 +15,10 @@ use Throwable;
 /**
  * DB Static Facade
  *
- * Thin static facade over Connection / QueryBuilder:
- * - Connection registry (named connections)
- * - Simple raw query helpers
- * - Basic query logging hooks (optional)
+ * Provides a convenient static interface for database operations.
+ * Acts as a facade to the underlying Connection and QueryBuilder classes.
+ *
+ * @package Infocyph\DBLayer
  */
 class DB
 {
@@ -33,7 +35,7 @@ class DB
     protected static ?string $defaultConnection = 'default';
 
     /**
-     * Query event listeners.
+     * Query event listeners (facade-level).
      *
      * @var list<callable(array<string,mixed>):void>
      */
@@ -48,24 +50,23 @@ class DB
      * Query log entries.
      *
      * Each entry:
-     *  - query       (string)
-     *  - bindings    (list<mixed>)
-     *  - time        (float ms)
-     *  - connection  (?string)
+     *  - query (string)
+     *  - bindings (list<mixed>)
+     *  - time (float, ms)
+     *  - connection (string|null)
+     *  - rows (int|null)
      *
-     * @var list<array{
-     *   query:string,
-     *   bindings:list<mixed>,
-     *   time:float,
-     *   connection:?string
-     * }>
+     * @var list<array<string,mixed>>
      */
     protected static array $queryLog = [];
 
     /**
-     * Dynamically proxy method calls to the default connection.
-     *
-     * @throws ConnectionException
+     * Whether we've registered the global event listener bridge.
+     */
+    protected static bool $eventsHooked = false;
+
+    /**
+     * Dynamically pass methods to the default connection.
      */
     public static function __callStatic(string $method, array $parameters): mixed
     {
@@ -89,21 +90,18 @@ class DB
     }
 
     /**
-     * Execute multiple select queries in sequence.
+     * Execute multiple queries in sequence.
      *
      * @param list<array{0:string,1:array<int,mixed>|null}> $queries
-     * @return list<list<array<string,mixed>>>
-     *
-     * @throws ConnectionException
+     * @return list<array<int,mixed>>
      */
     public static function batch(array $queries, ?string $connection = null): array
     {
         $results = [];
 
-        foreach ($queries as [$sql, $bindings]) {
-            /** @var array<int,mixed> $bindings */
-            $bindings   = $bindings ?? [];
-            $results[] = static::select($sql, $bindings, $connection);
+        foreach ($queries as $query) {
+            [$sql, $bindings] = $query;
+            $results[] = static::select($sql, $bindings ?? [], $connection);
         }
 
         return $results;
@@ -130,7 +128,7 @@ class DB
     }
 
     /**
-     * Get a database connection instance by name (or default).
+     * Get a database connection instance.
      *
      * @throws ConnectionException
      */
@@ -146,7 +144,7 @@ class DB
     }
 
     /**
-     * Execute a DELETE statement.
+     * Execute a delete statement.
      *
      * @param array<int,mixed> $bindings
      *
@@ -158,7 +156,7 @@ class DB
     }
 
     /**
-     * Disable the query log (for DB facade's own log).
+     * Disable the query log.
      */
     public static function disableQueryLog(): void
     {
@@ -167,8 +165,6 @@ class DB
 
     /**
      * Remove a connection from the registry.
-     *
-     * Does not touch the default connection name.
      */
     public static function disconnect(string $name): void
     {
@@ -176,44 +172,16 @@ class DB
     }
 
     /**
-     * Enable the query log (for DB facade's own log).
+     * Enable the query log.
      */
     public static function enableQueryLog(): void
     {
         static::$loggingQueries = true;
+        static::ensureEventsHooked();
     }
 
     /**
-     * Fire the query event for listeners.
-     *
-     * Intended to be called by Connection / Executor when desired.
-     *
-     * @param list<mixed> $bindings
-     */
-    public static function fireQueryEvent(
-      string $query,
-      array $bindings,
-      float $time,
-      ?string $connection = null
-    ): void {
-        $event = [
-          'query'      => $query,
-          'bindings'   => array_values($bindings),
-          'time'       => $time,
-          'connection' => $connection ?? static::$defaultConnection,
-        ];
-
-        foreach (static::$listeners as $listener) {
-            $listener($event);
-        }
-
-        if (static::$loggingQueries) {
-            static::$queryLog[] = $event;
-        }
-    }
-
-    /**
-     * Flush the DB facade query log.
+     * Flush the query log.
      */
     public static function flushQueryLog(): void
     {
@@ -259,7 +227,7 @@ class DB
     }
 
     /**
-     * Get the underlying PDO instance.
+     * Get the PDO instance.
      *
      * @throws ConnectionException
      */
@@ -269,14 +237,9 @@ class DB
     }
 
     /**
-     * Get the DB facade query log.
+     * Get the query log.
      *
-     * @return list<array{
-     *   query:string,
-     *   bindings:list<mixed>,
-     *   time:float,
-     *   connection:?string
-     * }>
+     * @return list<array<string,mixed>>
      */
     public static function getQueryLog(): array
     {
@@ -294,7 +257,7 @@ class DB
     }
 
     /**
-     * Determine if a named connection has been registered.
+     * Determine if a connection has been registered.
      */
     public static function hasConnection(string $name): bool
     {
@@ -302,7 +265,7 @@ class DB
     }
 
     /**
-     * Execute an INSERT statement.
+     * Execute an insert statement.
      *
      * @param array<int,mixed> $bindings
      *
@@ -314,7 +277,7 @@ class DB
     }
 
     /**
-     * Get last insert ID from PDO.
+     * Get last insert ID.
      *
      * @throws ConnectionException
      */
@@ -324,17 +287,25 @@ class DB
     }
 
     /**
-     * Register a query event listener.
+     * Register a query event listener on the facade.
+     *
+     * Listener receives:
+     *  - query (string)
+     *  - bindings (list<mixed>)
+     *  - time (float, ms)
+     *  - connection (string|null)
+     *  - rows (int|null)
      *
      * @param callable(array<string,mixed>):void $callback
      */
     public static function listen(callable $callback): void
     {
         static::$listeners[] = $callback;
+        static::ensureEventsHooked();
     }
 
     /**
-     * Determine if DB facade query logging is enabled.
+     * Determine if query logging is enabled.
      */
     public static function logging(): bool
     {
@@ -342,7 +313,7 @@ class DB
     }
 
     /**
-     * Check if connection is alive using a cheap SELECT 1.
+     * Check if connection is alive.
      *
      * @throws ConnectionException
      */
@@ -358,15 +329,16 @@ class DB
     }
 
     /**
-     * Purge all connections and reset facade state.
+     * Purge all connections and facade state.
      */
     public static function purge(): void
     {
-        static::$connections       = [];
-        static::$defaultConnection = null;
-        static::$queryLog          = [];
-        static::$listeners         = [];
-        static::$loggingQueries    = false;
+        static::$connections        = [];
+        static::$defaultConnection  = null;
+        static::$queryLog           = [];
+        static::$listeners          = [];
+        static::$loggingQueries     = false;
+        static::$eventsHooked       = false;
     }
 
     /**
@@ -383,13 +355,13 @@ class DB
     }
 
     /**
-     * Create a raw database expression through the current connection.
+     * Create a raw database expression.
      *
      * @throws ConnectionException
      */
     public static function raw(mixed $value): mixed
     {
-        return static::connection()->raw($value);
+        return static::connection()->raw((string) $value);
     }
 
     /**
@@ -413,7 +385,7 @@ class DB
     }
 
     /**
-     * Roll back the active transaction.
+     * Rollback the active transaction.
      *
      * @throws ConnectionException
      */
@@ -423,7 +395,7 @@ class DB
     }
 
     /**
-     * Execute a SELECT query.
+     * Execute a select statement.
      *
      * @param array<int,mixed> $bindings
      *
@@ -436,21 +408,17 @@ class DB
     }
 
     /**
-     * Execute a SELECT query and return the first row (or null).
+     * Execute a select statement and return the first result.
      *
      * @param array<int,mixed> $bindings
      *
      * @throws ConnectionException
-     * @return array<string,mixed>|null
      */
     public static function selectOne(string $query, array $bindings = [], ?string $connection = null): mixed
     {
         $records = static::select($query, $bindings, $connection);
 
-        /** @var array<string,mixed>|null $first */
-        $first = $records[0] ?? null;
-
-        return $first;
+        return array_shift($records);
     }
 
     /**
@@ -482,7 +450,7 @@ class DB
     }
 
     /**
-     * Execute a general statement (INSERT / UPDATE / DELETE / DDL).
+     * Execute a statement (INSERT/UPDATE/DELETE/DDL).
      *
      * @param array<int,mixed> $bindings
      *
@@ -496,7 +464,7 @@ class DB
     }
 
     /**
-     * Get simple connection statistics.
+     * Get connection statistics.
      *
      * @throws ConnectionException
      *
@@ -513,16 +481,16 @@ class DB
         $conn = static::connection($connection);
 
         return [
-          'driver'            => $conn->getDriverName(),
-          'database'          => $conn->getDatabaseName(),
-          'prefix'            => $conn->getTablePrefix(),
-          'transaction_level' => $conn->transactionLevel(),
-          'total_queries'     => count(static::$queryLog),
+          'driver'             => $conn->getDriverName(),
+          'database'           => $conn->getDatabaseName(),
+          'prefix'             => $conn->getTablePrefix(),
+          'transaction_level'  => $conn->transactionLevel(),
+          'total_queries'      => count(static::$queryLog),
         ];
     }
 
     /**
-     * Get a QueryBuilder for a table.
+     * Get a query builder for a table.
      *
      * @throws ConnectionException
      */
@@ -532,7 +500,7 @@ class DB
     }
 
     /**
-     * Execute a callback within a transaction with deadlock retry.
+     * Execute a callback within a transaction.
      *
      * @throws Throwable
      * @throws ConnectionException
@@ -558,7 +526,7 @@ class DB
     /**
      * Execute an unprepared statement.
      *
-     * Alias for execute() without bindings.
+     * This is an alias for execute() without bindings, kept for convenience.
      *
      * @throws ConnectionException
      */
@@ -570,7 +538,7 @@ class DB
     }
 
     /**
-     * Execute an UPDATE statement.
+     * Execute an update statement.
      *
      * @param array<int,mixed> $bindings
      *
@@ -582,7 +550,7 @@ class DB
     }
 
     /**
-     * Get server version from PDO.
+     * Get server version.
      *
      * @throws ConnectionException
      */
@@ -591,5 +559,52 @@ class DB
         return (string) static::connection($connection)
           ->getPdo()
           ->getAttribute(PDO::ATTR_SERVER_VERSION);
+    }
+
+    /**
+     * Ensure the global query event listener is registered.
+     *
+     * Bridges typed QueryExecuted events into the DB facade
+     * listener list and query log.
+     */
+    private static function ensureEventsHooked(): void
+    {
+        if (static::$eventsHooked) {
+            return;
+        }
+
+        static::$eventsHooked = true;
+
+        Events::listen('db.query.executed', function (QueryExecuted $event): void {
+            // Skip work if nothing is interested.
+            if (! static::$loggingQueries && static::$listeners === []) {
+                return;
+            }
+
+            // Try to infer the connection name from the facade registry.
+            $connectionName = null;
+            foreach (static::$connections as $name => $connection) {
+                if ($connection === $event->connection) {
+                    $connectionName = $name;
+                    break;
+                }
+            }
+
+            $payload = [
+              'query'      => $event->sql,
+              'bindings'   => $event->bindings,
+              'time'       => $event->time,          // ms
+              'connection' => $connectionName,
+              'rows'       => $event->rowsAffected,
+            ];
+
+            foreach (static::$listeners as $listener) {
+                $listener($payload);
+            }
+
+            if (static::$loggingQueries) {
+                static::$queryLog[] = $payload;
+            }
+        });
     }
 }

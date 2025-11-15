@@ -5,7 +5,9 @@ declare(strict_types=1);
 /**
  * DBLayer Helper Functions
  *
- * Global helper functions for database operations and small utilities.
+ * Global helper functions for database operations.
+ *
+ * @package Infocyph\DBLayer
  */
 
 use ArrayAccess;
@@ -51,7 +53,7 @@ if (! function_exists('db_transaction')) {
 
 if (! function_exists('db_select')) {
     /**
-     * Execute a SELECT query.
+     * Execute a select query.
      *
      * @param array<int,mixed> $bindings
      * @return list<array<string,mixed>>
@@ -64,25 +66,21 @@ if (! function_exists('db_select')) {
 
 if (! function_exists('db_select_one')) {
     /**
-     * Execute a SELECT query and return the first row.
+     * Execute a select query and return the first result.
      *
      * @param array<int,mixed> $bindings
-     * @return array<string,mixed>|null
      */
     function db_select_one(string $query, array $bindings = [], ?string $connection = null): mixed
     {
         $results = db_select($query, $bindings, $connection);
 
-        /** @var array<string,mixed>|null $first */
-        $first = $results[0] ?? null;
-
-        return $first;
+        return $results[0] ?? null;
     }
 }
 
 if (! function_exists('db_insert')) {
     /**
-     * Execute an INSERT query.
+     * Execute an insert query.
      *
      * @param array<int,mixed> $bindings
      */
@@ -94,7 +92,7 @@ if (! function_exists('db_insert')) {
 
 if (! function_exists('db_update')) {
     /**
-     * Execute an UPDATE query.
+     * Execute an update query.
      *
      * @param array<int,mixed> $bindings
      */
@@ -106,7 +104,7 @@ if (! function_exists('db_update')) {
 
 if (! function_exists('db_delete')) {
     /**
-     * Execute a DELETE query.
+     * Execute a delete query.
      *
      * @param array<int,mixed> $bindings
      */
@@ -140,7 +138,7 @@ if (! function_exists('db_unprepared')) {
 
 if (! function_exists('db_table')) {
     /**
-     * Get a QueryBuilder for a table.
+     * Get a query builder for a table.
      */
     function db_table(string $table, ?string $connection = null): QueryBuilder
     {
@@ -160,18 +158,10 @@ if (! function_exists('db_raw')) {
 
 if (! function_exists('collect')) {
     /**
-     * Create a Collection from the given value.
-     *
-     * - If already a Collection, returns as-is.
-     * - If array, wraps it.
-     * - Otherwise, creates a single-item collection.
+     * Create a collection from the given value.
      */
     function collect(mixed $value = []): Collection
     {
-        if ($value instanceof Collection) {
-            return $value;
-        }
-
         return new Collection(is_array($value) ? $value : [$value]);
     }
 }
@@ -179,8 +169,6 @@ if (! function_exists('collect')) {
 if (! function_exists('value')) {
     /**
      * Return the default value of the given value.
-     *
-     * Evaluates closures, returns scalars/arrays as-is.
      */
     function value(mixed $value): mixed
     {
@@ -217,8 +205,6 @@ if (! function_exists('with')) {
 if (! function_exists('data_get')) {
     /**
      * Get an item from an array or object using "dot" notation.
-     *
-     * @param array|ArrayAccess|object $target
      */
     function data_get(mixed $target, string|array|int|null $key, mixed $default = null): mixed
     {
@@ -258,13 +244,7 @@ if (! function_exists('data_get')) {
 
 if (! function_exists('data_set')) {
     /**
-     * Set an item on an array using "dot" notation.
-     *
-     * Note: only supports arrays (not objects / ArrayAccess) for mutation.
-     *
-     * @param array<string,mixed> $target
-     * @param string|array<int,string> $key
-     * @return array<string,mixed>
+     * Set an item on an array or object using dot notation.
      */
     function data_set(mixed &$target, string|array $key, mixed $value, bool $overwrite = true): mixed
     {
@@ -276,12 +256,12 @@ if (! function_exists('data_set')) {
         }
 
         if ($segments === []) {
-            if (! is_array($target)) {
-                $target = [];
+            if (! $overwrite && is_array($target) && array_key_exists($segment, $target)) {
+                return $target;
             }
 
-            if (! $overwrite && array_key_exists($segment, $target)) {
-                return $target;
+            if (! is_array($target)) {
+                $target = [];
             }
 
             $target[$segment] = $value;
@@ -317,8 +297,8 @@ if (! function_exists('array_all')) {
     /**
      * Determine if all items in the array pass the given truth test.
      *
-     * @param array<mixed> $array
-     * @param callable(mixed,mixed):bool $callback
+     * @param array $array
+     * @param callable $callback fn(mixed $value, mixed $key): bool
      */
     function array_all(array $array, callable $callback): bool
     {
@@ -347,8 +327,6 @@ if (! function_exists('class_basename')) {
 if (! function_exists('class_uses_recursive')) {
     /**
      * Returns all traits used by a class, its parent classes and their traits.
-     *
-     * @return array<string,string>
      */
     function class_uses_recursive(object|string $class): array
     {
@@ -369,8 +347,6 @@ if (! function_exists('class_uses_recursive')) {
 if (! function_exists('trait_uses_recursive')) {
     /**
      * Returns all traits used by a trait and its traits.
-     *
-     * @return array<string,string>
      */
     function trait_uses_recursive(string $trait): array
     {
@@ -442,10 +418,6 @@ if (! function_exists('retry')) {
     /**
      * Retry an operation a given number of times.
      *
-     * @param callable(int):mixed $callback
-     * @param int                 $sleep   Sleep time between attempts in ms
-     * @param callable(Exception):bool|null $when
-     *
      * @throws Exception
      */
     function retry(int $times, callable $callback, int $sleep = 0, ?callable $when = null): mixed
@@ -459,7 +431,7 @@ if (! function_exists('retry')) {
         try {
             return $callback($attempts);
         } catch (Exception $e) {
-            if ($times < 1 || ($when !== null && ! $when($e))) {
+            if ($times < 1 || ($when && ! $when($e))) {
                 throw $e;
             }
 
@@ -475,8 +447,6 @@ if (! function_exists('retry')) {
 if (! function_exists('rescue')) {
     /**
      * Catch a potential exception and return a default value.
-     *
-     * @param callable():mixed $callback
      */
     function rescue(callable $callback, mixed $rescue = null, bool $report = true): mixed
     {
@@ -485,7 +455,6 @@ if (! function_exists('rescue')) {
         } catch (Throwable $e) {
             if ($report) {
                 // Hook for logging if needed.
-                // e.g. logger()->error($e);
             }
 
             return value($rescue);
@@ -496,8 +465,6 @@ if (! function_exists('rescue')) {
 if (! function_exists('transform')) {
     /**
      * Transform the given value if it is present.
-     *
-     * @param callable(mixed):mixed $callback
      */
     function transform(mixed $value, callable $callback, mixed $default = null): mixed
     {
@@ -540,7 +507,7 @@ if (! function_exists('now')) {
 
 if (! function_exists('today')) {
     /**
-     * Get today's date at midnight.
+     * Get today's date.
      */
     function today(DateTimeZone|string|null $tz = null): DateTime
     {
