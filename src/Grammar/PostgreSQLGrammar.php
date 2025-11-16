@@ -19,11 +19,11 @@ final class PostgreSQLGrammar extends Grammar
     /**
      * Compile a delete statement with RETURNING.
      *
-     * @param array<int, string> $returning
+     * @param  array<int,string>  $returning
      */
     public function compileDeleteReturning(QueryBuilder $query, array $returning = ['*']): string
     {
-        $delete  = $this->compileDelete($query);
+        $delete = $this->compileDelete($query);
         $columns = $this->columnize($returning);
 
         return "{$delete} returning {$columns}";
@@ -32,17 +32,17 @@ final class PostgreSQLGrammar extends Grammar
     /**
      * Compile an insert statement with RETURNING.
      *
-     * @param array<int, array<string, mixed>>|array<string, mixed> $values
+     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
      */
     public function compileInsertGetId(
-      QueryBuilder $query,
-      array $values,
-      ?string $sequence = null
+        QueryBuilder $query,
+        array $values,
+        ?string $sequence = null
     ): string {
         $insert = $this->compileInsert($query, $values);
         $column = $sequence ?? 'id';
 
-        return $insert . ' returning ' . $this->wrap($column);
+        return $insert.' returning '.$this->wrap($column);
     }
 
     /**
@@ -51,7 +51,7 @@ final class PostgreSQLGrammar extends Grammar
     public function compileTruncate(QueryBuilder $query): string
     {
         $components = $query->getComponents();
-        $table      = $this->wrapTable($components['from']);
+        $table = $this->wrapTable($components['from']);
 
         return "truncate table {$table} restart identity cascade";
     }
@@ -59,15 +59,15 @@ final class PostgreSQLGrammar extends Grammar
     /**
      * Compile an update statement with RETURNING.
      *
-     * @param array<string, mixed> $values
-     * @param array<int, string>   $returning
+     * @param  array<string,mixed>  $values
+     * @param  array<int,string>  $returning
      */
     public function compileUpdateReturning(
-      QueryBuilder $query,
-      array $values,
-      array $returning = ['*']
+        QueryBuilder $query,
+        array $values,
+        array $returning = ['*']
     ): string {
-        $update  = $this->compileUpdate($query, $values);
+        $update = $this->compileUpdate($query, $values);
         $columns = $this->columnize($returning);
 
         return "{$update} returning {$columns}";
@@ -76,17 +76,17 @@ final class PostgreSQLGrammar extends Grammar
     /**
      * Compile an insert statement with ON CONFLICT (UPSERT).
      *
-     * @param array<int, array<string, mixed>>|array<string, mixed> $values
-     * @param array<int, string>                                    $uniqueBy
-     * @param array<string, mixed>|null                             $update
+     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param  array<int,string>  $uniqueBy
+     * @param  array<string,mixed>|null  $update
      */
     public function compileUpsert(
-      QueryBuilder $query,
-      array $values,
-      array $uniqueBy,
-      ?array $update = null
+        QueryBuilder $query,
+        array $values,
+        array $uniqueBy,
+        ?array $update = null
     ): string {
-        $insert   = $this->compileInsert($query, $values);
+        $insert = $this->compileInsert($query, $values);
         $conflict = $this->columnize($uniqueBy);
 
         if ($update === null) {
@@ -94,10 +94,10 @@ final class PostgreSQLGrammar extends Grammar
         }
 
         $updateColumns = implode(', ', array_map(
-          function (string $key): string {
-              return $this->wrap($key) . ' = excluded.' . $this->wrap($key);
-          },
-          array_keys($update)
+            function (string $key): string {
+                return $this->wrap($key).' = excluded.'.$this->wrap($key);
+            },
+            array_keys($update)
         ));
 
         return "{$insert} on conflict ({$conflict}) do update set {$updateColumns}";
@@ -118,7 +118,7 @@ final class PostgreSQLGrammar extends Grammar
     {
         unset($query);
 
-        return 'limit ' . (int) $limit;
+        return 'limit '.(int) $limit;
     }
 
     /**
@@ -131,7 +131,7 @@ final class PostgreSQLGrammar extends Grammar
         return match ($lock) {
             'update' => 'for update',
             'shared' => 'for share',
-            default  => '',
+            default => '',
         };
     }
 
@@ -142,7 +142,7 @@ final class PostgreSQLGrammar extends Grammar
     {
         unset($query);
 
-        return 'offset ' . (int) $offset;
+        return 'offset '.(int) $offset;
     }
 
     /**
@@ -154,6 +154,6 @@ final class PostgreSQLGrammar extends Grammar
             return $value;
         }
 
-        return '"' . str_replace('"', '""', $value) . '"';
+        return '"'.str_replace('"', '""', $value).'"';
     }
 }

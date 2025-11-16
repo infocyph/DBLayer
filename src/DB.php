@@ -21,18 +21,9 @@ use Throwable;
  * Design goals:
  * - One shared Connection instance per DB name for the whole process lifetime.
  * - Ability to opt-in to a fresh Connection instance on demand (no caching).
- *
- * @package Infocyph\DBLayer
  */
 class DB
 {
-    /**
-     * The database connections keyed by name (shared singletons).
-     *
-     * @var array<string,Connection>
-     */
-    protected static array $connections = [];
-
     /**
      * Original configuration arrays keyed by connection name.
      *
@@ -43,9 +34,21 @@ class DB
     protected static array $connectionConfigs = [];
 
     /**
+     * The database connections keyed by name (shared singletons).
+     *
+     * @var array<string,Connection>
+     */
+    protected static array $connections = [];
+
+    /**
      * The default connection name.
      */
     protected static ?string $defaultConnection = 'default';
+
+    /**
+     * Whether we've registered the global event listener bridge.
+     */
+    protected static bool $eventsHooked = false;
 
     /**
      * Query event listeners (facade-level).
@@ -74,11 +77,6 @@ class DB
     protected static array $queryLog = [];
 
     /**
-     * Whether we've registered the global event listener bridge.
-     */
-    protected static bool $eventsHooked = false;
-
-    /**
      * Dynamically pass methods to the default connection.
      */
     public static function __callStatic(string $method, array $parameters): mixed
@@ -89,12 +87,12 @@ class DB
     /**
      * Add a database connection configuration (and instantiate shared Connection).
      *
-     * @param array<string,mixed> $config
+     * @param  array<string,mixed>  $config
      */
     public static function addConnection(array $config, string $name = 'default'): Connection
     {
         static::$connectionConfigs[$name] = $config;
-        static::$connections[$name]       = new Connection($config);
+        static::$connections[$name] = new Connection($config);
 
         if (static::$defaultConnection === null) {
             static::$defaultConnection = $name;
@@ -106,7 +104,7 @@ class DB
     /**
      * Execute multiple queries in sequence.
      *
-     * @param list<array{0:string,1:array<int,mixed>|null}> $queries
+     * @param  list<array{0:string,1:array<int,mixed>|null}>  $queries
      * @return list<array<int,mixed>>
      */
     public static function batch(array $queries, ?string $connection = null): array
@@ -115,7 +113,7 @@ class DB
 
         foreach ($queries as $query) {
             [$sql, $bindings] = $query;
-            $results[]        = static::select($sql, $bindings ?? [], $connection);
+            $results[] = static::select($sql, $bindings ?? [], $connection);
         }
 
         return $results;
@@ -175,21 +173,9 @@ class DB
     }
 
     /**
-     * Convenience shortcut for an uncached Connection instance.
-     *
-     * Equivalent to connection($name, true).
-     *
-     * @throws ConnectionException
-     */
-    public static function freshConnection(?string $name = null): Connection
-    {
-        return static::connection($name, true);
-    }
-
-    /**
      * Execute a delete statement.
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
      *
      * @throws ConnectionException
      */
@@ -231,6 +217,18 @@ class DB
     public static function flushQueryLog(): void
     {
         static::$queryLog = [];
+    }
+
+    /**
+     * Convenience shortcut for an uncached Connection instance.
+     *
+     * Equivalent to connection($name, true).
+     *
+     * @throws ConnectionException
+     */
+    public static function freshConnection(?string $name = null): Connection
+    {
+        return static::connection($name, true);
     }
 
     /**
@@ -312,7 +310,7 @@ class DB
     /**
      * Execute an insert statement.
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
      *
      * @throws ConnectionException
      */
@@ -341,7 +339,7 @@ class DB
      *  - connection (string|null)
      *  - rows (int|null)
      *
-     * @param callable(array<string,mixed>):void $callback
+     * @param  callable(array<string,mixed>):void  $callback
      */
     public static function listen(callable $callback): void
     {
@@ -378,13 +376,13 @@ class DB
      */
     public static function purge(): void
     {
-        static::$connections        = [];
-        static::$connectionConfigs  = [];
-        static::$defaultConnection  = null;
-        static::$queryLog           = [];
-        static::$listeners          = [];
-        static::$loggingQueries     = false;
-        static::$eventsHooked       = false;
+        static::$connections = [];
+        static::$connectionConfigs = [];
+        static::$defaultConnection = null;
+        static::$queryLog = [];
+        static::$listeners = [];
+        static::$loggingQueries = false;
+        static::$eventsHooked = false;
     }
 
     /**
@@ -393,9 +391,9 @@ class DB
      * @throws ConnectionException
      */
     public static function quote(
-      string $value,
-      int $type = PDO::PARAM_STR,
-      ?string $connection = null
+        string $value,
+        int $type = PDO::PARAM_STR,
+        ?string $connection = null
     ): string {
         return static::connection($connection)->getPdo()->quote($value, $type);
     }
@@ -444,10 +442,10 @@ class DB
     /**
      * Execute a select statement.
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
+     * @return list<array<string,mixed>>
      *
      * @throws ConnectionException
-     * @return list<array<string,mixed>>
      */
     public static function select(string $query, array $bindings = [], ?string $connection = null): array
     {
@@ -457,7 +455,7 @@ class DB
     /**
      * Execute a select statement and return the first result.
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
      *
      * @throws ConnectionException
      */
@@ -499,7 +497,7 @@ class DB
     /**
      * Execute a statement (INSERT/UPDATE/DELETE/DDL).
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
      *
      * @throws ConnectionException
      */
@@ -513,7 +511,6 @@ class DB
     /**
      * Get connection statistics.
      *
-     * @throws ConnectionException
      *
      * @return array{
      *   driver:string,
@@ -522,17 +519,19 @@ class DB
      *   transaction_level:int,
      *   total_queries:int
      * }
+     *
+     * @throws ConnectionException
      */
     public static function stats(?string $connection = null): array
     {
         $conn = static::connection($connection);
 
         return [
-          'driver'            => $conn->getDriverName(),
-          'database'          => $conn->getDatabaseName(),
-          'prefix'            => $conn->getTablePrefix(),
-          'transaction_level' => $conn->transactionLevel(),
-          'total_queries'     => count(static::$queryLog),
+            'driver' => $conn->getDriverName(),
+            'database' => $conn->getDatabaseName(),
+            'prefix' => $conn->getTablePrefix(),
+            'transaction_level' => $conn->transactionLevel(),
+            'total_queries' => count(static::$queryLog),
         ];
     }
 
@@ -553,9 +552,9 @@ class DB
      * @throws ConnectionException
      */
     public static function transaction(
-      callable $callback,
-      int $attempts = 1,
-      ?string $connection = null
+        callable $callback,
+        int $attempts = 1,
+        ?string $connection = null
     ): mixed {
         return static::connection($connection)->transaction($callback, $attempts);
     }
@@ -587,7 +586,7 @@ class DB
     /**
      * Execute an update statement.
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
      *
      * @throws ConnectionException
      */
@@ -604,8 +603,8 @@ class DB
     public static function version(?string $connection = null): string
     {
         return (string) static::connection($connection)
-          ->getPdo()
-          ->getAttribute(PDO::ATTR_SERVER_VERSION);
+            ->getPdo()
+            ->getAttribute(PDO::ATTR_SERVER_VERSION);
     }
 
     /**
@@ -638,11 +637,11 @@ class DB
             }
 
             $payload = [
-              'query'      => $event->sql,
-              'bindings'   => $event->bindings,
-              'time'       => $event->time,          // ms
-              'connection' => $connectionName,
-              'rows'       => $event->rowsAffected,
+                'query' => $event->sql,
+                'bindings' => $event->bindings,
+                'time' => $event->time, // ms
+                'connection' => $connectionName,
+                'rows' => $event->rowsAffected,
             ];
 
             foreach (static::$listeners as $listener) {

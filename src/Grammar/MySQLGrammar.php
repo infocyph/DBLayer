@@ -19,7 +19,7 @@ final class MySQLGrammar extends Grammar
     /**
      * Compile an INSERT IGNORE statement.
      *
-     * @param array<int, array<string, mixed>>|array<string, mixed> $values
+     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
      */
     public function compileInsertIgnore(QueryBuilder $query, array $values): string
     {
@@ -29,23 +29,23 @@ final class MySQLGrammar extends Grammar
     /**
      * Compile an insert statement with ON DUPLICATE KEY UPDATE.
      *
-     * @param array<int, array<string, mixed>>|array<string, mixed> $values
-     * @param array<string, mixed>                                  $update
+     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param  array<string,mixed>  $update
      */
     public function compileInsertOnDuplicateKeyUpdate(
-      QueryBuilder $query,
-      array $values,
-      array $update
+        QueryBuilder $query,
+        array $values,
+        array $update
     ): string {
         $insert = $this->compileInsert($query, $values);
 
         $updateColumns = implode(', ', array_map(
-          function (string $key): string {
-              $wrapped = $this->wrap($key);
+            function (string $key): string {
+                $wrapped = $this->wrap($key);
 
-              return "{$wrapped} = VALUES({$wrapped})";
-          },
-          array_keys($update)
+                return "{$wrapped} = VALUES({$wrapped})";
+            },
+            array_keys($update)
         ));
 
         return "{$insert} on duplicate key update {$updateColumns}";
@@ -54,7 +54,7 @@ final class MySQLGrammar extends Grammar
     /**
      * Compile a REPLACE statement.
      *
-     * @param array<int, array<string, mixed>>|array<string, mixed> $values
+     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
      */
     public function compileReplace(QueryBuilder $query, array $values): string
     {
@@ -68,7 +68,7 @@ final class MySQLGrammar extends Grammar
     {
         $components = $query->getComponents();
 
-        return 'truncate table ' . $this->wrapTable($components['from']);
+        return 'truncate table '.$this->wrapTable($components['from']);
     }
 
     /**
@@ -85,13 +85,13 @@ final class MySQLGrammar extends Grammar
     protected function compileLimit(QueryBuilder $query, int $limit): string
     {
         $components = $query->getComponents();
-        $offset     = $components['offset'];
+        $offset = $components['offset'];
 
         if ($offset !== null) {
-            return 'limit ' . (int) $offset . ', ' . (int) $limit;
+            return 'limit '.(int) $offset.', '.(int) $limit;
         }
 
-        return 'limit ' . (int) $limit;
+        return 'limit '.(int) $limit;
     }
 
     /**
@@ -104,7 +104,7 @@ final class MySQLGrammar extends Grammar
         return match ($lock) {
             'update' => 'for update',
             'shared' => 'lock in share mode',
-            default  => '',
+            default => '',
         };
     }
 
@@ -128,6 +128,6 @@ final class MySQLGrammar extends Grammar
             return $value;
         }
 
-        return '`' . str_replace('`', '``', $value) . '`';
+        return '`'.str_replace('`', '``', $value).'`';
     }
 }

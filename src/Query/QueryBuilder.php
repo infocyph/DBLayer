@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Query;
 
+use Generator;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Grammar\Grammar;
+use Infocyph\DBLayer\Pagination\CursorPaginator;
+use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
+use Infocyph\DBLayer\Pagination\SimplePaginator;
 
 /**
  * SQL Query Builder
@@ -21,7 +25,7 @@ use Infocyph\DBLayer\Grammar\Grammar;
  * - Subqueries
  * - Aggregate functions
  * - Conditional clauses (when / unless)
- * - Pagination helpers (forPage / chunk / cursor)
+ * - Pagination helpers (forPage / chunk / cursor / paginate / simplePaginate / cursorPaginate)
  */
 class QueryBuilder
 {
@@ -137,13 +141,13 @@ class QueryBuilder
      * Create a new query builder instance.
      */
     public function __construct(
-      Connection $connection,
-      Grammar $grammar,
-      Executor $executor
+        Connection $connection,
+        Grammar $grammar,
+        Executor $executor
     ) {
         $this->connection = $connection;
-        $this->grammar    = $grammar;
-        $this->executor   = $executor;
+        $this->grammar = $grammar;
+        $this->executor = $executor;
     }
 
     /**
@@ -165,22 +169,7 @@ class QueryBuilder
      */
     public function aggregate(string $function, string $column = '*'): mixed
     {
-        $clone = clone $this;
-
-        $clone->aggregate = [
-          'function' => strtoupper($function),
-          'column'   => $column,
-        ];
-
-        $results = $this->executor->select($clone);
-
-        if ($results === []) {
-            return null;
-        }
-
-        $row = $results[0];
-
-        return $row['aggregate'] ?? (array_values($row)[0] ?? null);
+        return $this->runAggregate($function, $column, false);
     }
 
     /**
@@ -192,6 +181,93 @@ class QueryBuilder
     }
 
     /**
+     * Process the query results in chunks.
+     *
+     * The callback receives (list<row>, pageNumber) and may return false to stop.
+     *
+     * @param  callable(list<array<string,mixed>>,int):bool  $callback
+     */
+    public function chunk(int $count, callable $callback): bool
+    {
+        if ($count <= 0) {
+            throw QueryException::invalidLimit($count);
+        }
+
+        $page = 1;
+
+        do {
+            $clone = $this->cloneBuilder();
+            $clone->offset = ($page - 1) * $count;
+            $clone->limit = $count;
+
+            $results = $clone->get();
+            $num = count($results);
+
+            if ($num === 0) {
+                break;
+            }
+
+            if ($callback($results, $page) === false) {
+                return false;
+            }
+
+            $page++;
+        } while ($num === $count);
+
+        return true;
+    }
+
+    /**
+     * Process results in chunks using a key (typically primary key).
+     *
+     * Safer for large tables than OFFSET-based chunk() when rows are inserted/deleted.
+     *
+     * @param  callable(list<array<string,mixed>>,int):bool  $callback
+     */
+    public function chunkById(
+        int $count,
+        callable $callback,
+        string $column = 'id',
+        ?int $fromId = null
+    ): bool {
+        if ($count <= 0) {
+            throw QueryException::invalidLimit($count);
+        }
+
+        $lastId = $fromId;
+        $page = 1;
+
+        while (true) {
+            $clone = $this->cloneBuilder();
+
+            if ($lastId !== null) {
+                $clone->where($column, '>', $lastId);
+            }
+
+            $clone->orderBy($column, 'asc');
+            $clone->limit = $count;
+
+            $results = $clone->get();
+            $num = count($results);
+
+            if ($num === 0) {
+                break;
+            }
+
+            if ($callback($results, $page) === false) {
+                return false;
+            }
+
+            $lastRow = $results[$num - 1];
+            $lastId = (int) ($lastRow[$column] ?? $lastId);
+
+            $page++;
+        }
+
+        return true;
+    }
+
+    /**
      * Clone the query builder (explicit helper).
      */
     public function cloneBuilder(): self
@@ -200,11 +276,11 @@ class QueryBuilder
     }
 
     /**
-     * Get the count of results.
+     * Get the count of results (ignores LIMIT/OFFSET for correctness in pagination).
      */
     public function count(string $column = '*'): int
     {
-        return (int) ($this->aggregate('COUNT', $column) ?? 0);
+        return (int) ($this->runAggregate('COUNT', $column, true) ?? 0);
     }
 
     /**
@@ -213,11 +289,125 @@ class QueryBuilder
     public function crossJoin(string $table): self
     {
         $this->joins[] = [
-          'type'  => 'cross',
-          'table' => $table,
+            'type' => 'cross',
+            'table' => $table,
         ];
 
         return $this;
+    }
+
+    /**
+     * Iterate over the results using a simple cursor based on LIMIT/OFFSET.
+     *
+     * This keeps memory usage bounded by $chunkSize.
+     *
+     * @return Generator<array<string,mixed>>
+     */
+    public function cursor(int $chunkSize = 1000): Generator
+    {
+        if ($chunkSize <= 0) {
+            throw QueryException::invalidLimit($chunkSize);
+        }
+
+        $page = 1;
+
+        while (true) {
+            $clone = $this->cloneBuilder();
+            $clone->offset = ($page - 1) * $chunkSize;
+            $clone->limit = $chunkSize;
+
+            $results = $clone->get();
+            $num = count($results);
+
+            if ($num === 0) {
+                break;
+            }
+
+            foreach ($results as $row) {
+                yield $row;
+            }
+
+            if ($num < $chunkSize) {
+                break;
+            }
+
+            $page++;
+        }
+    }
+
+    /**
+     * Cursor-based pagination.
+     *
+     * This assumes a stable ordering by $column. For large datasets this is
+     * more efficient than OFFSET-based pagination.
+     *
+     * @param  int  $perPage  Items per page
+     * @param  mixed  $cursor  Last seen value for $column (raw DB value)
+     * @param  string  $column  Ordered column used as the cursor (default: "id")
+     * @param  non-empty-string  $direction  "asc" or "desc"
+     *
+     * @throws QueryException
+     */
+    public function cursorPaginate(
+        int $perPage = 15,
+        mixed $cursor = null,
+        string $column = 'id',
+        string $direction = 'asc'
+    ): CursorPaginator {
+        if ($perPage <= 0) {
+            throw QueryException::invalidLimit($perPage);
+        }
+
+        $direction = strtolower($direction);
+
+        if (! in_array($direction, ['asc', 'desc'], true)) {
+            throw QueryException::invalidOrderDirection($direction);
+        }
+
+        $operator = $direction === 'asc' ? '>' : '<';
+
+        $clone = $this->cloneBuilder();
+        $clone->aggregate = null;
+        $clone->limit = null;
+        $clone->offset = null;
+        $clone->orders = [];
+
+        if ($cursor !== null) {
+            $clone->where($column, $operator, $cursor);
+        }
+
+        $clone->orderBy($column, $direction);
+        $clone->limit = $perPage + 1;
+
+        $results = $clone->get();
+        $hasMore = count($results) > $perPage;
+
+        if ($hasMore) {
+            $items = array_slice($results, 0, $perPage);
+        } else {
+            $items = $results;
+        }
+
+        $nextCursor = null;
+
+        if ($hasMore && $items !== []) {
+            $lastRow = $items[count($items) - 1];
+            $nextCursorVal = $lastRow[$column] ?? null;
+
+            if ($nextCursorVal !== null) {
+                $nextCursor = (string) $nextCursorVal;
+            }
+        }
+
+        $currentCursor = $cursor !== null ? (string) $cursor : null;
+
+        return new CursorPaginator(
+            $items,
+            $perPage,
+            $currentCursor,
+            $nextCursor,
+            $hasMore
+        );
     }
 
     /**
@@ -247,6 +437,18 @@ class QueryBuilder
     }
 
     /**
+     * Find a row by primary key (default: "id").
+     *
+     * @return array<string,mixed>|null
+     */
+    public function find(mixed $id, string $column = 'id'): ?array
+    {
+        $clone = $this->cloneBuilder();
+
+        return $clone->where($column, '=', $id)->first();
+    }
+
+    /**
      * Execute the query and get the first result.
      *
      * @return array<string,mixed>|null
@@ -254,6 +456,39 @@ class QueryBuilder
     public function first(): ?array
     {
         return $this->limit(1)->get()[0] ?? null;
+    }
+
+    /**
+     * Execute the query and get the first result matching the constraint.
+     *
+     * @param  callable(self):void|non-empty-string  $column
+     * @return array<string,mixed>|null
+     */
+    public function firstWhere(
+        string|callable $column,
+        mixed $operator = null,
+        mixed $value = null
+    ): ?array {
+        return $this->where($column, $operator, $value)->first();
+    }
+
+    /**
+     * Apply pagination offsets based on page and per-page values.
+     *
+     * This mutates the current builder (like skip/take) and returns it.
+     */
+    public function forPage(int $page, int $perPage = 15): self
+    {
+        if ($perPage <= 0) {
+            throw QueryException::invalidLimit($perPage);
+        }
+
+        $page = max(1, $page);
+
+        $this->offset(($page - 1) * $perPage);
+        $this->limit($perPage);
+
+        return $this;
     }
 
     /**
@@ -287,14 +522,6 @@ class QueryBuilder
     }
 
     /**
-     * Expose the connection (escape hatch for low-level usage).
-     */
-    public function getConnection(): Connection
-    {
-        return $this->connection;
-    }
-
-    /**
      * Get all query components (for Grammar).
      *
      * @return array{
@@ -317,21 +544,29 @@ class QueryBuilder
     public function getComponents(): array
     {
         return [
-          'type'      => $this->type,
-          'columns'   => $this->columns,
-          'distinct'  => $this->distinct,
-          'from'      => $this->from,
-          'joins'     => $this->joins,
-          'wheres'    => $this->wheres,
-          'groups'    => $this->groups,
-          'havings'   => $this->havings,
-          'orders'    => $this->orders,
-          'limit'     => $this->limit,
-          'offset'    => $this->offset,
-          'unions'    => $this->unions,
-          'lock'      => $this->lock,
-          'aggregate' => $this->aggregate,
+            'type' => $this->type,
+            'columns' => $this->columns,
+            'distinct' => $this->distinct,
+            'from' => $this->from,
+            'joins' => $this->joins,
+            'wheres' => $this->wheres,
+            'groups' => $this->groups,
+            'havings' => $this->havings,
+            'orders' => $this->orders,
+            'limit' => $this->limit,
+            'offset' => $this->offset,
+            'unions' => $this->unions,
+            'lock' => $this->lock,
+            'aggregate' => $this->aggregate,
         ];
+    }
+
+    /**
+     * Expose the connection (escape hatch for low-level usage).
+     */
+    public function getConnection(): Connection
+    {
+        return $this->connection;
     }
 
     /**
@@ -348,22 +583,22 @@ class QueryBuilder
      * Add a HAVING clause.
      */
     public function having(
-      string $column,
-      mixed $operator = null,
-      mixed $value = null,
-      string $boolean = 'and'
+        string $column,
+        mixed $operator = null,
+        mixed $value = null,
+        string $boolean = 'and'
     ): self {
         if (func_num_args() === 2) {
-            $value    = $operator;
+            $value = $operator;
             $operator = '=';
         }
 
         $this->havings[] = [
-          'type'     => 'basic',
-          'column'   => $column,
-          'operator' => $operator,
-          'value'    => $value,
-          'boolean'  => $boolean,
+            'type' => 'basic',
+            'column' => $column,
+            'operator' => $operator,
+            'value' => $value,
+            'boolean' => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -374,23 +609,11 @@ class QueryBuilder
     /**
      * Insert a new record (single or multiple rows).
      *
-     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
      */
     public function insert(array $values): bool
     {
         return $this->executor->insert($this, $values);
-    }
-
-    /**
-     * Insert ignoring duplicate-key errors when the driver supports it.
-     *
-     * Falls back to insert() on drivers without native support.
-     *
-     * @param array<string,mixed>|array<int,array<string,mixed>> $values
-     */
-    public function insertIgnore(array $values): bool
-    {
-        return $this->executor->insertIgnore($this, $values);
     }
 
     /**
@@ -399,7 +622,7 @@ class QueryBuilder
      * Uses insertReturning() when supported to avoid extra round trips.
      * Falls back to insert() + lastInsertId().
      *
-     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
      */
     public function insertGetId(array $values, ?string $sequence = null): string
     {
@@ -417,12 +640,24 @@ class QueryBuilder
     }
 
     /**
+     * Insert ignoring duplicate-key errors when the driver supports it.
+     *
+     * Falls back to insert() on drivers without native support.
+     *
+     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
+     */
+    public function insertIgnore(array $values): bool
+    {
+        return $this->executor->insertIgnore($this, $values);
+    }
+
+    /**
      * Insert and return generated key/row when supported.
      *
      * On PostgreSQL, uses INSERT ... RETURNING.
      * On other drivers, falls back to lastInsertId() and synthesizes a row.
      *
-     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
      * @return array<string,mixed>|null
      */
     public function insertReturning(array $values, ?string $column = null): ?array
@@ -431,33 +666,21 @@ class QueryBuilder
     }
 
     /**
-     * Upsert helper: INSERT ... ON DUPLICATE KEY UPDATE / ON CONFLICT.
-     *
-     * @param array<string,mixed>|array<int,array<string,mixed>> $values
-     * @param list<string>                                       $uniqueBy
-     * @param list<string>|null                                  $update
-     */
-    public function upsert(array $values, array $uniqueBy, ?array $update = null): bool
-    {
-        return $this->executor->upsert($this, $values, $uniqueBy, $update);
-    }
-
-    /**
      * Add a simple JOIN clause.
      */
     public function join(
-      string $table,
-      string $first,
-      string $operator,
-      string $second,
-      string $type = 'inner'
+        string $table,
+        string $first,
+        string $operator,
+        string $second,
+        string $type = 'inner'
     ): self {
         $this->joins[] = [
-          'type'     => $type,
-          'table'    => $table,
-          'first'    => $first,
-          'operator' => $operator,
-          'second'   => $second,
+            'type' => $type,
+            'table' => $table,
+            'first' => $first,
+            'operator' => $operator,
+            'second' => $second,
         ];
 
         return $this;
@@ -468,7 +691,7 @@ class QueryBuilder
      *
      * The callback receives a JoinClause instance.
      *
-     * @param callable(JoinClause):void $callback
+     * @param  callable(JoinClause):void  $callback
      */
     public function joinComplex(string $table, callable $callback, string $type = 'inner'): self
     {
@@ -482,6 +705,14 @@ class QueryBuilder
         }
 
         return $this;
+    }
+
+    /**
+     * Convenience: order by "created_at" DESC.
+     */
+    public function latest(string $column = 'created_at'): self
+    {
+        return $this->orderBy($column, 'desc');
     }
 
     /**
@@ -555,6 +786,14 @@ class QueryBuilder
     }
 
     /**
+     * Convenience: order by "created_at" ASC.
+     */
+    public function oldest(string $column = 'created_at'): self
+    {
+        return $this->orderBy($column, 'asc');
+    }
+
+    /**
      * Add an ORDER BY clause.
      */
     public function orderBy(string $column, string $direction = 'asc'): self
@@ -566,8 +805,8 @@ class QueryBuilder
         }
 
         $this->orders[] = [
-          'column'    => $column,
-          'direction' => $direction,
+            'column' => $column,
+            'direction' => $direction,
         ];
 
         return $this;
@@ -587,11 +826,70 @@ class QueryBuilder
     public function orWhere(string|callable $column, mixed $operator = null, mixed $value = null): self
     {
         if (func_num_args() === 2) {
-            $value    = $operator;
+            $value = $operator;
             $operator = '=';
         }
 
         return $this->where($column, $operator, $value, 'or');
+    }
+
+    /**
+     * Paginate the results with a known total.
+     *
+     * @throws QueryException
+     */
+    public function paginate(int $perPage = 15, ?int $page = null): LengthAwarePaginator
+    {
+        if ($perPage <= 0) {
+            throw QueryException::invalidLimit($perPage);
+        }
+
+        $page = max(1, $page ?? 1);
+
+        // Total (ignores LIMIT/OFFSET).
+        $total = $this->count();
+
+        // Page items.
+        $clone = $this->cloneBuilder();
+        $clone->aggregate = null;
+        $clone->limit = null;
+        $clone->offset = null;
+
+        $clone->offset = ($page - 1) * $perPage;
+        $clone->limit = $perPage;
+
+        $items = $clone->get();
+
+        return new LengthAwarePaginator($items, $total, $perPage, $page);
+    }
+
+    /**
+     * Pluck a single column's values from the result set.
+     *
+     * @return array<int|string,mixed>
+     */
+    public function pluck(string $column, ?string $key = null): array
+    {
+        $results = $this->get();
+        $values = [];
+
+        foreach ($results as $row) {
+            $value = $row[$column] ?? null;
+
+            if ($key === null) {
+                $values[] = $value;
+
+                continue;
+            }
+
+            if (! array_key_exists($key, $row)) {
+                continue;
+            }
+
+            $values[$row[$key]] = $value;
+        }
+
+        return $values;
     }
 
     /**
@@ -605,7 +903,7 @@ class QueryBuilder
     /**
      * Set the columns to select.
      *
-     * @param array<int,string|Expression>|string|Expression ...$columns
+     * @param  array<int,string|Expression>|string|Expression  ...$columns
      */
     public function select(array|string|Expression ...$columns): self
     {
@@ -613,7 +911,7 @@ class QueryBuilder
             return $this;
         }
 
-        $this->type    = 'select';
+        $this->type = 'select';
         $this->columns = is_array($columns[0]) ? $columns[0] : $columns;
 
         return $this;
@@ -627,6 +925,40 @@ class QueryBuilder
         $this->lock = 'shared';
 
         return $this;
+    }
+
+    /**
+     * Simple pagination without a COUNT(*) query.
+     *
+     * @throws QueryException
+     */
+    public function simplePaginate(int $perPage = 15, ?int $page = null): SimplePaginator
+    {
+        if ($perPage <= 0) {
+            throw QueryException::invalidLimit($perPage);
+        }
+
+        $page = max(1, $page ?? 1);
+
+        $clone = $this->cloneBuilder();
+        $clone->aggregate = null;
+        $clone->limit = null;
+        $clone->offset = null;
+
+        $offset = ($page - 1) * $perPage;
+        $clone->offset = $offset;
+        $clone->limit = $perPage + 1; // fetch one extra row
+
+        $results = $clone->get();
+        $hasMore = count($results) > $perPage;
+
+        if ($hasMore) {
+            $items = array_slice($results, 0, $perPage);
+        } else {
+            $items = $results;
+        }
+
+        return new SimplePaginator($items, $perPage, $page, $hasMore);
     }
 
     /**
@@ -680,7 +1012,7 @@ class QueryBuilder
     /**
      * Add a UNION query.
      *
-     * @param QueryBuilder|callable(QueryBuilder):void $query
+     * @param  QueryBuilder|callable(QueryBuilder):void  $query
      */
     public function union(QueryBuilder|callable $query, bool $all = false): self
     {
@@ -691,8 +1023,8 @@ class QueryBuilder
         }
 
         $this->unions[] = [
-          'query' => $query,
-          'all'   => $all,
+            'query' => $query,
+            'all' => $all,
         ];
 
         $this->bindings = array_merge($this->bindings, $query->getBindings());
@@ -703,7 +1035,7 @@ class QueryBuilder
     /**
      * Add a UNION ALL query.
      *
-     * @param QueryBuilder|callable(QueryBuilder):void $query
+     * @param  QueryBuilder|callable(QueryBuilder):void  $query
      */
     public function unionAll(QueryBuilder|callable $query): self
     {
@@ -711,9 +1043,26 @@ class QueryBuilder
     }
 
     /**
+     * Inverse of when(): apply callback only if the value is "falsey".
+     *
+     * @param  callable(self,mixed):void  $callback
+     * @param  callable(self,mixed):void|null  $default
+     */
+    public function unless(mixed $value, callable $callback, ?callable $default = null): self
+    {
+        if (! $value) {
+            $callback($this, $value);
+        } elseif ($default !== null) {
+            $default($this, $value);
+        }
+
+        return $this;
+    }
+
+    /**
      * Update records.
      *
-     * @param array<string,mixed> $values
+     * @param  array<string,mixed>  $values
      */
     public function update(array $values): int
     {
@@ -722,6 +1071,18 @@ class QueryBuilder
         }
 
         return $this->executor->update($this, $values);
+    }
+
+    /**
+     * Upsert helper: INSERT ... ON DUPLICATE KEY UPDATE / ON CONFLICT.
+     *
+     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>|null  $update
+     */
+    public function upsert(array $values, array $uniqueBy, ?array $update = null): bool
+    {
+        return $this->executor->upsert($this, $values, $uniqueBy, $update);
     }
 
     /**
@@ -735,15 +1096,37 @@ class QueryBuilder
     }
 
     /**
+     * Conditionally apply query modifications.
+     *
+     * Example:
+     *  $builder
+     *      ->when($search, fn ($q, $search) => $q->where('name', 'like', "%$search%"))
+     *      ->when($active, fn ($q) => $q->where('active', 1));
+     *
+     * @param  callable(self,mixed):void  $callback
+     * @param  callable(self,mixed):void|null  $default
+     */
+    public function when(mixed $value, callable $callback, ?callable $default = null): self
+    {
+        if ($value) {
+            $callback($this, $value);
+        } elseif ($default !== null) {
+            $default($this, $value);
+        }
+
+        return $this;
+    }
+
+    /**
      * Add a WHERE clause.
      *
-     * @param callable(QueryBuilder):void|non-empty-string $column
+     * @param  callable(QueryBuilder):void|non-empty-string  $column
      */
     public function where(
-      string|callable $column,
-      mixed $operator = null,
-      mixed $value = null,
-      string $boolean = 'and'
+        string|callable $column,
+        mixed $operator = null,
+        mixed $value = null,
+        string $boolean = 'and'
     ): self {
         // Handle closure for nested where.
         if (is_callable($column)) {
@@ -752,16 +1135,16 @@ class QueryBuilder
 
         // Handle two arguments (column, value).
         if (func_num_args() === 2) {
-            $value    = $operator;
+            $value = $operator;
             $operator = '=';
         }
 
         $this->wheres[] = [
-          'type'     => 'basic',
-          'column'   => $column,
-          'operator' => $operator,
-          'value'    => $value,
-          'boolean'  => $boolean,
+            'type' => 'basic',
+            'column' => $column,
+            'operator' => $operator,
+            'value' => $value,
+            'boolean' => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -772,16 +1155,16 @@ class QueryBuilder
     /**
      * Add a WHERE BETWEEN clause.
      *
-     * @param array{0:mixed,1:mixed} $values
+     * @param  array{0:mixed,1:mixed}  $values
      */
     public function whereBetween(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type'    => 'between',
-          'column'  => $column,
-          'values'  => $values,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type' => 'between',
+            'column' => $column,
+            'values' => $values,
+            'boolean' => $boolean,
+            'not' => $not,
         ];
 
         $this->bindings = array_merge($this->bindings, $values);
@@ -792,7 +1175,7 @@ class QueryBuilder
     /**
      * Add a WHERE EXISTS clause.
      *
-     * @param callable(QueryBuilder):void $callback
+     * @param  callable(QueryBuilder):void  $callback
      */
     public function whereExists(callable $callback, string $boolean = 'and', bool $not = false): self
     {
@@ -800,10 +1183,10 @@ class QueryBuilder
         $callback($query);
 
         $this->wheres[] = [
-          'type'    => 'exists',
-          'query'   => $query,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type' => 'exists',
+            'query' => $query,
+            'boolean' => $boolean,
+            'not' => $not,
         ];
 
         $this->bindings = array_merge($this->bindings, $query->getBindings());
@@ -814,16 +1197,16 @@ class QueryBuilder
     /**
      * Add a WHERE IN clause.
      *
-     * @param list<mixed> $values
+     * @param  list<mixed>  $values
      */
     public function whereIn(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type'    => 'in',
-          'column'  => $column,
-          'values'  => $values,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type' => 'in',
+            'column' => $column,
+            'values' => $values,
+            'boolean' => $boolean,
+            'not' => $not,
         ];
 
         $this->bindings = array_merge($this->bindings, $values);
@@ -834,7 +1217,7 @@ class QueryBuilder
     /**
      * Add a nested WHERE clause.
      *
-     * @param callable(QueryBuilder):void $callback
+     * @param  callable(QueryBuilder):void  $callback
      */
     public function whereNested(callable $callback, string $boolean = 'and'): self
     {
@@ -843,9 +1226,9 @@ class QueryBuilder
 
         if ($query->wheres !== []) {
             $this->wheres[] = [
-              'type'    => 'nested',
-              'query'   => $query,
-              'boolean' => $boolean,
+                'type' => 'nested',
+                'query' => $query,
+                'boolean' => $boolean,
             ];
 
             $this->bindings = array_merge($this->bindings, $query->getBindings());
@@ -855,9 +1238,9 @@ class QueryBuilder
     }
 
     /**
-     * Add a WHERE NOT BETWEEN clause.
+     * Add a WHERE BETWEEN NOT clause.
      *
-     * @param array{0:mixed,1:mixed} $values
+     * @param  array{0:mixed,1:mixed}  $values
      */
     public function whereNotBetween(string $column, array $values, string $boolean = 'and'): self
     {
@@ -865,19 +1248,9 @@ class QueryBuilder
     }
 
     /**
-     * Add a WHERE NOT EXISTS clause.
-     *
-     * @param callable(QueryBuilder):void $callback
-     */
-    public function whereNotExists(callable $callback, string $boolean = 'and'): self
-    {
-        return $this->whereExists($callback, $boolean, true);
-    }
-
-    /**
      * Add a WHERE NOT IN clause.
      *
-     * @param list<mixed> $values
+     * @param  list<mixed>  $values
      */
     public function whereNotIn(string $column, array $values, string $boolean = 'and'): self
     {
@@ -898,10 +1271,10 @@ class QueryBuilder
     public function whereNull(string $column, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type'    => 'null',
-          'column'  => $column,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type' => 'null',
+            'column' => $column,
+            'boolean' => $boolean,
+            'not' => $not,
         ];
 
         return $this;
@@ -910,14 +1283,14 @@ class QueryBuilder
     /**
      * Add a raw WHERE clause.
      *
-     * @param list<mixed> $bindings
+     * @param  list<mixed>  $bindings
      */
     public function whereRaw(string $sql, array $bindings = [], string $boolean = 'and'): self
     {
         $this->wheres[] = [
-          'type'    => 'raw',
-          'sql'     => $sql,
-          'boolean' => $boolean,
+            'type' => 'raw',
+            'sql' => $sql,
+            'boolean' => $boolean,
         ];
 
         $this->bindings = array_merge($this->bindings, $bindings);
@@ -926,133 +1299,35 @@ class QueryBuilder
     }
 
     /**
-     * Conditionally apply query modifications.
+     * Internal helper to run aggregate queries.
      *
-     * Example:
-     *  $builder
-     *      ->when($search, fn ($q, $search) => $q->where('name', 'like', "%$search%"))
-     *      ->when($active, fn ($q) => $q->where('active', 1));
-     *
-     * @param mixed                                  $value
-     * @param callable(self,mixed):void              $callback
-     * @param callable(self,mixed):void|null         $default
+     * @param  non-empty-string  $function
      */
-    public function when(mixed $value, callable $callback, ?callable $default = null): self
+    private function runAggregate(string $function, string $column = '*', bool $ignoreLimitOffset = false): mixed
     {
-        if ($value) {
-            $callback($this, $value);
-        } elseif ($default !== null) {
-            $default($this, $value);
+        $clone = clone $this;
+
+        if ($ignoreLimitOffset) {
+            $clone->limit = null;
+            $clone->offset = null;
+            $clone->orders = [];
+            $clone->unions = [];
+            $clone->lock = null;
         }
 
-        return $this;
-    }
+        $clone->aggregate = [
+            'function' => strtoupper($function),
+            'column' => $column,
+        ];
 
-    /**
-     * Inverse of when(): apply callback only if the value is "falsey".
-     *
-     * @param mixed                                  $value
-     * @param callable(self,mixed):void              $callback
-     * @param callable(self,mixed):void|null         $default
-     */
-    public function unless(mixed $value, callable $callback, ?callable $default = null): self
-    {
-        if (! $value) {
-            $callback($this, $value);
-        } elseif ($default !== null) {
-            $default($this, $value);
+        $results = $this->executor->select($clone);
+
+        if ($results === []) {
+            return null;
         }
 
-        return $this;
-    }
+        $row = $results[0];
 
-    /**
-     * Apply pagination offsets based on page and per-page values.
-     *
-     * This mutates the current builder (like skip/take) and returns it.
-     */
-    public function forPage(int $page, int $perPage = 15): self
-    {
-        if ($perPage <= 0) {
-            throw QueryException::invalidLimit($perPage);
-        }
-
-        $page = max(1, $page);
-
-        $this->offset(($page - 1) * $perPage);
-        $this->limit($perPage);
-
-        return $this;
-    }
-
-    /**
-     * Process the query results in chunks.
-     *
-     * The callback receives (list<row>, pageNumber) and may return false to stop.
-     *
-     * @param int                                    $count
-     * @param callable(list<array<string,mixed>>,int):bool|null $callback
-     */
-    public function chunk(int $count, callable $callback): bool
-    {
-        if ($count <= 0) {
-            throw QueryException::invalidLimit($count);
-        }
-
-        $page = 1;
-
-        do {
-            $clone   = $this->cloneBuilder();
-            $results = $clone->forPage($page, $count)->get();
-            $num     = count($results);
-
-            if ($num === 0) {
-                break;
-            }
-
-            if ($callback($results, $page) === false) {
-                return false;
-            }
-
-            $page++;
-        } while ($num === $count);
-
-        return true;
-    }
-
-    /**
-     * Iterate over the results using a simple cursor based on LIMIT/OFFSET.
-     *
-     * This keeps memory usage bounded by $chunkSize.
-     *
-     * @return \Generator<array<string,mixed>>
-     */
-    public function cursor(int $chunkSize = 1000): \Generator
-    {
-        if ($chunkSize <= 0) {
-            throw QueryException::invalidLimit($chunkSize);
-        }
-
-        $page = 1;
-
-        while (true) {
-            $clone   = $this->cloneBuilder();
-            $results = $clone->forPage($page, $chunkSize)->get();
-            $num     = count($results);
-
-            if ($num === 0) {
-                break;
-            }
-
-            foreach ($results as $row) {
-                yield $row;
-            }
-
-            if ($num < $chunkSize) {
-                break;
-            }
-
-            $page++;
-        }
+        return $row['aggregate'] ?? (array_values($row)[0] ?? null);
     }
 }
