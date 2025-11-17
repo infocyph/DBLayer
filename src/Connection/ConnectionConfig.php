@@ -33,6 +33,12 @@ readonly class ConnectionConfig
       'engine'    => 'InnoDB',
       'options'   => [],
       'read'      => [],
+        // Optional security configuration:
+        // [
+        //     'enabled' => bool,
+        //     'mode'    => 'off'|'normal'|'strict' (consumed by bootstrap, not here)
+        // ]
+      'security'  => [],
     ];
 
     /**
@@ -56,7 +62,7 @@ readonly class ConnectionConfig
     /**
      * Create a new configuration instance.
      *
-     * @param array<string, mixed> $config
+     * @param  array<string, mixed>  $config
      */
     public function __construct(array $config)
     {
@@ -67,7 +73,7 @@ readonly class ConnectionConfig
     /**
      * Create configuration from array.
      *
-     * @param array<string, mixed> $config
+     * @param  array<string, mixed>  $config
      */
     public static function fromArray(array $config): self
     {
@@ -77,7 +83,7 @@ readonly class ConnectionConfig
     /**
      * Create MySQL configuration.
      *
-     * @param array<string, mixed> $options
+     * @param  array<string, mixed>  $options
      */
     public static function mysql(
       string $host,
@@ -100,7 +106,7 @@ readonly class ConnectionConfig
     /**
      * Create PostgreSQL configuration.
      *
-     * @param array<string, mixed> $options
+     * @param  array<string, mixed>  $options
      */
     public static function pgsql(
       string $host,
@@ -123,7 +129,7 @@ readonly class ConnectionConfig
     /**
      * Create SQLite configuration.
      *
-     * @param array<string, mixed> $options
+     * @param  array<string, mixed>  $options
      */
     public static function sqlite(string $database, array $options = []): self
     {
@@ -222,12 +228,34 @@ readonly class ConnectionConfig
     }
 
     /**
+     * Get security configuration as array.
+     *
+     * @return array<string, mixed>
+     */
+    public function getSecurityConfig(): array
+    {
+        $security = $this->config['security'] ?? [];
+
+        return is_array($security) ? $security : [];
+    }
+
+    /**
+     * Whether security checks are enabled at config level.
+     */
+    public function isSecurityEnabled(): bool
+    {
+        $security = $this->getSecurityConfig();
+
+        return (bool) ($security['enabled'] ?? false);
+    }
+
+    /**
      * Get a new instance with a modified value.
      */
     public function with(string $key, mixed $value): self
     {
-        $config        = $this->config;
-        $config[$key]  = $value;
+        $config       = $this->config;
+        $config[$key] = $value;
 
         return new self($config);
     }
@@ -243,8 +271,7 @@ readonly class ConnectionConfig
     /**
      * Apply MySQL-specific defaults.
      *
-     * @param array<string, mixed> $config
-     *
+     * @param  array<string, mixed>  $config
      * @return array<string, mixed>
      */
     private function applyMySqlDefaults(array $config): array
@@ -259,8 +286,7 @@ readonly class ConnectionConfig
     /**
      * Apply PostgreSQL-specific defaults.
      *
-     * @param array<string, mixed> $config
-     *
+     * @param  array<string, mixed>  $config
      * @return array<string, mixed>
      */
     private function applyPostgreSqlDefaults(array $config): array
@@ -274,8 +300,7 @@ readonly class ConnectionConfig
     /**
      * Apply SQLite-specific defaults.
      *
-     * @param array<string, mixed> $config
-     *
+     * @param  array<string, mixed>  $config
      * @return array<string, mixed>
      */
     private function applySqliteDefaults(array $config): array
@@ -289,8 +314,7 @@ readonly class ConnectionConfig
     /**
      * Merge with default configuration.
      *
-     * @param array<string, mixed> $config
-     *
+     * @param  array<string, mixed>  $config
      * @return array<string, mixed>
      */
     private function mergeDefaults(array $config): array
@@ -317,7 +341,7 @@ readonly class ConnectionConfig
     /**
      * Validate configuration.
      *
-     * @param array<string, mixed> $config
+     * @param  array<string, mixed>  $config
      */
     private function validateConfig(array $config): void
     {
@@ -326,6 +350,7 @@ readonly class ConnectionConfig
         }
 
         $driver = $config['driver'];
+
         if (! in_array($driver, ['mysql', 'pgsql', 'sqlite'], true)) {
             throw ConnectionException::unsupportedDriver($driver);
         }

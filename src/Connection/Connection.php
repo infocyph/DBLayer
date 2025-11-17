@@ -12,6 +12,7 @@ use Infocyph\DBLayer\Grammar\SQLiteGrammar;
 use Infocyph\DBLayer\Query\Executor;
 use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Security\Security;
 use Infocyph\DBLayer\Transaction\Transaction;
 use PDO;
 use PDOException;
@@ -27,6 +28,7 @@ use PDOStatement;
  * - Lightweight health checks
  * - Query statistics
  * - Query builder / grammar wiring
+ * - Optional SQL security validation (config-driven)
  */
 final class Connection
 {
@@ -95,12 +97,20 @@ final class Connection
     private $queryRecorder = null;
 
     /**
+     * Whether to run SQL security checks (heuristics, length, bindings).
+     *
+     * Backed by ConnectionConfig::security['enabled'].
+     */
+    private bool $securityChecks;
+
+    /**
      * Create a new connection instance.
      */
     public function __construct(ConnectionConfig $config)
     {
-        $this->config      = $config;
-        $this->tablePrefix = (string) ($config->get('prefix') ?? '');
+        $this->config         = $config;
+        $this->tablePrefix    = (string) ($config->get('prefix') ?? '');
+        $this->securityChecks = $config->isSecurityEnabled();
     }
 
     /**
@@ -122,7 +132,7 @@ final class Connection
     /**
      * Run a delete statement.
      *
-     * @param array<int|string, mixed> $bindings
+     * @param  array<int|string, mixed>  $bindings
      */
     public function delete(string $sql, array $bindings = []): int
     {
@@ -139,12 +149,33 @@ final class Connection
     }
 
     /**
+     * Enable SQL security checks for this connection instance.
+     */
+    public function enableSecurityChecks(): void
+    {
+        $this->securityChecks = true;
+    }
+
+    /**
+     * Disable SQL security checks for this connection instance.
+     */
+    public function disableSecurityChecks(): void
+    {
+        $this->securityChecks = false;
+    }
+
+    /**
      * Execute a statement with automatic reconnection on connection loss.
      *
-     * @param array<int|string, mixed> $bindings
+     * @param  array<int|string, mixed>  $bindings
      */
     public function execute(string $sql, array $bindings = []): PDOStatement
     {
+        if ($this->securityChecks) {
+            // Will be a no-op when SecurityMode::OFF is set globally.
+            Security::validateQuery($sql, $bindings);
+        }
+
         $isWrite = $this->isWriteQuery($sql);
         $pdo     = $isWrite ? $this->getPdo() : $this->getReadPdo();
 
@@ -261,7 +292,7 @@ final class Connection
     /**
      * Run an insert statement.
      *
-     * @param array<int|string, mixed> $bindings
+     * @param  array<int|string, mixed>  $bindings
      */
     public function insert(string $sql, array $bindings = []): bool
     {
@@ -326,8 +357,7 @@ final class Connection
     /**
      * Run a select statement.
      *
-     * @param array<int|string, mixed> $bindings
-     *
+     * @param  array<int|string, mixed>  $bindings
      * @return array<int, array<string, mixed>>
      */
     public function select(string $sql, array $bindings = []): array
@@ -343,7 +373,7 @@ final class Connection
     /**
      * Run an update statement.
      *
-     * @param array<int|string, mixed> $bindings
+     * @param  array<int|string, mixed>  $bindings
      */
     public function update(string $sql, array $bindings = []): int
     {
@@ -353,7 +383,7 @@ final class Connection
     /**
      * Execute a general statement (INSERT, UPDATE, DELETE, DDL).
      *
-     * @param array<int|string, mixed> $bindings
+     * @param  array<int|string, mixed>  $bindings
      */
     public function statement(string $sql, array $bindings = []): bool
     {
@@ -367,6 +397,10 @@ final class Connection
      */
     public function unprepared(string $sql): bool
     {
+        if ($this->securityChecks) {
+            Security::validateQuery($sql, []);
+        }
+
         $isWrite = $this->isWriteQuery($sql);
         $pdo     = $isWrite ? $this->getPdo() : $this->getReadPdo();
 
@@ -435,7 +469,7 @@ final class Connection
     /**
      * Execute a callback within a transaction using the Transaction manager.
      *
-     * @param callable(self):mixed $callback
+     * @param  callable(self):mixed  $callback
      */
     public function transaction(callable $callback, int $attempts = 1): mixed
     {
@@ -468,7 +502,7 @@ final class Connection
      * Note: for now this still executes queries; it only records them.
      * It is primarily useful for inspecting generated SQL.
      *
-     * @param callable(self):void $callback
+     * @param  callable(self):void  $callback
      *
      * @return array<int, array{sql:string,bindings:array<int|string,mixed>}>
      */
@@ -496,7 +530,7 @@ final class Connection
     /**
      * Build DSN string for the configured driver.
      *
-     * @param array<string, mixed>|null $config
+     * @param  array<string, mixed>|null  $config
      */
     private function buildDsn(?array $config = null): string
     {
@@ -514,7 +548,7 @@ final class Connection
     /**
      * Build MySQL DSN.
      *
-     * @param array<string, mixed> $config
+     * @param  array<string, mixed>  $config
      */
     private function buildMySqlDsn(array $config): string
     {
@@ -534,7 +568,7 @@ final class Connection
     /**
      * Build PostgreSQL DSN.
      *
-     * @param array<string, mixed> $config
+     * @param  array<string, mixed>  $config
      */
     private function buildPostgreSqlDsn(array $config): string
     {
@@ -550,7 +584,7 @@ final class Connection
     /**
      * Build SQLite DSN.
      *
-     * @param array<string, mixed> $config
+     * @param  array<string, mixed>  $config
      */
     private function buildSqliteDsn(array $config): string
     {
@@ -829,7 +863,7 @@ final class Connection
     /**
      * Execute a prepared statement on a given PDO instance.
      *
-     * @param array<int|string, mixed> $bindings
+     * @param  array<int|string, mixed>  $bindings
      */
     private function runStatement(PDO $pdo, string $sql, array $bindings): PDOStatement
     {
@@ -875,7 +909,7 @@ final class Connection
     /**
      * Record a query for pretend mode if enabled.
      *
-     * @param array<int|string, mixed> $bindings
+     * @param  array<int|string, mixed>  $bindings
      */
     private function recordPretend(string $sql, array $bindings): void
     {

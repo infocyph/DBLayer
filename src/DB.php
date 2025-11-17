@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer;
 
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
@@ -25,11 +26,11 @@ use Throwable;
 class DB
 {
     /**
-     * Original configuration arrays keyed by connection name.
+     * Original configuration objects keyed by connection name.
      *
      * Used to build fresh Connection instances when requested.
      *
-     * @var array<string,array<string,mixed>>
+     * @var array<string,ConnectionConfig>
      */
     protected static array $connectionConfigs = [];
 
@@ -63,6 +64,11 @@ class DB
     protected static bool $loggingQueries = false;
 
     /**
+     * Maximum number of query log entries to retain (null = unbounded).
+     */
+    protected static ?int $maxQueryLogEntries = null;
+
+    /**
      * Query log entries.
      *
      * Each entry:
@@ -87,12 +93,14 @@ class DB
     /**
      * Add a database connection configuration (and instantiate shared Connection).
      *
-     * @param  array<string,mixed>  $config
+     * @param  array<string,mixed>|ConnectionConfig  $config
      */
-    public static function addConnection(array $config, string $name = 'default'): Connection
+    public static function addConnection(array|ConnectionConfig $config, string $name = 'default'): Connection
     {
-        static::$connectionConfigs[$name] = $config;
-        static::$connections[$name] = new Connection($config);
+        $configObject = static::normalizeConfig($config);
+
+        static::$connectionConfigs[$name] = $configObject;
+        static::$connections[$name] = new Connection($configObject);
 
         if (static::$defaultConnection === null) {
             static::$defaultConnection = $name;
@@ -159,14 +167,16 @@ class DB
             throw ConnectionException::connectionNotFound($name ?? 'null');
         }
 
+        $config = static::$connectionConfigs[$name];
+
         if ($fresh) {
             // Fresh, non-cached Connection for this DB config.
-            return new Connection(static::$connectionConfigs[$name]);
+            return new Connection($config);
         }
 
         // Shared singleton: lazily (re)instantiate if missing.
         if (! isset(static::$connections[$name])) {
-            static::$connections[$name] = new Connection(static::$connectionConfigs[$name]);
+            static::$connections[$name] = new Connection($config);
         }
 
         return static::$connections[$name];
@@ -383,6 +393,7 @@ class DB
         static::$listeners = [];
         static::$loggingQueries = false;
         static::$eventsHooked = false;
+        static::$maxQueryLogEntries = null;
     }
 
     /**
@@ -423,8 +434,10 @@ class DB
             throw ConnectionException::connectionNotFound($name ?? 'null');
         }
 
+        $config = static::$connectionConfigs[$name];
+
         // Drop existing shared instance (if any) and create a new one.
-        static::$connections[$name] = new Connection(static::$connectionConfigs[$name]);
+        static::$connections[$name] = new Connection($config);
 
         return static::$connections[$name];
     }
@@ -485,6 +498,24 @@ class DB
     }
 
     /**
+     * Set maximum number of facade query log entries to retain.
+     *
+     * Pass null or <= 0 for unbounded.
+     */
+    public static function setMaxQueryLogEntries(?int $max): void
+    {
+        static::$maxQueryLogEntries = $max !== null && $max > 0 ? $max : null;
+
+        if (static::$maxQueryLogEntries !== null && count(static::$queryLog) > static::$maxQueryLogEntries) {
+            $overflow = count(static::$queryLog) - static::$maxQueryLogEntries;
+
+            if ($overflow > 0) {
+                array_splice(static::$queryLog, 0, $overflow);
+            }
+        }
+    }
+
+    /**
      * Set the table prefix.
      *
      * @throws ConnectionException
@@ -510,7 +541,6 @@ class DB
 
     /**
      * Get connection statistics.
-     *
      *
      * @return array{
      *   driver:string,
@@ -608,6 +638,18 @@ class DB
     }
 
     /**
+     * Normalize a connection configuration into a ConnectionConfig instance.
+     *
+     * @param  array<string,mixed>|ConnectionConfig  $config
+     */
+    protected static function normalizeConfig(array|ConnectionConfig $config): ConnectionConfig
+    {
+        return $config instanceof ConnectionConfig
+          ? $config
+          : ConnectionConfig::fromArray($config);
+    }
+
+    /**
      * Ensure the global query event listener is registered.
      *
      * Bridges typed QueryExecuted events into the DB facade
@@ -650,6 +692,14 @@ class DB
 
             if (static::$loggingQueries) {
                 static::$queryLog[] = $payload;
+
+                if (static::$maxQueryLogEntries !== null && count(static::$queryLog) > static::$maxQueryLogEntries) {
+                    $overflow = count(static::$queryLog) - static::$maxQueryLogEntries;
+
+                    if ($overflow > 0) {
+                        array_splice(static::$queryLog, 0, $overflow);
+                    }
+                }
             }
         });
     }

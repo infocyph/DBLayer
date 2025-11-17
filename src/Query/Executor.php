@@ -30,6 +30,11 @@ class Executor
     private Connection $connection;
 
     /**
+     * Whether to dispatch query events.
+     */
+    private bool $dispatchEvents = true;
+
+    /**
      * SQL grammar compiler.
      */
     private Grammar $grammar;
@@ -38,6 +43,11 @@ class Executor
      * Enable query logging.
      */
     private bool $logging = false;
+
+    /**
+     * Maximum number of query log entries to keep (null = unbounded).
+     */
+    private ?int $maxLogEntries = null;
 
     /**
      * Query execution log.
@@ -58,6 +68,11 @@ class Executor
      * }>
      */
     private array $queryLog = [];
+
+    /**
+     * Whether to perform binding count validation.
+     */
+    private bool $validateBindings = true;
 
     /**
      * Create a new executor instance.
@@ -88,9 +103,7 @@ class Executor
 
         $startTime = microtime(true);
 
-        Events::dispatch('db.query.executing', [
-            new QueryExecuting($sql, $bindings, $this->connection),
-        ]);
+        $this->dispatchEvent('db.query.executing', new QueryExecuting($sql, $bindings, $this->connection));
 
         try {
             $affected = $this->connection->delete($sql, $bindings);
@@ -98,9 +111,10 @@ class Executor
 
             $this->logQuery($sql, $bindings, $elapsed);
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected)
+            );
 
             return $affected;
         } catch (\Throwable $e) {
@@ -108,12 +122,29 @@ class Executor
 
             $this->logQuery($sql, $bindings, $elapsed, $e->getMessage());
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+            );
 
             throw QueryException::executionFailed($sql, $e->getMessage());
         }
+    }
+
+    /**
+     * Disable binding count validation.
+     */
+    public function disableBindingValidation(): void
+    {
+        $this->validateBindings = false;
+    }
+
+    /**
+     * Disable query event dispatching.
+     */
+    public function disableEvents(): void
+    {
+        $this->dispatchEvents = false;
     }
 
     /**
@@ -122,6 +153,22 @@ class Executor
     public function disableQueryLog(): void
     {
         $this->logging = false;
+    }
+
+    /**
+     * Enable binding count validation.
+     */
+    public function enableBindingValidation(): void
+    {
+        $this->validateBindings = true;
+    }
+
+    /**
+     * Enable query event dispatching.
+     */
+    public function enableEvents(): void
+    {
+        $this->dispatchEvents = true;
     }
 
     /**
@@ -147,8 +194,8 @@ class Executor
     {
         /** @var list<array{sql:string,bindings:list<mixed>,time:float,timestamp:float,error:string}> $failed */
         $failed = array_values(array_filter(
-            $this->queryLog,
-            static fn (array $log): bool => isset($log['error'])
+          $this->queryLog,
+          static fn (array $log): bool => isset($log['error'])
         ));
 
         return $failed;
@@ -186,12 +233,12 @@ class Executor
     {
         if ($this->queryLog === []) {
             return [
-                'total_queries' => 0,
-                'total_time' => 0.0,
-                'avg_time' => 0.0,
-                'min_time' => 0.0,
-                'max_time' => 0.0,
-                'failed_queries' => 0,
+              'total_queries' => 0,
+              'total_time' => 0.0,
+              'avg_time' => 0.0,
+              'min_time' => 0.0,
+              'max_time' => 0.0,
+              'failed_queries' => 0,
             ];
         }
 
@@ -202,12 +249,12 @@ class Executor
         $count = count($times);
 
         return [
-            'total_queries' => count($this->queryLog),
-            'total_time' => round($totalTime, 4),           // ms
-            'avg_time' => round($totalTime / $count, 4),  // ms
-            'min_time' => round(min($times), 4),          // ms
-            'max_time' => round(max($times), 4),          // ms
-            'failed_queries' => count($failed),
+          'total_queries' => count($this->queryLog),
+          'total_time' => round($totalTime, 4),          // ms
+          'avg_time' => round($totalTime / $count, 4),   // ms
+          'min_time' => round((float) min($times), 4),   // ms
+          'max_time' => round((float) max($times), 4),   // ms
+          'failed_queries' => count($failed),
         ];
     }
 
@@ -227,8 +274,8 @@ class Executor
         $queries = $this->queryLog;
 
         usort(
-            $queries,
-            static fn (array $a, array $b): int => $b['time'] <=> $a['time']
+          $queries,
+          static fn (array $a, array $b): int => $b['time'] <=> $a['time']
         );
 
         return array_slice($queries, 0, $limit);
@@ -254,9 +301,7 @@ class Executor
 
         $startTime = microtime(true);
 
-        Events::dispatch('db.query.executing', [
-            new QueryExecuting($sql, $bindings, $this->connection),
-        ]);
+        $this->dispatchEvent('db.query.executing', new QueryExecuting($sql, $bindings, $this->connection));
 
         try {
             $result = $this->connection->insert($sql, $bindings);
@@ -266,9 +311,10 @@ class Executor
 
             $rowsCount = count($rows);
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
+            );
 
             return $result;
         } catch (\Throwable $e) {
@@ -276,9 +322,10 @@ class Executor
 
             $this->logQuery($sql, $bindings, $elapsed, $e->getMessage());
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+            );
 
             throw QueryException::executionFailed($sql, $e->getMessage());
         }
@@ -317,9 +364,7 @@ class Executor
 
         $startTime = microtime(true);
 
-        Events::dispatch('db.query.executing', [
-            new QueryExecuting($sql, $bindings, $this->connection),
-        ]);
+        $this->dispatchEvent('db.query.executing', new QueryExecuting($sql, $bindings, $this->connection));
 
         try {
             $result = $this->connection->insert($sql, $bindings);
@@ -329,9 +374,10 @@ class Executor
 
             $rowsCount = count($rows);
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
+            );
 
             return $result;
         } catch (\Throwable $e) {
@@ -339,9 +385,10 @@ class Executor
 
             $this->logQuery($sql, $bindings, $elapsed, $e->getMessage());
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+            );
 
             throw QueryException::executionFailed($sql, $e->getMessage());
         }
@@ -357,9 +404,9 @@ class Executor
      * @return array<string,mixed>|null First returned row or simulated row from lastInsertId()
      */
     public function insertReturning(
-        QueryBuilder $query,
-        array $values,
-        ?string $column = null
+      QueryBuilder $query,
+      array $values,
+      ?string $column = null
     ): ?array {
         $rows = $this->normalizeInsertValues($values);
 
@@ -378,9 +425,7 @@ class Executor
 
             $startTime = microtime(true);
 
-            Events::dispatch('db.query.executing', [
-                new QueryExecuting($sql, $bindings, $this->connection),
-            ]);
+            $this->dispatchEvent('db.query.executing', new QueryExecuting($sql, $bindings, $this->connection));
 
             try {
                 $resultRows = $this->connection->select($sql, $bindings);
@@ -388,9 +433,10 @@ class Executor
 
                 $this->logQuery($sql, $bindings, $elapsed);
 
-                Events::dispatch('db.query.executed', [
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, count($resultRows)),
-                ]);
+                $this->dispatchEvent(
+                  'db.query.executed',
+                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, count($resultRows))
+                );
 
                 return $resultRows[0] ?? null;
             } catch (\Throwable $e) {
@@ -398,9 +444,10 @@ class Executor
 
                 $this->logQuery($sql, $bindings, $elapsed, $e->getMessage());
 
-                Events::dispatch('db.query.executed', [
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
-                ]);
+                $this->dispatchEvent(
+                  'db.query.executed',
+                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                );
 
                 throw QueryException::executionFailed($sql, $e->getMessage());
             }
@@ -428,9 +475,7 @@ class Executor
 
         $startTime = microtime(true);
 
-        Events::dispatch('db.query.executing', [
-            new QueryExecuting($sql, $bindings, $this->connection),
-        ]);
+        $this->dispatchEvent('db.query.executing', new QueryExecuting($sql, $bindings, $this->connection));
 
         try {
             $results = $this->connection->select($sql, $bindings);
@@ -438,9 +483,10 @@ class Executor
 
             $this->logQuery($sql, $bindings, $elapsed);
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+            );
 
             return $results;
         } catch (\Throwable $e) {
@@ -448,9 +494,10 @@ class Executor
 
             $this->logQuery($sql, $bindings, $elapsed, $e->getMessage());
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+            );
 
             throw QueryException::executionFailed($sql, $e->getMessage());
         }
@@ -466,7 +513,25 @@ class Executor
         $sql = $this->grammar->compileSelect($query);
         $bindings = $query->getBindings();
 
-        $this->raw($sql, $bindings);
+        return $this->raw($sql, $bindings);
+    }
+
+    /**
+     * Set maximum number of query log entries to keep.
+     *
+     * Pass null or <= 0 for unbounded.
+     */
+    public function setMaxQueryLogEntries(?int $max): void
+    {
+        $this->maxLogEntries = $max !== null && $max > 0 ? $max : null;
+
+        if ($this->maxLogEntries !== null && count($this->queryLog) > $this->maxLogEntries) {
+            $overflow = count($this->queryLog) - $this->maxLogEntries;
+
+            if ($overflow > 0) {
+                array_splice($this->queryLog, 0, $overflow);
+            }
+        }
     }
 
     /**
@@ -478,9 +543,7 @@ class Executor
 
         $startTime = microtime(true);
 
-        Events::dispatch('db.query.executing', [
-            new QueryExecuting($sql, $bindings, $this->connection),
-        ]);
+        $this->dispatchEvent('db.query.executing', new QueryExecuting($sql, $bindings, $this->connection));
 
         try {
             $this->connection->execute($sql, $bindings);
@@ -488,9 +551,10 @@ class Executor
 
             $this->logQuery($sql, $bindings, $elapsed);
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+            );
 
             return true;
         } catch (\Throwable $e) {
@@ -498,9 +562,10 @@ class Executor
 
             $this->logQuery($sql, $bindings, $elapsed, $e->getMessage());
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+            );
 
             throw QueryException::executionFailed($sql, $e->getMessage());
         }
@@ -515,9 +580,7 @@ class Executor
 
         $startTime = microtime(true);
 
-        Events::dispatch('db.query.executing', [
-            new QueryExecuting($sql, [], $this->connection),
-        ]);
+        $this->dispatchEvent('db.query.executing', new QueryExecuting($sql, [], $this->connection));
 
         try {
             $this->connection->execute($sql);
@@ -525,9 +588,10 @@ class Executor
 
             $this->logQuery($sql, [], $elapsed);
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null)
+            );
 
             return true;
         } catch (\Throwable $e) {
@@ -535,9 +599,10 @@ class Executor
 
             $this->logQuery($sql, [], $elapsed, $e->getMessage());
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null)
+            );
 
             throw QueryException::executionFailed($sql, $e->getMessage());
         }
@@ -550,6 +615,10 @@ class Executor
      */
     public function update(QueryBuilder $query, array $values): int
     {
+        if ($values === []) {
+            return 0;
+        }
+
         $sql = $this->grammar->compileUpdate($query, $values);
         $bindings = array_merge(array_values($values), $query->getBindings());
 
@@ -557,9 +626,7 @@ class Executor
 
         $startTime = microtime(true);
 
-        Events::dispatch('db.query.executing', [
-            new QueryExecuting($sql, $bindings, $this->connection),
-        ]);
+        $this->dispatchEvent('db.query.executing', new QueryExecuting($sql, $bindings, $this->connection));
 
         try {
             $affected = $this->connection->update($sql, $bindings);
@@ -567,9 +634,10 @@ class Executor
 
             $this->logQuery($sql, $bindings, $elapsed);
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected)
+            );
 
             return $affected;
         } catch (\Throwable $e) {
@@ -577,9 +645,10 @@ class Executor
 
             $this->logQuery($sql, $bindings, $elapsed, $e->getMessage());
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+            );
 
             throw QueryException::executionFailed($sql, $e->getMessage());
         }
@@ -595,10 +664,10 @@ class Executor
      * @param  list<string>|null  $update
      */
     public function upsert(
-        QueryBuilder $query,
-        array $values,
-        array $uniqueBy,
-        ?array $update = null
+      QueryBuilder $query,
+      array $values,
+      array $uniqueBy,
+      ?array $update = null
     ): bool {
         $rows = $this->normalizeInsertValues($values);
 
@@ -639,9 +708,7 @@ class Executor
 
         $startTime = microtime(true);
 
-        Events::dispatch('db.query.executing', [
-            new QueryExecuting($sql, $bindings, $this->connection),
-        ]);
+        $this->dispatchEvent('db.query.executing', new QueryExecuting($sql, $bindings, $this->connection));
 
         try {
             $result = $this->connection->insert($sql, $bindings);
@@ -651,9 +718,10 @@ class Executor
 
             $rowsCount = count($rows);
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
+            );
 
             return $result;
         } catch (\Throwable $e) {
@@ -661,12 +729,25 @@ class Executor
 
             $this->logQuery($sql, $bindings, $elapsed, $e->getMessage());
 
-            Events::dispatch('db.query.executed', [
-                new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
-            ]);
+            $this->dispatchEvent(
+              'db.query.executed',
+              new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+            );
 
             throw QueryException::executionFailed($sql, $e->getMessage());
         }
+    }
+
+    /**
+     * Dispatch an event if event dispatching is enabled.
+     */
+    private function dispatchEvent(string $event, object $payload): void
+    {
+        if (! $this->dispatchEvents) {
+            return;
+        }
+
+        Events::dispatch($event, [$payload]);
     }
 
     /**
@@ -702,10 +783,10 @@ class Executor
         }
 
         $entry = [
-            'sql' => $sql,
-            'bindings' => array_values($bindings),
-            'time' => round($time * 1000, 2), // milliseconds
-            'timestamp' => microtime(true),
+          'sql' => $sql,
+          'bindings' => array_values($bindings),
+          'time' => round($time * 1000, 2), // milliseconds
+          'timestamp' => microtime(true),
         ];
 
         if ($error !== null) {
@@ -713,6 +794,14 @@ class Executor
         }
 
         $this->queryLog[] = $entry;
+
+        if ($this->maxLogEntries !== null && count($this->queryLog) > $this->maxLogEntries) {
+            $overflow = count($this->queryLog) - $this->maxLogEntries;
+
+            if ($overflow > 0) {
+                array_splice($this->queryLog, 0, $overflow);
+            }
+        }
     }
 
     /**
@@ -746,7 +835,7 @@ class Executor
      */
     private function validateBindingCount(string $sql, array $bindings): void
     {
-        if ($bindings === []) {
+        if (! $this->validateBindings || $bindings === []) {
             return;
         }
 

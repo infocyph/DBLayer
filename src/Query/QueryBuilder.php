@@ -570,6 +570,14 @@ class QueryBuilder
     }
 
     /**
+     * Get the current query type (e.g. "select") or null if not set.
+     */
+    public function getType(): ?string
+    {
+        return $this->type;
+    }
+
+    /**
      * Add a GROUP BY clause.
      */
     public function groupBy(string ...$groups): self
@@ -852,8 +860,6 @@ class QueryBuilder
         // Page items.
         $clone = $this->cloneBuilder();
         $clone->aggregate = null;
-        $clone->limit = null;
-        $clone->offset = null;
 
         $clone->offset = ($page - 1) * $perPage;
         $clone->limit = $perPage;
@@ -942,8 +948,6 @@ class QueryBuilder
 
         $clone = $this->cloneBuilder();
         $clone->aggregate = null;
-        $clone->limit = null;
-        $clone->offset = null;
 
         $offset = ($page - 1) * $perPage;
         $clone->offset = $offset;
@@ -994,11 +998,27 @@ class QueryBuilder
     }
 
     /**
-     * Get the SQL query string.
+     * Explicit helper to get the SQL for the current SELECT query.
+     */
+    public function toSelectSql(): string
+    {
+        if ($this->type === null) {
+            $this->type = 'select';
+        }
+
+        return $this->grammar->compileSelect($this);
+    }
+
+    /**
+     * Get the SQL query string for the current SELECT query.
+     *
+     * This is primarily intended for debugging/logging SELECTs.
+     * Non-SELECT operations (insert/update/delete) are executed via the Executor
+     * and may require additional context (e.g. values) that is not tracked here.
      */
     public function toSql(): string
     {
-        return $this->grammar->compileSelect($this);
+        return $this->toSelectSql();
     }
 
     /**
