@@ -14,13 +14,12 @@ namespace Infocyph\DBLayer\Driver\Support;
 final readonly class Capabilities
 {
     public function __construct(
-        public bool $supportsReturning    = false,
+        public bool $supportsReturning = false,
         public bool $supportsInsertIgnore = false,
-        public bool $supportsUpsert       = false,
-        public bool $supportsSavepoints   = true,
-        public bool $supportsSchemas      = false,
-    ) {
-    }
+        public bool $supportsUpsert = false,
+        public bool $supportsSavepoints = true,
+        public bool $supportsSchemas = false,
+    ) {}
 
     public function withInsertIgnore(bool $enabled = true): self
     {

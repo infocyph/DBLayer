@@ -80,7 +80,7 @@ final class Executor
     public function __construct(Connection $connection, Grammar $grammar)
     {
         $this->connection = $connection;
-        $this->grammar    = $grammar;
+        $this->grammar = $grammar;
     }
 
     /**
@@ -96,7 +96,7 @@ final class Executor
      */
     public function delete(QueryBuilder $query): int
     {
-        $sql      = $this->grammar->compileDelete($query);
+        $sql = $this->grammar->compileDelete($query);
         $bindings = $query->getBindings();
 
         $this->validateBindingCount($sql, $bindings);
@@ -112,7 +112,7 @@ final class Executor
 
         try {
             $affected = $this->connection->delete($sql, $bindings);
-            $elapsed  = microtime(true) - $startTime;
+            $elapsed = microtime(true) - $startTime;
 
             $this->logQuery($sql, $bindings, $elapsed);
 
@@ -242,28 +242,28 @@ final class Executor
     {
         if ($this->queryLog === []) {
             return [
-              'total_queries'  => 0,
-              'total_time'     => 0.0,
-              'avg_time'       => 0.0,
-              'min_time'       => 0.0,
-              'max_time'       => 0.0,
-              'failed_queries' => 0,
+                'total_queries' => 0,
+                'total_time' => 0.0,
+                'avg_time' => 0.0,
+                'min_time' => 0.0,
+                'max_time' => 0.0,
+                'failed_queries' => 0,
             ];
         }
 
-        $times  = array_column($this->queryLog, 'time');
+        $times = array_column($this->queryLog, 'time');
         $failed = $this->getFailedQueries();
 
         $totalTime = array_sum($times);
-        $count     = count($times);
+        $count = count($times);
 
         return [
-          'total_queries'  => count($this->queryLog),
-          'total_time'     => round($totalTime, 4),           // ms
-          'avg_time'       => round($totalTime / $count, 4),  // ms
-          'min_time'       => round((float) min($times), 4),  // ms
-          'max_time'       => round((float) max($times), 4),  // ms
-          'failed_queries' => count($failed),
+            'total_queries' => count($this->queryLog),
+            'total_time' => round($totalTime, 4),           // ms
+            'avg_time' => round($totalTime / $count, 4),  // ms
+            'min_time' => round((float) min($times), 4),  // ms
+            'max_time' => round((float) max($times), 4),  // ms
+            'failed_queries' => count($failed),
         ];
     }
 
@@ -303,7 +303,7 @@ final class Executor
             return true;
         }
 
-        $sql      = $this->grammar->compileInsert($query, $rows);
+        $sql = $this->grammar->compileInsert($query, $rows);
         $bindings = $this->getInsertBindings($rows);
 
         $this->validateBindingCount($sql, $bindings);
@@ -318,7 +318,7 @@ final class Executor
         }
 
         try {
-            $result  = $this->connection->insert($sql, $bindings);
+            $result = $this->connection->insert($sql, $bindings);
             $elapsed = microtime(true) - $startTime;
 
             $this->logQuery($sql, $bindings, $elapsed);
@@ -390,7 +390,7 @@ final class Executor
         }
 
         try {
-            $result  = $this->connection->insert($sql, $bindings);
+            $result = $this->connection->insert($sql, $bindings);
             $elapsed = microtime(true) - $startTime;
 
             $this->logQuery($sql, $bindings, $elapsed);
@@ -445,7 +445,7 @@ final class Executor
 
         if (method_exists($this->grammar, 'compileInsertGetId')) {
             /** @phpstan-ignore-next-line */
-            $sql      = $this->grammar->compileInsertGetId($query, $rows, $column);
+            $sql = $this->grammar->compileInsertGetId($query, $rows, $column);
             $bindings = $this->getInsertBindings($rows);
 
             $this->validateBindingCount($sql, $bindings);
@@ -461,7 +461,7 @@ final class Executor
 
             try {
                 $resultRows = $this->connection->select($sql, $bindings);
-                $elapsed    = microtime(true) - $startTime;
+                $elapsed = microtime(true) - $startTime;
 
                 $this->logQuery($sql, $bindings, $elapsed);
 
@@ -564,7 +564,7 @@ final class Executor
         if (method_exists($query, 'toPayload')) {
             try {
                 /** @var object $payload */
-                $payload  = $query->toPayload();
+                $payload = $query->toPayload();
                 $compiler = $this->connection->getCompiler();
                 /** @var object $compiled */
                 $compiled = $compiler->compile($payload);
@@ -581,7 +581,7 @@ final class Executor
         }
 
         // Legacy path: Grammar-based compilation.
-        $sql      = $this->grammar->compileSelect($query);
+        $sql = $this->grammar->compileSelect($query);
         $bindings = $query->getBindings();
 
         return $this->raw($sql, $bindings);
@@ -708,7 +708,7 @@ final class Executor
             return 0;
         }
 
-        $sql      = $this->grammar->compileUpdate($query, $values);
+        $sql = $this->grammar->compileUpdate($query, $values);
         $bindings = array_merge(array_values($values), $query->getBindings());
 
         $this->validateBindingCount($sql, $bindings);
@@ -724,7 +724,7 @@ final class Executor
 
         try {
             $affected = $this->connection->update($sql, $bindings);
-            $elapsed  = microtime(true) - $startTime;
+            $elapsed = microtime(true) - $startTime;
 
             $this->logQuery($sql, $bindings, $elapsed);
 
@@ -814,7 +814,7 @@ final class Executor
         }
 
         try {
-            $result  = $this->connection->insert($sql, $bindings);
+            $result = $this->connection->insert($sql, $bindings);
             $elapsed = microtime(true) - $startTime;
 
             $this->logQuery($sql, $bindings, $elapsed);
@@ -890,10 +890,10 @@ final class Executor
         }
 
         $entry = [
-          'sql'       => $sql,
-          'bindings'  => array_values($bindings),
-          'time'      => round($time * 1000, 2), // ms
-          'timestamp' => microtime(true),
+            'sql' => $sql,
+            'bindings' => array_values($bindings),
+            'time' => round($time * 1000, 2), // ms
+            'timestamp' => microtime(true),
         ];
 
         if ($error !== null) {
@@ -925,7 +925,7 @@ final class Executor
 
         if (! is_array(reset($values))) {
             /** @var array<string,mixed> $row */
-            $row    = $values;
+            $row = $values;
             $values = [$row];
         }
 

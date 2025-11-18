@@ -6,8 +6,6 @@ declare(strict_types=1);
  * DBLayer Helper Functions
  *
  * Global helper functions for database operations.
- *
- * @package Infocyph\DBLayer
  */
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
@@ -47,7 +45,7 @@ if (! function_exists('db_select')) {
     /**
      * Execute a select query.
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
      * @return list<array<string,mixed>>
      */
     function db_select(string $query, array $bindings = [], ?string $connection = null): array
@@ -60,7 +58,7 @@ if (! function_exists('db_select_one')) {
     /**
      * Execute a select query and return the first result.
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
      */
     function db_select_one(string $query, array $bindings = [], ?string $connection = null): mixed
     {
@@ -74,7 +72,7 @@ if (! function_exists('db_insert')) {
     /**
      * Execute an insert query.
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
      */
     function db_insert(string $query, array $bindings = [], ?string $connection = null): bool
     {
@@ -86,7 +84,7 @@ if (! function_exists('db_update')) {
     /**
      * Execute an update query.
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
      */
     function db_update(string $query, array $bindings = [], ?string $connection = null): int
     {
@@ -98,7 +96,7 @@ if (! function_exists('db_delete')) {
     /**
      * Execute a delete query.
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
      */
     function db_delete(string $query, array $bindings = [], ?string $connection = null): int
     {
@@ -110,7 +108,7 @@ if (! function_exists('db_statement')) {
     /**
      * Execute a general statement.
      *
-     * @param array<int,mixed> $bindings
+     * @param  array<int,mixed>  $bindings
      */
     function db_statement(string $query, array $bindings = [], ?string $connection = null): bool
     {
@@ -241,7 +239,7 @@ if (! function_exists('data_set')) {
     function data_set(mixed &$target, string|array $key, mixed $value, bool $overwrite = true): mixed
     {
         $segments = is_array($key) ? $key : explode('.', $key);
-        $segment  = array_shift($segments);
+        $segment = array_shift($segments);
 
         if ($segment === null) {
             return $target;
@@ -289,8 +287,7 @@ if (! function_exists('array_all')) {
     /**
      * Determine if all items in the array pass the given truth test.
      *
-     * @param array $array
-     * @param callable $callback fn(mixed $value, mixed $key): bool
+     * @param  callable  $callback  fn(mixed $value, mixed $key): bool
      */
     function array_all(array $array, callable $callback): bool
     {
