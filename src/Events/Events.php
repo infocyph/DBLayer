@@ -65,14 +65,6 @@ final class Events
     }
 
     /**
-     * Enable event dispatching.
-     */
-    public static function enable(): void
-    {
-        self::$enabled = true;
-    }
-
-    /**
      * Dispatch an event.
      *
      * @param string           $event   Event name (class name, "db.query.executed", etc.)
@@ -114,6 +106,14 @@ final class Events
     }
 
     /**
+     * Enable event dispatching.
+     */
+    public static function enable(): void
+    {
+        self::$enabled = true;
+    }
+
+    /**
      * Flush queued events (dispatch them in FIFO order).
      */
     public static function flush(): void
@@ -123,45 +123,6 @@ final class Events
         }
 
         self::$queue = [];
-    }
-
-    /**
-     * Queue an event for later dispatch.
-     *
-     * @param string           $event
-     * @param array<int,mixed> $payload
-     */
-    public static function queue(string $event, array $payload = []): void
-    {
-        self::$queue[] = [
-          'event'   => $event,
-          'payload' => $payload,
-          'time'    => microtime(true),
-        ];
-
-        self::$stats['queued']++;
-    }
-
-    /**
-     * Register an event listener.
-     */
-    public static function listen(string $event, callable $listener): void
-    {
-        self::$listeners[$event][] = $listener;
-    }
-
-    /**
-     * Subscribe to multiple events using a subscriber.
-     */
-    public static function subscribe(EventSubscriber $subscriber): void
-    {
-        foreach ($subscriber->subscribe() as $event => $listener) {
-            if (is_string($listener)) {
-                $listener = [$subscriber, $listener];
-            }
-
-            self::listen($event, $listener);
-        }
     }
 
     /**
@@ -196,22 +157,6 @@ final class Events
     public static function forgetAll(): void
     {
         self::$listeners = [];
-    }
-
-    /**
-     * Check if event has listeners (exact name only).
-     */
-    public static function hasListeners(string $event): bool
-    {
-        return ! empty(self::$listeners[$event]);
-    }
-
-    /**
-     * Check if events are enabled.
-     */
-    public static function isEnabled(): bool
-    {
-        return self::$enabled;
     }
 
     /**
@@ -259,6 +204,47 @@ final class Events
     }
 
     /**
+     * Check if event has listeners (exact name only).
+     */
+    public static function hasListeners(string $event): bool
+    {
+        return ! empty(self::$listeners[$event]);
+    }
+
+    /**
+     * Check if events are enabled.
+     */
+    public static function isEnabled(): bool
+    {
+        return self::$enabled;
+    }
+
+    /**
+     * Register an event listener.
+     */
+    public static function listen(string $event, callable $listener): void
+    {
+        self::$listeners[$event][] = $listener;
+    }
+
+    /**
+     * Queue an event for later dispatch.
+     *
+     * @param string           $event
+     * @param array<int,mixed> $payload
+     */
+    public static function queue(string $event, array $payload = []): void
+    {
+        self::$queue[] = [
+          'event'   => $event,
+          'payload' => $payload,
+          'time'    => microtime(true),
+        ];
+
+        self::$stats['queued']++;
+    }
+
+    /**
      * Reset statistics counters.
      */
     public static function resetStats(): void
@@ -267,6 +253,20 @@ final class Events
           'dispatched' => 0,
           'queued'     => 0,
         ];
+    }
+
+    /**
+     * Subscribe to multiple events using a subscriber.
+     */
+    public static function subscribe(EventSubscriber $subscriber): void
+    {
+        foreach ($subscriber->subscribe() as $event => $listener) {
+            if (is_string($listener)) {
+                $listener = [$subscriber, $listener];
+            }
+
+            self::listen($event, $listener);
+        }
     }
 
     /**

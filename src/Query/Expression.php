@@ -26,6 +26,14 @@ final class Expression
     }
 
     /**
+     * Get the string representation.
+     */
+    public function __toString(): string
+    {
+        return $this->getValue();
+    }
+
+    /**
      * Create a new expression instance (static factory).
      */
     public static function make(string $value): self
@@ -39,13 +47,5 @@ final class Expression
     public function getValue(): string
     {
         return $this->value;
-    }
-
-    /**
-     * Get the string representation.
-     */
-    public function __toString(): string
-    {
-        return $this->getValue();
     }
 }

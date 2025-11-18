@@ -2,8 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Infocyph\DBLayer\Grammar;
+namespace Infocyph\DBLayer\Driver\MySQL;
 
+use Infocyph\DBLayer\Grammar\Grammar;
 use Infocyph\DBLayer\Query\QueryBuilder;
 
 /**

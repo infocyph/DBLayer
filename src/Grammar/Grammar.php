@@ -1,5 +1,7 @@
 <?php
 
+// src/Grammar/Grammar.php
+
 declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Grammar;
@@ -13,6 +15,9 @@ use Infocyph\DBLayer\Query\QueryBuilder;
  *
  * Abstract base class for database-specific SQL compilation.
  * Provides common methods and structure for grammar implementations.
+ *
+ * Note: in the new design, core no longer talks to Grammar directly.
+ * Grammar is used by driver-specific compilers.
  */
 abstract class Grammar
 {
@@ -24,17 +29,17 @@ abstract class Grammar
      * @var list<string>
      */
     protected array $selectComponents = [
-        'aggregate',
-        'columns',
-        'from',
-        'joins',
-        'wheres',
-        'groups',
-        'havings',
-        'orders',
-        'limit',
-        'offset',
-        'lock',
+      'aggregate',
+      'columns',
+      'from',
+      'joins',
+      'wheres',
+      'groups',
+      'havings',
+      'orders',
+      'limit',
+      'offset',
+      'lock',
     ];
 
     /**
@@ -63,8 +68,8 @@ abstract class Grammar
     public function compileDelete(QueryBuilder $query): string
     {
         $components = $query->getComponents();
-        $table = $this->wrapTable($components['from']);
-        $where = $this->compileWheres($query, $components['wheres']);
+        $table      = $this->wrapTable($components['from']);
+        $where      = $this->compileWheres($query, $components['wheres']);
 
         return trim("delete from {$table} {$where}");
     }
@@ -121,7 +126,7 @@ abstract class Grammar
     public function compileUpdate(QueryBuilder $query, array $values): string
     {
         $components = $query->getComponents();
-        $table = $this->wrapTable($components['from']);
+        $table      = $this->wrapTable($components['from']);
 
         $columns = implode(', ', array_map(
             function (mixed $value, string $key): string {
@@ -205,7 +210,7 @@ abstract class Grammar
     protected function compileAggregate(QueryBuilder $query): string
     {
         $components = $query->getComponents();
-        $aggregate = $components['aggregate'];
+        $aggregate  = $components['aggregate'];
 
         $column = $aggregate['column'] === '*'
           ? '*'
@@ -247,7 +252,7 @@ abstract class Grammar
     protected function compileColumns(QueryBuilder $query, array $columns): string
     {
         $components = $query->getComponents();
-        $select = $components['distinct'] ? 'select distinct ' : 'select ';
+        $select     = $components['distinct'] ? 'select distinct ' : 'select ';
 
         return $select.$this->columnize($columns);
     }
@@ -259,7 +264,7 @@ abstract class Grammar
      */
     protected function compileComponents(QueryBuilder $query): array
     {
-        $sql = [];
+        $sql        = [];
         $components = $query->getComponents();
 
         foreach ($this->selectComponents as $component) {
@@ -356,8 +361,8 @@ abstract class Grammar
         $rows = $this->normalizeInsertValues($values);
 
         $components = $query->getComponents();
-        $table = $this->wrapTable($components['from']);
-        $columns = $this->columnize(array_keys($rows[0]));
+        $table      = $this->wrapTable($components['from']);
+        $columns    = $this->columnize(array_keys($rows[0]));
 
         $parameters = implode(', ', array_map(
             function (array $record): string {
@@ -374,8 +379,8 @@ abstract class Grammar
      */
     protected function compileJoinClause(JoinClause $join): string
     {
-        $table = $this->wrapTable($join->getTable());
-        $type = strtoupper($join->getType());
+        $table      = $this->wrapTable($join->getTable());
+        $type       = strtoupper($join->getType());
         $conditions = $join->getConditions();
 
         if ($conditions === []) {
@@ -403,7 +408,7 @@ abstract class Grammar
 
                 case 'whereIn':
                     $placeholders = $this->parameterize($condition['values']);
-                    $clauses[] = $boolean
+                    $clauses[]    = $boolean
                       .$this->wrap($condition['column'])
                       .' in ('.$placeholders.')';
                     break;
@@ -441,7 +446,7 @@ abstract class Grammar
                 }
 
                 $table = $this->wrapTable($join['table']);
-                $type = strtoupper($join['type']);
+                $type  = strtoupper($join['type']);
 
                 if (isset($join['first'])) {
                     return "{$type} join {$table} on {$this->wrap($join['first'])} {$join['operator']} {$this->wrap($join['second'])}";
@@ -519,7 +524,7 @@ abstract class Grammar
      */
     protected function compileUnions(QueryBuilder $query): string
     {
-        $sql = '';
+        $sql    = '';
         $unions = $query->getComponents()['unions'];
 
         foreach ($unions as $union) {
@@ -593,7 +598,7 @@ abstract class Grammar
 
         if (! is_array(reset($values))) {
             /** @var array<string,mixed> $row */
-            $row = $values;
+            $row    = $values;
             $values = [$row];
         }
 
@@ -659,7 +664,7 @@ abstract class Grammar
         unset($query);
 
         $values = $this->parameterize($where['values']);
-        $not = $where['not'] ? 'not ' : '';
+        $not    = $where['not'] ? 'not ' : '';
 
         return $this->wrap($where['column']).' '.$not.'in ('.$values.')';
     }

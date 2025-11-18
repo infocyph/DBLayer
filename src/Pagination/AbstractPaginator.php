@@ -15,6 +15,10 @@ use Traversable;
 abstract class AbstractPaginator implements PaginatorInterface
 {
     /**
+     * Current page (1-based).
+     */
+    protected int $currentPage;
+    /**
      * Current page items.
      *
      * @var list<mixed>
@@ -27,11 +31,6 @@ abstract class AbstractPaginator implements PaginatorInterface
     protected int $perPage;
 
     /**
-     * Current page (1-based).
-     */
-    protected int $currentPage;
-
-    /**
      * @param list<mixed> $items
      */
     public function __construct(array $items, int $perPage, int $currentPage = 1)
@@ -42,26 +41,32 @@ abstract class AbstractPaginator implements PaginatorInterface
     }
 
     /**
-     * @return list<mixed>
+     * Concrete paginators must implement these.
      */
-    public function items(): array
-    {
-        return $this->items;
-    }
+    abstract public function hasMorePages(): bool;
 
-    public function perPage(): int
+    abstract public function lastPage(): ?int;
+
+    /**
+     * @return array<string,mixed>
+     */
+    abstract public function meta(): array;
+
+    /**
+     * @return array<string,mixed>
+     */
+    abstract public function toArray(): array;
+
+    abstract public function total(): ?int;
+
+    public function count(): int
     {
-        return $this->perPage;
+        return \count($this->items);
     }
 
     public function currentPage(): int
     {
         return $this->currentPage;
-    }
-
-    public function count(): int
-    {
-        return \count($this->items);
     }
 
     public function firstItem(): ?int
@@ -71,6 +76,27 @@ abstract class AbstractPaginator implements PaginatorInterface
         }
 
         return (($this->currentPage - 1) * $this->perPage) + 1;
+    }
+
+    /**
+     * @return Traversable<int,mixed>
+     */
+    public function getIterator(): Traversable
+    {
+        return new ArrayIterator($this->items);
+    }
+
+    /**
+     * @return list<mixed>
+     */
+    public function items(): array
+    {
+        return $this->items;
+    }
+
+    public function jsonSerialize(): mixed
+    {
+        return $this->toArray();
     }
 
     public function lastItem(): ?int
@@ -84,35 +110,8 @@ abstract class AbstractPaginator implements PaginatorInterface
         return $first === null ? null : $first + $this->count() - 1;
     }
 
-    /**
-     * @return Traversable<int,mixed>
-     */
-    public function getIterator(): Traversable
+    public function perPage(): int
     {
-        return new ArrayIterator($this->items);
+        return $this->perPage;
     }
-
-    public function jsonSerialize(): mixed
-    {
-        return $this->toArray();
-    }
-
-    /**
-     * Concrete paginators must implement these.
-     */
-    abstract public function hasMorePages(): bool;
-
-    abstract public function total(): ?int;
-
-    abstract public function lastPage(): ?int;
-
-    /**
-     * @return array<string,mixed>
-     */
-    abstract public function toArray(): array;
-
-    /**
-     * @return array<string,mixed>
-     */
-    abstract public function meta(): array;
 }

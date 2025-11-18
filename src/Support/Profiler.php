@@ -16,14 +16,14 @@ final class Profiler
 {
     private bool $enabled = false;
 
-    private float $startTime = 0.0;
-
-    private int $startMemory = 0;
-
     /**
      * @var array<int, array{sql:string,bindings:array<array-key,mixed>,time:float,memory:int}>
      */
     private array $profiles = [];
+
+    private int $startMemory = 0;
+
+    private float $startTime = 0.0;
 
     /**
      * Clear all profiling data.

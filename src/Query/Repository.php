@@ -26,14 +26,14 @@ abstract class Repository
     protected Connection $connection;
 
     /**
-     * SQL grammar compiler.
-     */
-    protected Grammar $grammar;
-
-    /**
      * Query executor.
      */
     protected Executor $executor;
+
+    /**
+     * SQL grammar compiler.
+     */
+    protected Grammar $grammar;
 
     /**
      * Result processor.
@@ -44,10 +44,10 @@ abstract class Repository
      * Create a new repository instance.
      */
     public function __construct(
-      Connection $connection,
-      Grammar $grammar,
-      Executor $executor,
-      ResultProcessor $results
+        Connection $connection,
+        Grammar $grammar,
+        Executor $executor,
+        ResultProcessor $results
     ) {
         $this->connection = $connection;
         $this->grammar    = $grammar;
@@ -63,46 +63,6 @@ abstract class Repository
     abstract protected function table(): string;
 
     /**
-     * Primary key column name.
-     *
-     * Override if the primary key is not "id".
-     */
-    protected function primaryKey(): string
-    {
-        return 'id';
-    }
-
-    /**
-     * Create a fresh QueryBuilder instance.
-     */
-    protected function newQuery(): QueryBuilder
-    {
-        return new QueryBuilder($this->connection, $this->grammar, $this->executor);
-    }
-
-    /**
-     * Base query for this repository's table.
-     */
-    protected function query(): QueryBuilder
-    {
-        return $this->newQuery()->from($this->table());
-    }
-
-    /**
-     * Apply an optional scope closure to the query.
-     *
-     * @param callable(QueryBuilder):void|null $scope
-     */
-    protected function applyScope(QueryBuilder $query, ?callable $scope): QueryBuilder
-    {
-        if ($scope !== null) {
-            $scope($query);
-        }
-
-        return $query;
-    }
-
-    /**
      * Get all rows for this table as a Collection.
      */
     public function all(array $columns = ['*']): Collection
@@ -115,36 +75,41 @@ abstract class Repository
     }
 
     /**
-     * Get rows using an optional scoped query as a Collection.
-     *
-     * @param callable(QueryBuilder):void|null $scope
+     * Get a ready-to-use QueryBuilder for advanced usage.
      */
-    public function get(?callable $scope = null, array $columns = ['*']): Collection
+    public function builder(): QueryBuilder
     {
-        $query = $this->applyScope(
-          $this->query()->select($columns),
-          $scope
-        );
-
-        $rows = $query->get();
-
-        return $this->results->process($rows);
+        return $this->query();
     }
 
     /**
-     * Get the first row matching an optional scoped query.
+     * Count rows for an optional scoped query.
      *
      * @param callable(QueryBuilder):void|null $scope
-     * @return array<string,mixed>|null
      */
-    public function first(?callable $scope = null, array $columns = ['*']): ?array
+    public function count(?callable $scope = null): int
     {
         $query = $this->applyScope(
-          $this->query()->select($columns),
-          $scope
+            $this->query(),
+            $scope
         );
 
-        return $query->first();
+        return $query->count();
+    }
+
+    /**
+     * Check if any row exists for an optional scoped query.
+     *
+     * @param callable(QueryBuilder):void|null $scope
+     */
+    public function exists(?callable $scope = null): bool
+    {
+        $query = $this->applyScope(
+            $this->query(),
+            $scope
+        );
+
+        return $query->exists();
     }
 
     /**
@@ -182,21 +147,54 @@ abstract class Repository
     }
 
     /**
-     * Get a scalar value from the first row of a scoped query.
+     * Get the first row matching an optional scoped query.
      *
-     * Example:
-     *   $total = $repo->value('amount', fn ($q) => $q->where('status', 'paid'));
+     * @param callable(QueryBuilder):void|null $scope
+     * @return array<string,mixed>|null
      */
-    public function value(string $column, ?callable $scope = null): mixed
+    public function first(?callable $scope = null, array $columns = ['*']): ?array
     {
         $query = $this->applyScope(
-          $this->query()->select([$column]),
-          $scope
+            $this->query()->select($columns),
+            $scope
+        );
+
+        return $query->first();
+    }
+
+    /**
+     * Get rows using an optional scoped query as a Collection.
+     *
+     * @param callable(QueryBuilder):void|null $scope
+     */
+    public function get(?callable $scope = null, array $columns = ['*']): Collection
+    {
+        $query = $this->applyScope(
+            $this->query()->select($columns),
+            $scope
         );
 
         $rows = $query->get();
 
-        return $this->results->processAggregate($rows);
+        return $this->results->process($rows);
+    }
+
+    /**
+     * Group results by a column into an array keyed by that column.
+     *
+     * @param callable(QueryBuilder):void|null $scope
+     * @return array<string|int,list<array<string,mixed>>>
+     */
+    public function groupByKey(string $column, ?callable $scope = null): array
+    {
+        $query = $this->applyScope(
+            $this->query(),
+            $scope
+        );
+
+        $rows = $query->get();
+
+        return $this->results->processGrouped($rows, $column);
     }
 
     /**
@@ -208,8 +206,8 @@ abstract class Repository
     public function pluck(string $column, ?string $keyColumn = null, ?callable $scope = null): array
     {
         $query = $this->applyScope(
-          $this->query(),
-          $scope
+            $this->query(),
+            $scope
         );
 
         $rows = $query->get();
@@ -222,58 +220,60 @@ abstract class Repository
     }
 
     /**
-     * Group results by a column into an array keyed by that column.
+     * Get a scalar value from the first row of a scoped query.
      *
-     * @param callable(QueryBuilder):void|null $scope
-     * @return array<string|int,list<array<string,mixed>>>
+     * Example:
+     *   $total = $repo->value('amount', fn ($q) => $q->where('status', 'paid'));
      */
-    public function groupByKey(string $column, ?callable $scope = null): array
+    public function value(string $column, ?callable $scope = null): mixed
     {
         $query = $this->applyScope(
-          $this->query(),
-          $scope
+            $this->query()->select([$column]),
+            $scope
         );
 
         $rows = $query->get();
 
-        return $this->results->processGrouped($rows, $column);
+        return $this->results->processAggregate($rows);
     }
 
     /**
-     * Count rows for an optional scoped query.
+     * Apply an optional scope closure to the query.
      *
      * @param callable(QueryBuilder):void|null $scope
      */
-    public function count(?callable $scope = null): int
+    protected function applyScope(QueryBuilder $query, ?callable $scope): QueryBuilder
     {
-        $query = $this->applyScope(
-          $this->query(),
-          $scope
-        );
+        if ($scope !== null) {
+            $scope($query);
+        }
 
-        return $query->count();
+        return $query;
     }
 
     /**
-     * Check if any row exists for an optional scoped query.
+     * Create a fresh QueryBuilder instance.
+     */
+    protected function newQuery(): QueryBuilder
+    {
+        return new QueryBuilder($this->connection, $this->grammar, $this->executor);
+    }
+
+    /**
+     * Primary key column name.
      *
-     * @param callable(QueryBuilder):void|null $scope
+     * Override if the primary key is not "id".
      */
-    public function exists(?callable $scope = null): bool
+    protected function primaryKey(): string
     {
-        $query = $this->applyScope(
-          $this->query(),
-          $scope
-        );
-
-        return $query->exists();
+        return 'id';
     }
 
     /**
-     * Get a ready-to-use QueryBuilder for advanced usage.
+     * Base query for this repository's table.
      */
-    public function builder(): QueryBuilder
+    protected function query(): QueryBuilder
     {
-        return $this->query();
+        return $this->newQuery()->from($this->table());
     }
 }

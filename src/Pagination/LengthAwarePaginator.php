@@ -28,9 +28,9 @@ final class LengthAwarePaginator extends AbstractPaginator
         $this->total = max(0, $total);
     }
 
-    public function total(): ?int
+    public function hasMorePages(): bool
     {
-        return $this->total;
+        return $this->currentPage < $this->lastPage();
     }
 
     public function lastPage(): ?int
@@ -40,11 +40,6 @@ final class LengthAwarePaginator extends AbstractPaginator
         }
 
         return (int) \ceil($this->total / $this->perPage);
-    }
-
-    public function hasMorePages(): bool
-    {
-        return $this->currentPage < $this->lastPage();
     }
 
     /**
@@ -73,5 +68,10 @@ final class LengthAwarePaginator extends AbstractPaginator
           'data' => $this->items(),
           'meta' => $this->meta(),
         ];
+    }
+
+    public function total(): ?int
+    {
+        return $this->total;
     }
 }

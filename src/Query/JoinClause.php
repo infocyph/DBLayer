@@ -15,18 +15,17 @@ namespace Infocyph\DBLayer\Query;
 class JoinClause
 {
     /**
-     * The join conditions.
-     *
-     * @var list<array<string,mixed>>
-     */
-    private array $conditions = [];
-
-    /**
      * Bound values for where/whereIn conditions.
      *
      * @var list<mixed>
      */
     private array $bindings = [];
+    /**
+     * The join conditions.
+     *
+     * @var list<array<string,mixed>>
+     */
+    private array $conditions = [];
 
     /**
      * The table being joined.
@@ -48,16 +47,6 @@ class JoinClause
     }
 
     /**
-     * Get all join conditions.
-     *
-     * @return list<array<string,mixed>>
-     */
-    public function getConditions(): array
-    {
-        return $this->conditions;
-    }
-
-    /**
      * Get bindings for this join.
      *
      * @return list<mixed>
@@ -65,6 +54,16 @@ class JoinClause
     public function getBindings(): array
     {
         return $this->bindings;
+    }
+
+    /**
+     * Get all join conditions.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function getConditions(): array
+    {
+        return $this->conditions;
     }
 
     /**

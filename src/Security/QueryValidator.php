@@ -44,6 +44,22 @@ final class QueryValidator
     ];
 
     /**
+     * Detect SQL injection attempts using heuristic patterns.
+     *
+     * @throws SecurityException
+     */
+    public function detectSqlInjection(string $sql): void
+    {
+        foreach (self::INJECTION_PATTERNS as $pattern) {
+            if (preg_match($pattern, $sql) === 1) {
+                $fragment = mb_substr($sql, 0, 256, 'UTF-8');
+
+                throw SecurityException::sqlInjectionDetected($pattern, $fragment);
+            }
+        }
+    }
+
+    /**
      * Validate query for basic safety (mode-agnostic).
      *
      * @param array<int|string, mixed> $bindings
@@ -59,22 +75,6 @@ final class QueryValidator
 
         $this->detectSqlInjection($sql);
         $this->validateBindings($bindings);
-    }
-
-    /**
-     * Detect SQL injection attempts using heuristic patterns.
-     *
-     * @throws SecurityException
-     */
-    public function detectSqlInjection(string $sql): void
-    {
-        foreach (self::INJECTION_PATTERNS as $pattern) {
-            if (preg_match($pattern, $sql) === 1) {
-                $fragment = mb_substr($sql, 0, 256, 'UTF-8');
-
-                throw SecurityException::sqlInjectionDetected($pattern, $fragment);
-            }
-        }
     }
 
     /**

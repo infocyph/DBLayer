@@ -18,6 +18,30 @@ use Traversable;
 interface PaginatorInterface extends Countable, IteratorAggregate, JsonSerializable
 {
     /**
+     * Current page index (1-based).
+     *
+     * For cursor pagination this is mostly a compatibility number
+     * and may always be 1.
+     */
+    public function currentPage(): int;
+
+    /**
+     * Index (1-based) of the first item in the current page, or null for empty.
+     */
+    public function firstItem(): ?int;
+
+    /**
+     * Iterate over items (IteratorAggregate).
+     *
+     * @return Traversable<int,mixed>
+     */
+    public function getIterator(): Traversable;
+
+    /**
+     * Whether there are more items after this page.
+     */
+    public function hasMorePages(): bool;
+    /**
      * Get the current page's items.
      *
      * @return list<mixed>
@@ -25,25 +49,9 @@ interface PaginatorInterface extends Countable, IteratorAggregate, JsonSerializa
     public function items(): array;
 
     /**
-     * Total number of items across all pages, if known.
-     *
-     * - Length-aware paginator: integer total
-     * - Simple/cursor paginator: null (unknown)
+     * Index (1-based) of the last item in the current page, or null for empty.
      */
-    public function total(): ?int;
-
-    /**
-     * Items per page.
-     */
-    public function perPage(): int;
-
-    /**
-     * Current page index (1-based).
-     *
-     * For cursor pagination this is mostly a compatibility number
-     * and may always be 1.
-     */
-    public function currentPage(): int;
+    public function lastItem(): ?int;
 
     /**
      * Last page index, if known.
@@ -54,19 +62,16 @@ interface PaginatorInterface extends Countable, IteratorAggregate, JsonSerializa
     public function lastPage(): ?int;
 
     /**
-     * Whether there are more items after this page.
+     * Pagination metadata only (no items).
+     *
+     * @return array<string,mixed>
      */
-    public function hasMorePages(): bool;
+    public function meta(): array;
 
     /**
-     * Index (1-based) of the first item in the current page, or null for empty.
+     * Items per page.
      */
-    public function firstItem(): ?int;
-
-    /**
-     * Index (1-based) of the last item in the current page, or null for empty.
-     */
-    public function lastItem(): ?int;
+    public function perPage(): int;
 
     /**
      * Array representation, typically for JSON resources.
@@ -82,16 +87,10 @@ interface PaginatorInterface extends Countable, IteratorAggregate, JsonSerializa
     public function toArray(): array;
 
     /**
-     * Pagination metadata only (no items).
+     * Total number of items across all pages, if known.
      *
-     * @return array<string,mixed>
+     * - Length-aware paginator: integer total
+     * - Simple/cursor paginator: null (unknown)
      */
-    public function meta(): array;
-
-    /**
-     * Iterate over items (IteratorAggregate).
-     *
-     * @return Traversable<int,mixed>
-     */
-    public function getIterator(): Traversable;
+    public function total(): ?int;
 }

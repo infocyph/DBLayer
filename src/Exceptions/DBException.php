@@ -15,9 +15,9 @@ use Throwable;
 class DBException extends RuntimeException
 {
     public function __construct(
-      string $message = '',
-      int $code = 0,
-      ?Throwable $previous = null
+        string $message = '',
+        int $code = 0,
+        ?Throwable $previous = null
     ) {
         parent::__construct($message, $code, $previous);
     }
@@ -29,8 +29,8 @@ class DBException extends RuntimeException
      * @param string|null $prefix    Optional context prefix for the message.
      */
     public static function fromThrowable(
-      Throwable $throwable,
-      ?string $prefix = null
+        Throwable $throwable,
+        ?string $prefix = null
     ): static {
         $message = $throwable->getMessage();
 

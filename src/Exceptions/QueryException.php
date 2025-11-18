@@ -10,22 +10,14 @@ namespace Infocyph\DBLayer\Exceptions;
 final class QueryException extends DBException
 {
     /**
-     * Error while executing a query against the database.
-     *
-     * @param string      $sql   The SQL statement that failed.
-     * @param string      $error Error message from the driver.
-     * @param string|null $code  Optional driver error code.
+     * When the number of bound parameters does not match placeholders.
      */
-    public static function executionFailed(
-      string $sql,
-      string $error,
-      ?string $code = null
+    public static function bindingCountMismatch(
+        string $sql,
+        int $expected,
+        int $given
     ): self {
-        $message = 'Query execution failed: ' . $error . ' [SQL: ' . $sql . ']';
-
-        if ($code !== null && $code !== '') {
-            $message .= ' [code: ' . $code . ']';
-        }
+        $message = "Binding count mismatch for SQL [{$sql}]: expected {$expected}, got {$given}.";
 
         return new self($message);
     }
@@ -37,26 +29,25 @@ final class QueryException extends DBException
     {
         return new self('Failed to build query: ' . $message);
     }
-
     /**
-     * When the number of bound parameters does not match placeholders.
+     * Error while executing a query against the database.
+     *
+     * @param string      $sql   The SQL statement that failed.
+     * @param string      $error Error message from the driver.
+     * @param string|null $code  Optional driver error code.
      */
-    public static function bindingCountMismatch(
-      string $sql,
-      int $expected,
-      int $given
+    public static function executionFailed(
+        string $sql,
+        string $error,
+        ?string $code = null
     ): self {
-        $message = "Binding count mismatch for SQL [{$sql}]: expected {$expected}, got {$given}.";
+        $message = 'Query execution failed: ' . $error . ' [SQL: ' . $sql . ']';
+
+        if ($code !== null && $code !== '') {
+            $message .= ' [code: ' . $code . ']';
+        }
 
         return new self($message);
-    }
-
-    /**
-     * Invalid parameter passed into the query builder.
-     */
-    public static function invalidParameter(string $name, string $reason): self
-    {
-        return new self("Invalid query parameter [{$name}]: {$reason}");
     }
 
     /**
@@ -67,7 +58,7 @@ final class QueryException extends DBException
     public static function invalidLimit(int $limit): self
     {
         return new self(
-          "Invalid LIMIT value [{$limit}]. LIMIT must be a non-negative integer greater than zero for pagination."
+            "Invalid LIMIT value [{$limit}]. LIMIT must be a non-negative integer greater than zero for pagination."
         );
     }
 
@@ -79,7 +70,7 @@ final class QueryException extends DBException
     public static function invalidOffset(int $offset): self
     {
         return new self(
-          "Invalid OFFSET value [{$offset}]. OFFSET must be a non-negative integer."
+            "Invalid OFFSET value [{$offset}]. OFFSET must be a non-negative integer."
         );
     }
 
@@ -91,7 +82,15 @@ final class QueryException extends DBException
     public static function invalidOrderDirection(string $direction): self
     {
         return new self(
-          "Invalid ORDER BY direction [{$direction}]. Use 'asc' or 'desc'."
+            "Invalid ORDER BY direction [{$direction}]. Use 'asc' or 'desc'."
         );
+    }
+
+    /**
+     * Invalid parameter passed into the query builder.
+     */
+    public static function invalidParameter(string $name, string $reason): self
+    {
+        return new self("Invalid query parameter [{$name}]: {$reason}");
     }
 }

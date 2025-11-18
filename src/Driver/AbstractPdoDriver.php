@@ -1,0 +1,109 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Infocyph\DBLayer\Driver;
+
+use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
+use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
+use Infocyph\DBLayer\Driver\Support\Capabilities;
+use PDO;
+
+/**
+ * Base PDO-backed driver.
+ *
+ * - Normalises createPdo() so concrete drivers only care about DSN + capabilities.
+ * - Leaves config validation to ConnectionConfig by default (drivers can override).
+ */
+abstract class AbstractPdoDriver implements DriverInterface
+{
+    /**
+     * Concrete drivers must still provide compiler + capabilities.
+     */
+    abstract public function createCompiler(): QueryCompilerInterface;
+
+    abstract public function getCapabilities(): Capabilities;
+    /**
+     * Canonical engine name, e.g. "mysql", "pgsql", "sqlite".
+     */
+    abstract public function getName(): string;
+
+    /**
+     * Build the PDO DSN string for the driver.
+     *
+     * @param  array<string,mixed>  $config
+     */
+    abstract protected function buildDsn(array $config, bool $readOnly): string;
+
+    /**
+     * Create a PDO instance for this driver.
+     *
+     * Concrete drivers only need to implement buildDsn().
+     */
+    final public function createPdo(ConnectionConfig $config, bool $readOnly = false): PDO
+    {
+        $data = method_exists($config, 'toArray') ? $config->toArray() : [];
+
+        /** @var array<string,mixed> $data */
+        $dsn = $this->buildDsn($data, $readOnly);
+
+        $username = (string) ($data['username'] ?? '');
+        $password = (string) ($data['password'] ?? '');
+
+        $options = $data['options'] ?? [];
+        if (! is_array($options)) {
+            $options = [];
+        }
+
+        $defaults = $this->defaultPdoOptions($data);
+
+        // User-specified options should win.
+        $options = $options + $defaults;
+
+        return new PDO($dsn, $username, $password, $options);
+    }
+
+    /**
+     * Merge driver-specific defaults into user config.
+     *
+     * Default: ensure "driver" is set to this driver's canonical name.
+     *
+     * @param  array<string,mixed>  $config
+     * @return array<string,mixed>
+     */
+    public function mergeDefaults(array $config): array
+    {
+        $config['driver'] ??= $this->getName();
+
+        return $config;
+    }
+
+    /**
+     * Validate driver-specific configuration.
+     *
+     * By default, rely on ConnectionConfig to enforce core invariants.
+     *
+     * @param  array<string,mixed>  $config
+     */
+    public function validateConfig(array $config): void
+    {
+        // Intentionally empty for now.
+        // Concrete drivers may throw if required keys are missing/misconfigured.
+    }
+
+    /**
+     * Default PDO attributes for this driver.
+     *
+     * @param  array<string,mixed>  $config
+     * @return array<int,mixed>
+     */
+    protected function defaultPdoOptions(array $config): array
+    {
+        return [
+          PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+          PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+          PDO::ATTR_EMULATE_PREPARES   => false,
+        ];
+    }
+}

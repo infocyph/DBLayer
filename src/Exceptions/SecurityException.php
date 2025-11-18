@@ -9,10 +9,21 @@ namespace Infocyph\DBLayer\Exceptions;
  */
 final class SecurityException extends DBException
 {
+    public static function invalidConfiguration(string $message): self
+    {
+        return new self('Invalid security configuration: ' . $message);
+    }
+
+    public static function rateLimitExceeded(string $key, int $maxAttempts, int $ttlSeconds): self
+    {
+        return new self(
+            "Rate limit exceeded for key [{$key}]: max {$maxAttempts} attempts within {$ttlSeconds} seconds."
+        );
+    }
     public static function sqlInjectionDetected(string $pattern, string $fragment): self
     {
         return new self(
-          'Potential SQL injection detected using pattern [' .
+            'Potential SQL injection detected using pattern [' .
           $pattern .
           '] in fragment [' .
           $fragment .
@@ -20,25 +31,13 @@ final class SecurityException extends DBException
         );
     }
 
-    public static function rateLimitExceeded(string $key, int $maxAttempts, int $ttlSeconds): self
-    {
-        return new self(
-          "Rate limit exceeded for key [{$key}]: max {$maxAttempts} attempts within {$ttlSeconds} seconds."
-        );
-    }
-
-    public static function unsafeQuery(string $reason): self
-    {
-        return new self('Unsafe query detected: ' . $reason);
-    }
-
     public static function unsafeOperation(string $message): self
     {
         return new self('Unsafe database operation: ' . $message);
     }
 
-    public static function invalidConfiguration(string $message): self
+    public static function unsafeQuery(string $reason): self
     {
-        return new self('Invalid security configuration: ' . $message);
+        return new self('Unsafe query detected: ' . $reason);
     }
 }

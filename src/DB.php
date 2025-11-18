@@ -100,7 +100,7 @@ class DB
         $configObject = static::normalizeConfig($config);
 
         static::$connectionConfigs[$name] = $configObject;
-        static::$connections[$name] = new Connection($configObject);
+        static::$connections[$name]       = new Connection($configObject);
 
         if (static::$defaultConnection === null) {
             static::$defaultConnection = $name;
@@ -121,7 +121,7 @@ class DB
 
         foreach ($queries as $query) {
             [$sql, $bindings] = $query;
-            $results[] = static::select($sql, $bindings ?? [], $connection);
+            $results[]        = static::select($sql, $bindings ?? [], $connection);
         }
 
         return $results;
@@ -386,13 +386,13 @@ class DB
      */
     public static function purge(): void
     {
-        static::$connections = [];
-        static::$connectionConfigs = [];
-        static::$defaultConnection = null;
-        static::$queryLog = [];
-        static::$listeners = [];
-        static::$loggingQueries = false;
-        static::$eventsHooked = false;
+        static::$connections        = [];
+        static::$connectionConfigs  = [];
+        static::$defaultConnection  = null;
+        static::$queryLog           = [];
+        static::$listeners          = [];
+        static::$loggingQueries     = false;
+        static::$eventsHooked       = false;
         static::$maxQueryLogEntries = null;
     }
 
@@ -557,11 +557,11 @@ class DB
         $conn = static::connection($connection);
 
         return [
-            'driver' => $conn->getDriverName(),
-            'database' => $conn->getDatabaseName(),
-            'prefix' => $conn->getTablePrefix(),
-            'transaction_level' => $conn->transactionLevel(),
-            'total_queries' => count(static::$queryLog),
+          'driver'            => $conn->getDriverName(),
+          'database'          => $conn->getDatabaseName(),
+          'prefix'            => $conn->getTablePrefix(),
+          'transaction_level' => $conn->transactionLevel(),
+          'total_queries'     => count(static::$queryLog),
         ];
     }
 
@@ -633,8 +633,8 @@ class DB
     public static function version(?string $connection = null): string
     {
         return (string) static::connection($connection)
-            ->getPdo()
-            ->getAttribute(PDO::ATTR_SERVER_VERSION);
+          ->getPdo()
+          ->getAttribute(PDO::ATTR_SERVER_VERSION);
     }
 
     /**
@@ -668,22 +668,14 @@ class DB
             if (! static::$loggingQueries && static::$listeners === []) {
                 return;
             }
-
-            // Try to infer the connection name from the facade registry.
-            $connectionName = null;
-            foreach (static::$connections as $name => $connection) {
-                if ($connection === $event->connection) {
-                    $connectionName = $name;
-                    break;
-                }
-            }
+            $connectionName = array_find_key(static::$connections, fn ($connection) => $connection === $event->connection);
 
             $payload = [
-                'query' => $event->sql,
-                'bindings' => $event->bindings,
-                'time' => $event->time, // ms
-                'connection' => $connectionName,
-                'rows' => $event->rowsAffected,
+              'query'      => $event->sql,
+              'bindings'   => $event->bindings,
+              'time'       => $event->time, // ms
+              'connection' => $connectionName,
+              'rows'       => $event->rowsAffected,
             ];
 
             foreach (static::$listeners as $listener) {
@@ -693,7 +685,10 @@ class DB
             if (static::$loggingQueries) {
                 static::$queryLog[] = $payload;
 
-                if (static::$maxQueryLogEntries !== null && count(static::$queryLog) > static::$maxQueryLogEntries) {
+                if (
+                    static::$maxQueryLogEntries !== null
+                    && count(static::$queryLog) > static::$maxQueryLogEntries
+                ) {
                     $overflow = count(static::$queryLog) - static::$maxQueryLogEntries;
 
                     if ($overflow > 0) {

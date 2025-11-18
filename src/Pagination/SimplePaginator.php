@@ -25,19 +25,14 @@ final class SimplePaginator extends AbstractPaginator
         $this->hasMore = $hasMore;
     }
 
-    public function total(): ?int
+    public function hasMorePages(): bool
     {
-        return null;
+        return $this->hasMore;
     }
 
     public function lastPage(): ?int
     {
         return null;
-    }
-
-    public function hasMorePages(): bool
-    {
-        return $this->hasMore;
     }
 
     /**
@@ -66,5 +61,10 @@ final class SimplePaginator extends AbstractPaginator
           'data' => $this->items(),
           'meta' => $this->meta(),
         ];
+    }
+
+    public function total(): ?int
+    {
+        return null;
     }
 }

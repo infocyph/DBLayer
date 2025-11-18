@@ -24,6 +24,10 @@ use Infocyph\DBLayer\Exceptions\TransactionException;
 final class Transaction
 {
     /**
+     * Database connection.
+     */
+    private readonly Connection $connection;
+    /**
      * Event callbacks.
      *
      * @var array{
@@ -37,11 +41,6 @@ final class Transaction
       'afterCommit'   => [],
       'afterRollback' => [],
     ];
-
-    /**
-     * Database connection.
-     */
-    private readonly Connection $connection;
 
     /**
      * Current transaction nesting level (0 = no transaction).
@@ -132,8 +131,8 @@ final class Transaction
 
             // Dispatch event (class name channel).
             Events::dispatch(
-              TransactionBeginning::class,
-              [new TransactionBeginning($this->connection)]
+                TransactionBeginning::class,
+                [new TransactionBeginning($this->connection)]
             );
         } else {
             // Nested transaction → use savepoint.
@@ -180,8 +179,8 @@ final class Transaction
 
             // Dispatch event.
             Events::dispatch(
-              TransactionCommitted::class,
-              [new TransactionCommitted($this->connection, $elapsed)]
+                TransactionCommitted::class,
+                [new TransactionCommitted($this->connection, $elapsed)]
             );
 
             // Fire after-commit callbacks.
@@ -384,8 +383,8 @@ final class Transaction
 
                 // Dispatch event.
                 Events::dispatch(
-                  TransactionRolledBack::class,
-                  [new TransactionRolledBack($this->connection, $elapsed)]
+                    TransactionRolledBack::class,
+                    [new TransactionRolledBack($this->connection, $elapsed)]
                 );
 
                 // Fire after-rollback callbacks.
@@ -507,6 +506,6 @@ final class Transaction
     private function generateSavepointName(): string
     {
         // Level+1 so names are slightly indicative of nesting depth.
-        return 'sp_' . ($this->level + 1) . '_' . uniqid('', false);
+        return 'sp_'.($this->level + 1).'_'.uniqid('', false);
     }
 }

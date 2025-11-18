@@ -9,24 +9,9 @@ namespace Infocyph\DBLayer\Exceptions;
  */
 final class CacheException extends DBException
 {
-    public static function writeFailed(string $key, string $reason): self
-    {
-        return new self("Failed to write cache entry [{$key}]: {$reason}");
-    }
-
-    public static function readFailed(string $key, string $reason): self
-    {
-        return new self("Failed to read cache entry [{$key}]: {$reason}");
-    }
-
     public static function deleteFailed(string $key, string $reason): self
     {
         return new self("Failed to delete cache entry [{$key}]: {$reason}");
-    }
-
-    public static function invalidKey(string $key): self
-    {
-        return new self("Invalid cache key [{$key}].");
     }
 
     public static function directoryIssue(string $path, string $issue): self
@@ -34,8 +19,22 @@ final class CacheException extends DBException
         return new self("Cache directory issue at [{$path}]: {$issue}");
     }
 
+    public static function invalidKey(string $key): self
+    {
+        return new self("Invalid cache key [{$key}].");
+    }
+
+    public static function readFailed(string $key, string $reason): self
+    {
+        return new self("Failed to read cache entry [{$key}]: {$reason}");
+    }
+
     public static function serializationError(string $message): self
     {
         return new self('Cache serialization error: ' . $message);
+    }
+    public static function writeFailed(string $key, string $reason): self
+    {
+        return new self("Failed to write cache entry [{$key}]: {$reason}");
     }
 }

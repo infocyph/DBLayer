@@ -11,6 +11,8 @@ use Infocyph\DBLayer\Grammar\Grammar;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
+use Infocyph\DBLayer\Query\Core\QueryPayload;
+use Infocyph\DBLayer\Query\Core\QueryType;
 
 /**
  * SQL Query Builder
@@ -29,6 +31,20 @@ use Infocyph\DBLayer\Pagination\SimplePaginator;
  */
 class QueryBuilder
 {
+    /**
+     * Database connection.
+     */
+    private readonly Connection $connection;
+
+    /**
+     * Query executor.
+     */
+    private readonly Executor $executor;
+
+    /**
+     * SQL grammar compiler.
+     */
+    private readonly Grammar $grammar;
     /**
      * Aggregate function definition or null.
      *
@@ -51,29 +67,14 @@ class QueryBuilder
     private array $columns = ['*'];
 
     /**
-     * Database connection.
-     */
-    private Connection $connection;
-
-    /**
      * DISTINCT flag.
      */
     private bool $distinct = false;
 
     /**
-     * Query executor.
-     */
-    private Executor $executor;
-
-    /**
      * FROM table.
      */
     private ?string $from = null;
-
-    /**
-     * SQL grammar compiler.
-     */
-    private Grammar $grammar;
 
     /**
      * GROUP BY columns.
@@ -146,8 +147,8 @@ class QueryBuilder
         Executor $executor
     ) {
         $this->connection = $connection;
-        $this->grammar = $grammar;
-        $this->executor = $executor;
+        $this->grammar    = $grammar;
+        $this->executor   = $executor;
     }
 
     /**
@@ -196,12 +197,12 @@ class QueryBuilder
         $page = 1;
 
         do {
-            $clone = $this->cloneBuilder();
+            $clone         = $this->cloneBuilder();
             $clone->offset = ($page - 1) * $count;
-            $clone->limit = $count;
+            $clone->limit  = $count;
 
             $results = $clone->get();
-            $num = count($results);
+            $num     = count($results);
 
             if ($num === 0) {
                 break;
@@ -235,7 +236,7 @@ class QueryBuilder
         }
 
         $lastId = $fromId;
-        $page = 1;
+        $page   = 1;
 
         while (true) {
             $clone = $this->cloneBuilder();
@@ -248,7 +249,7 @@ class QueryBuilder
             $clone->limit = $count;
 
             $results = $clone->get();
-            $num = count($results);
+            $num     = count($results);
 
             if ($num === 0) {
                 break;
@@ -259,7 +260,7 @@ class QueryBuilder
             }
 
             $lastRow = $results[$num - 1];
-            $lastId = (int) ($lastRow[$column] ?? $lastId);
+            $lastId  = (int) ($lastRow[$column] ?? $lastId);
 
             $page++;
         }
@@ -289,8 +290,8 @@ class QueryBuilder
     public function crossJoin(string $table): self
     {
         $this->joins[] = [
-            'type' => 'cross',
-            'table' => $table,
+          'type'  => 'cross',
+          'table' => $table,
         ];
 
         return $this;
@@ -312,12 +313,12 @@ class QueryBuilder
         $page = 1;
 
         while (true) {
-            $clone = $this->cloneBuilder();
+            $clone         = $this->cloneBuilder();
             $clone->offset = ($page - 1) * $chunkSize;
-            $clone->limit = $chunkSize;
+            $clone->limit  = $chunkSize;
 
             $results = $clone->get();
-            $num = count($results);
+            $num     = count($results);
 
             if ($num === 0) {
                 break;
@@ -366,11 +367,11 @@ class QueryBuilder
 
         $operator = $direction === 'asc' ? '>' : '<';
 
-        $clone = $this->cloneBuilder();
+        $clone           = $this->cloneBuilder();
         $clone->aggregate = null;
-        $clone->limit = null;
-        $clone->offset = null;
-        $clone->orders = [];
+        $clone->limit     = null;
+        $clone->offset    = null;
+        $clone->orders    = [];
 
         if ($cursor !== null) {
             $clone->where($column, $operator, $cursor);
@@ -391,7 +392,7 @@ class QueryBuilder
         $nextCursor = null;
 
         if ($hasMore && $items !== []) {
-            $lastRow = $items[count($items) - 1];
+            $lastRow       = $items[count($items) - 1];
             $nextCursorVal = $lastRow[$column] ?? null;
 
             if ($nextCursorVal !== null) {
@@ -544,20 +545,20 @@ class QueryBuilder
     public function getComponents(): array
     {
         return [
-            'type' => $this->type,
-            'columns' => $this->columns,
-            'distinct' => $this->distinct,
-            'from' => $this->from,
-            'joins' => $this->joins,
-            'wheres' => $this->wheres,
-            'groups' => $this->groups,
-            'havings' => $this->havings,
-            'orders' => $this->orders,
-            'limit' => $this->limit,
-            'offset' => $this->offset,
-            'unions' => $this->unions,
-            'lock' => $this->lock,
-            'aggregate' => $this->aggregate,
+          'type'      => $this->type,
+          'columns'   => $this->columns,
+          'distinct'  => $this->distinct,
+          'from'      => $this->from,
+          'joins'     => $this->joins,
+          'wheres'    => $this->wheres,
+          'groups'    => $this->groups,
+          'havings'   => $this->havings,
+          'orders'    => $this->orders,
+          'limit'     => $this->limit,
+          'offset'    => $this->offset,
+          'unions'    => $this->unions,
+          'lock'      => $this->lock,
+          'aggregate' => $this->aggregate,
         ];
     }
 
@@ -597,16 +598,16 @@ class QueryBuilder
         string $boolean = 'and'
     ): self {
         if (func_num_args() === 2) {
-            $value = $operator;
+            $value    = $operator;
             $operator = '=';
         }
 
         $this->havings[] = [
-            'type' => 'basic',
-            'column' => $column,
-            'operator' => $operator,
-            'value' => $value,
-            'boolean' => $boolean,
+          'type'     => 'basic',
+          'column'   => $column,
+          'operator' => $operator,
+          'value'    => $value,
+          'boolean'  => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -684,11 +685,11 @@ class QueryBuilder
         string $type = 'inner'
     ): self {
         $this->joins[] = [
-            'type' => $type,
-            'table' => $table,
-            'first' => $first,
-            'operator' => $operator,
-            'second' => $second,
+          'type'     => $type,
+          'table'    => $table,
+          'first'    => $first,
+          'operator' => $operator,
+          'second'   => $second,
         ];
 
         return $this;
@@ -813,8 +814,8 @@ class QueryBuilder
         }
 
         $this->orders[] = [
-            'column' => $column,
-            'direction' => $direction,
+          'column'    => $column,
+          'direction' => $direction,
         ];
 
         return $this;
@@ -834,7 +835,7 @@ class QueryBuilder
     public function orWhere(string|callable $column, mixed $operator = null, mixed $value = null): self
     {
         if (func_num_args() === 2) {
-            $value = $operator;
+            $value    = $operator;
             $operator = '=';
         }
 
@@ -858,11 +859,11 @@ class QueryBuilder
         $total = $this->count();
 
         // Page items.
-        $clone = $this->cloneBuilder();
+        $clone           = $this->cloneBuilder();
         $clone->aggregate = null;
 
         $clone->offset = ($page - 1) * $perPage;
-        $clone->limit = $perPage;
+        $clone->limit  = $perPage;
 
         $items = $clone->get();
 
@@ -877,7 +878,7 @@ class QueryBuilder
     public function pluck(string $column, ?string $key = null): array
     {
         $results = $this->get();
-        $values = [];
+        $values  = [];
 
         foreach ($results as $row) {
             $value = $row[$column] ?? null;
@@ -917,7 +918,7 @@ class QueryBuilder
             return $this;
         }
 
-        $this->type = 'select';
+        $this->type    = 'select';
         $this->columns = is_array($columns[0]) ? $columns[0] : $columns;
 
         return $this;
@@ -946,12 +947,12 @@ class QueryBuilder
 
         $page = max(1, $page ?? 1);
 
-        $clone = $this->cloneBuilder();
+        $clone           = $this->cloneBuilder();
         $clone->aggregate = null;
 
-        $offset = ($page - 1) * $perPage;
-        $clone->offset = $offset;
-        $clone->limit = $perPage + 1; // fetch one extra row
+        $offset          = ($page - 1) * $perPage;
+        $clone->offset   = $offset;
+        $clone->limit    = $perPage + 1; // fetch one extra row
 
         $results = $clone->get();
         $hasMore = count($results) > $perPage;
@@ -995,6 +996,47 @@ class QueryBuilder
     public function take(int $limit): self
     {
         return $this->limit($limit);
+    }
+
+    /**
+     * New pipeline: convert the current query into a QueryPayload
+     * so the driver/compiler can generate SQL.
+     *
+     * NOTE: "distinct" is not yet represented in QueryPayload; the
+     * Grammar path remains the canonical source of truth for now.
+     */
+    public function toPayload(): QueryPayload
+    {
+        $type = $this->mapTypeToEnum($this->type);
+
+        $unionPayloads = [];
+
+        foreach ($this->unions as $union) {
+            /** @var QueryBuilder $unionQuery */
+            $unionQuery = $union['query'];
+
+            $unionPayloads[] = [
+              'query' => $unionQuery->toPayload(),
+              'all'   => (bool) $union['all'],
+            ];
+        }
+
+        return new QueryPayload(
+            type: $type,
+            table: $this->from,
+            columns: $this->columns,
+            wheres: $this->wheres,
+            joins: $this->joins,
+            groups: $this->groups,
+            havings: $this->havings,
+            orders: $this->orders,
+            limit: $this->limit,
+            offset: $this->offset,
+            unions: $unionPayloads,
+            lock: $this->lock,
+            aggregate: $this->aggregate,
+            bindings: $this->bindings,
+        );
     }
 
     /**
@@ -1043,8 +1085,8 @@ class QueryBuilder
         }
 
         $this->unions[] = [
-            'query' => $query,
-            'all' => $all,
+          'query' => $query,
+          'all'   => $all,
         ];
 
         $this->bindings = array_merge($this->bindings, $query->getBindings());
@@ -1155,16 +1197,16 @@ class QueryBuilder
 
         // Handle two arguments (column, value).
         if (func_num_args() === 2) {
-            $value = $operator;
+            $value    = $operator;
             $operator = '=';
         }
 
         $this->wheres[] = [
-            'type' => 'basic',
-            'column' => $column,
-            'operator' => $operator,
-            'value' => $value,
-            'boolean' => $boolean,
+          'type'     => 'basic',
+          'column'   => $column,
+          'operator' => $operator,
+          'value'    => $value,
+          'boolean'  => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -1180,11 +1222,11 @@ class QueryBuilder
     public function whereBetween(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-            'type' => 'between',
-            'column' => $column,
-            'values' => $values,
-            'boolean' => $boolean,
-            'not' => $not,
+          'type'    => 'between',
+          'column'  => $column,
+          'values'  => $values,
+          'boolean' => $boolean,
+          'not'     => $not,
         ];
 
         $this->bindings = array_merge($this->bindings, $values);
@@ -1203,10 +1245,10 @@ class QueryBuilder
         $callback($query);
 
         $this->wheres[] = [
-            'type' => 'exists',
-            'query' => $query,
-            'boolean' => $boolean,
-            'not' => $not,
+          'type'    => 'exists',
+          'query'   => $query,
+          'boolean' => $boolean,
+          'not'     => $not,
         ];
 
         $this->bindings = array_merge($this->bindings, $query->getBindings());
@@ -1222,11 +1264,11 @@ class QueryBuilder
     public function whereIn(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-            'type' => 'in',
-            'column' => $column,
-            'values' => $values,
-            'boolean' => $boolean,
-            'not' => $not,
+          'type'    => 'in',
+          'column'  => $column,
+          'values'  => $values,
+          'boolean' => $boolean,
+          'not'     => $not,
         ];
 
         $this->bindings = array_merge($this->bindings, $values);
@@ -1246,9 +1288,9 @@ class QueryBuilder
 
         if ($query->wheres !== []) {
             $this->wheres[] = [
-                'type' => 'nested',
-                'query' => $query,
-                'boolean' => $boolean,
+              'type'    => 'nested',
+              'query'   => $query,
+              'boolean' => $boolean,
             ];
 
             $this->bindings = array_merge($this->bindings, $query->getBindings());
@@ -1291,10 +1333,10 @@ class QueryBuilder
     public function whereNull(string $column, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-            'type' => 'null',
-            'column' => $column,
-            'boolean' => $boolean,
-            'not' => $not,
+          'type'    => 'null',
+          'column'  => $column,
+          'boolean' => $boolean,
+          'not'     => $not,
         ];
 
         return $this;
@@ -1308,14 +1350,31 @@ class QueryBuilder
     public function whereRaw(string $sql, array $bindings = [], string $boolean = 'and'): self
     {
         $this->wheres[] = [
-            'type' => 'raw',
-            'sql' => $sql,
-            'boolean' => $boolean,
+          'type'    => 'raw',
+          'sql'     => $sql,
+          'boolean' => $boolean,
         ];
 
         $this->bindings = array_merge($this->bindings, $bindings);
 
         return $this;
+    }
+
+    /**
+     * Map legacy string type to QueryType enum.
+     */
+    private function mapTypeToEnum(?string $type): QueryType
+    {
+        $type = $type !== null ? strtolower($type) : 'select';
+
+        return match ($type) {
+            'insert'   => QueryType::INSERT,
+            'update'   => QueryType::UPDATE,
+            'delete'   => QueryType::DELETE,
+            'truncate' => QueryType::TRUNCATE,
+            'select', '' => QueryType::SELECT,
+            default    => QueryType::SELECT,
+        };
     }
 
     /**
@@ -1328,16 +1387,16 @@ class QueryBuilder
         $clone = clone $this;
 
         if ($ignoreLimitOffset) {
-            $clone->limit = null;
-            $clone->offset = null;
-            $clone->orders = [];
-            $clone->unions = [];
-            $clone->lock = null;
+            $clone->limit   = null;
+            $clone->offset  = null;
+            $clone->orders  = [];
+            $clone->unions  = [];
+            $clone->lock    = null;
         }
 
         $clone->aggregate = [
-            'function' => strtoupper($function),
-            'column' => $column,
+          'function' => strtoupper($function),
+          'column'   => $column,
         ];
 
         $results = $this->executor->select($clone);

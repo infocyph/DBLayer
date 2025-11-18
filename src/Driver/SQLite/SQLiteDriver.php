@@ -1,0 +1,71 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Infocyph\DBLayer\Driver\SQLite;
+
+use Infocyph\DBLayer\Driver\AbstractPdoDriver;
+use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
+use Infocyph\DBLayer\Driver\Support\Capabilities;
+
+/**
+ * SQLite driver.
+ *
+ * Supports file-based and in-memory databases.
+ */
+final class SQLiteDriver extends AbstractPdoDriver
+{
+    public function createCompiler(): QueryCompilerInterface
+    {
+        return new SQLiteCompiler();
+    }
+
+    public function getCapabilities(): Capabilities
+    {
+        return new Capabilities(
+            supportsReturning: false, // SQLite >= 3.35.0 has RETURNING, but we treat it as off by default.
+            supportsInsertIgnore: true,
+            supportsUpsert: true,
+            supportsSavepoints: true,
+            supportsSchemas: false,
+        );
+    }
+    public function getName(): string
+    {
+        return 'sqlite';
+    }
+
+    /**
+     * @param  array<string,mixed>  $config
+     * @return array<string,mixed>
+     */
+    public function mergeDefaults(array $config): array
+    {
+        $config = parent::mergeDefaults($config);
+
+        // Default to in-memory if no database path is provided.
+        $config['database'] ??= ':memory:';
+
+        return $config;
+    }
+
+    /**
+     * @param  array<string,mixed>  $config
+     */
+    protected function buildDsn(array $config, bool $readOnly): string
+    {
+        $database = (string) ($config['database'] ?? ':memory:');
+
+        if ($database === ':memory:') {
+            return 'sqlite::memory:';
+        }
+
+        // SQLite read-only can be expressed via URI with mode=ro; keep this simple.
+        if ($readOnly && ! str_contains($database, 'mode=')) {
+            // Use query parameter mode=ro on file path.
+            return sprintf('sqlite:%s?mode=ro', $database);
+        }
+
+        return 'sqlite:' . $database;
+    }
+}

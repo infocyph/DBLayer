@@ -15,7 +15,7 @@ namespace Infocyph\DBLayer\Security;
  */
 enum SecurityMode: string
 {
-    case OFF    = 'off';
     case NORMAL = 'normal';
+    case OFF    = 'off';
     case STRICT = 'strict';
 }

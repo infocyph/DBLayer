@@ -21,24 +21,24 @@ final class CursorPaginator extends AbstractPaginator
     private ?string $cursor;
 
     /**
-     * Cursor for the next page (opaque).
-     */
-    private ?string $nextCursor;
-
-    /**
      * Whether there is a next page.
      */
     private bool $hasMore;
 
     /**
+     * Cursor for the next page (opaque).
+     */
+    private ?string $nextCursor;
+
+    /**
      * @param list<mixed> $items
      */
     public function __construct(
-      array $items,
-      int $perPage,
-      ?string $cursor,
-      ?string $nextCursor,
-      bool $hasMore
+        array $items,
+        int $perPage,
+        ?string $cursor,
+        ?string $nextCursor,
+        bool $hasMore
     ) {
         // Page number is mostly meaningless for cursor-based pagination,
         // but we keep it as 1 for interface compatibility.
@@ -49,14 +49,9 @@ final class CursorPaginator extends AbstractPaginator
         $this->hasMore    = $hasMore;
     }
 
-    public function total(): ?int
+    public function cursor(): ?string
     {
-        return null;
-    }
-
-    public function lastPage(): ?int
-    {
-        return null;
+        return $this->cursor;
     }
 
     public function hasMorePages(): bool
@@ -64,14 +59,9 @@ final class CursorPaginator extends AbstractPaginator
         return $this->hasMore;
     }
 
-    public function cursor(): ?string
+    public function lastPage(): ?int
     {
-        return $this->cursor;
-    }
-
-    public function nextCursor(): ?string
-    {
-        return $this->nextCursor;
+        return null;
     }
 
     /**
@@ -88,6 +78,11 @@ final class CursorPaginator extends AbstractPaginator
         ];
     }
 
+    public function nextCursor(): ?string
+    {
+        return $this->nextCursor;
+    }
+
     /**
      * @return array<string,mixed>
      */
@@ -97,5 +92,10 @@ final class CursorPaginator extends AbstractPaginator
           'data' => $this->items(),
           'meta' => $this->meta(),
         ];
+    }
+
+    public function total(): ?int
+    {
+        return null;
     }
 }

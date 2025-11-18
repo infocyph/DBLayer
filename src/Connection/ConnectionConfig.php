@@ -1,9 +1,12 @@
 <?php
 
+// src/Connection/ConnectionConfig.php
+
 declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection;
 
+use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 
 /**
@@ -66,7 +69,20 @@ readonly class ConnectionConfig
      */
     public function __construct(array $config)
     {
+        if (isset($config['driver']) && is_string($config['driver'])) {
+            $config['driver'] = $this->normalizeDriverName($config['driver']);
+        }
+
+        // Let driver-specific defaults run first when possible.
+        $config = $this->applyDriverDefaults($config);
+
+        // Core validation rules.
         $this->validateConfig($config);
+
+        // Let the driver perform additional validation if it wants to.
+        $this->validateWithDriver($config);
+
+        // Finally merge with core defaults + built-in driver defaults.
         $this->config = $this->mergeDefaults($config);
     }
 
@@ -86,12 +102,12 @@ readonly class ConnectionConfig
      * @param  array<string, mixed>  $options
      */
     public static function mysql(
-      string $host,
-      string $database,
-      string $username,
-      string $password,
-      int $port = 3306,
-      array $options = []
+        string $host,
+        string $database,
+        string $username,
+        string $password,
+        int $port = 3306,
+        array $options = []
     ): self {
         return new self(array_merge([
           'driver'   => 'mysql',
@@ -109,12 +125,12 @@ readonly class ConnectionConfig
      * @param  array<string, mixed>  $options
      */
     public static function pgsql(
-      string $host,
-      string $database,
-      string $username,
-      string $password,
-      int $port = 5432,
-      array $options = []
+        string $host,
+        string $database,
+        string $username,
+        string $password,
+        int $port = 5432,
+        array $options = []
     ): self {
         return new self(array_merge([
           'driver'   => 'pgsql',
@@ -212,6 +228,18 @@ readonly class ConnectionConfig
         return $this->config['read'];
     }
 
+    /**
+     * Get security configuration as array.
+     *
+     * @return array<string, mixed>
+     */
+    public function getSecurityConfig(): array
+    {
+        $security = $this->config['security'] ?? [];
+
+        return is_array($security) ? $security : [];
+    }
+
     public function getUsername(): string
     {
         return $this->config['username'] ?? '';
@@ -228,18 +256,6 @@ readonly class ConnectionConfig
     }
 
     /**
-     * Get security configuration as array.
-     *
-     * @return array<string, mixed>
-     */
-    public function getSecurityConfig(): array
-    {
-        $security = $this->config['security'] ?? [];
-
-        return is_array($security) ? $security : [];
-    }
-
-    /**
      * Whether security checks are enabled at config level.
      */
     public function isSecurityEnabled(): bool
@@ -247,6 +263,14 @@ readonly class ConnectionConfig
         $security = $this->getSecurityConfig();
 
         return (bool) ($security['enabled'] ?? false);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toArray(): array
+    {
+        return $this->config;
     }
 
     /**
@@ -261,11 +285,27 @@ readonly class ConnectionConfig
     }
 
     /**
-     * @return array<string, mixed>
+     * First pass: let the driver merge its own defaults into the config.
+     *
+     * This happens before core validation / defaults, so driver overrides win.
+     *
+     * @param  array<string,mixed>  $config
+     * @return array<string,mixed>
      */
-    public function toArray(): array
+    private function applyDriverDefaults(array $config): array
     {
-        return $this->config;
+        if (! isset($config['driver']) || ! is_string($config['driver']) || $config['driver'] === '') {
+            return $config;
+        }
+
+        try {
+            $driver = DriverRegistry::resolve($config['driver']);
+        } catch (ConnectionException) {
+            // Unknown driver name at this point; core validation will handle it.
+            return $config;
+        }
+
+        return $driver->mergeDefaults($config);
     }
 
     /**
@@ -321,15 +361,15 @@ readonly class ConnectionConfig
     {
         $driver = $config['driver'];
 
-        // Set default port based on driver.
+        // Set default port based on driver if still not set.
         if (! isset($config['port']) && array_key_exists($driver, self::DRIVER_PORTS)) {
             $config['port'] = self::DRIVER_PORTS[$driver];
         }
 
-        // Merge with defaults.
+        // Merge with defaults (driver + host + charset etc).
         $merged = array_merge(self::DEFAULTS, $config);
 
-        // Driver-specific defaults.
+        // Driver-specific defaults for built-in engines.
         return match ($driver) {
             'mysql'  => $this->applyMySqlDefaults($merged),
             'pgsql'  => $this->applyPostgreSqlDefaults($merged),
@@ -339,36 +379,78 @@ readonly class ConnectionConfig
     }
 
     /**
+     * Normalize driver aliases & case.
+     */
+    private function normalizeDriverName(string $driver): string
+    {
+        $driver = strtolower($driver);
+
+        return match ($driver) {
+            'pdo_mysql', 'mysqli'    => 'mysql',
+            'postgres', 'postgresql' => 'pgsql',
+            'sqlite3'                => 'sqlite',
+            default                  => $driver,
+        };
+    }
+
+    /**
      * Validate configuration.
+     *
+     * For built-in drivers we do stricter checks.
+     * For custom drivers we only make sure "driver" exists; the DriverInterface
+     * implementation is responsible for deeper validation.
      *
      * @param  array<string, mixed>  $config
      */
     private function validateConfig(array $config): void
     {
-        if (! isset($config['driver'])) {
+        if (! isset($config['driver']) || ! is_string($config['driver']) || $config['driver'] === '') {
             throw ConnectionException::missingConfigKey('driver');
         }
 
         $driver = $config['driver'];
 
-        if (! in_array($driver, ['mysql', 'pgsql', 'sqlite'], true)) {
-            throw ConnectionException::unsupportedDriver($driver);
-        }
+        if (in_array($driver, ['mysql', 'pgsql', 'sqlite'], true)) {
+            // SQLite only requires database path.
+            if ($driver === 'sqlite') {
+                if (! isset($config['database'])) {
+                    throw ConnectionException::missingConfigKey('database');
+                }
 
-        // SQLite only requires database path.
-        if ($driver === 'sqlite') {
-            if (! isset($config['database'])) {
-                throw ConnectionException::missingConfigKey('database');
+                return;
+            }
+
+            // MySQL and PostgreSQL require more configuration.
+            foreach (['host', 'database', 'username'] as $key) {
+                if (! isset($config[$key])) {
+                    throw ConnectionException::missingConfigKey($key);
+                }
             }
 
             return;
         }
 
-        // MySQL and PostgreSQL require more configuration.
-        foreach (['host', 'database', 'username'] as $key) {
-            if (! isset($config[$key])) {
-                throw ConnectionException::missingConfigKey($key);
-            }
+        // Custom drivers: no additional validation here; delegated to the driver.
+    }
+
+    /**
+     * Second pass: let the driver validate its specific configuration.
+     *
+     * @param  array<string,mixed>  $config
+     */
+    private function validateWithDriver(array $config): void
+    {
+        if (! isset($config['driver']) || ! is_string($config['driver']) || $config['driver'] === '') {
+            return;
         }
+
+        try {
+            $driver = DriverRegistry::resolve($config['driver']);
+        } catch (ConnectionException) {
+            // If the driver isn't registered, we don't try to validate via driver.
+            return;
+        }
+
+        $driver->validateConfig($config);
     }
 }

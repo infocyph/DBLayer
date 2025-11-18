@@ -51,6 +51,16 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     }
 
     /**
+     * Create an empty collection.
+     *
+     * @return static
+     */
+    public static function empty(): static
+    {
+        return new static();
+    }
+
+    /**
      * Create a collection from an array.
      *
      * @param array<TKey, TValue> $items
@@ -59,16 +69,6 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     public static function make(array $items = []): static
     {
         return new static($items);
-    }
-
-    /**
-     * Create an empty collection.
-     *
-     * @return static
-     */
-    public static function empty(): static
-    {
-        return new static();
     }
 
     /**
@@ -261,6 +261,16 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     }
 
     /**
+     * Get data for JSON serialization.
+     *
+     * @return array<TKey, TValue>
+     */
+    public function jsonSerialize(): array
+    {
+        return $this->items;
+    }
+
+    /**
      * Get the current key (Iterator implementation).
      *
      * @return TKey|null
@@ -414,8 +424,8 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     public function toJson(int $options = 0): string
     {
         $json = json_encode(
-          $this->jsonSerialize(),
-          $options | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            $this->jsonSerialize(),
+            $options | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
         );
 
         return $json === false ? '[]' : $json;
@@ -439,20 +449,10 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     public function where(string $key, mixed $value): static
     {
         return $this->filter(
-          static fn ($item) => (
-            (is_array($item) && array_key_exists($key, $item) && $item[$key] === $value)
+            static fn ($item) => (
+                (is_array($item) && array_key_exists($key, $item) && $item[$key] === $value)
             || (is_object($item) && isset($item->{$key}) && $item->{$key} === $value)
-          )
+            )
         );
-    }
-
-    /**
-     * Get data for JSON serialization.
-     *
-     * @return array<TKey, TValue>
-     */
-    public function jsonSerialize(): array
-    {
-        return $this->items;
     }
 }

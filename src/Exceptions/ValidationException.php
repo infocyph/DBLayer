@@ -20,10 +20,10 @@ final class ValidationException extends DBException
      * @param array<string, array<int, string>|string> $errors
      */
     public function __construct(
-      string $message = 'Validation failed.',
-      array $errors = [],
-      int $code = 0,
-      ?Throwable $previous = null
+        string $message = 'Validation failed.',
+        array $errors = [],
+        int $code = 0,
+        ?Throwable $previous = null
     ) {
         parent::__construct($message, $code, $previous);
 

@@ -37,20 +37,20 @@ final class Security
       '/exec\s*\(/i',
       '/execute\s+immediate/i',
     ];
+    private const DEFAULT_MAX_IN_ITEMS       = 1000;
+    private const DEFAULT_MAX_QUERY_LENGTH   = 10000;
 
     /**
      * Defaults (compatible with old constants).
      */
     private const DEFAULT_QUERIES_PER_MINUTE = 1000;
     private const DEFAULT_QUERIES_PER_SECOND = 100;
-    private const DEFAULT_MAX_QUERY_LENGTH   = 10000;
-    private const DEFAULT_MAX_IN_ITEMS       = 1000;
+    private const STRICT_MAX_IN_ITEMS     = 800;
 
     /**
      * STRICT mode can be a bit tighter.
      */
     private const STRICT_MAX_QUERY_LENGTH = 8000;
-    private const STRICT_MAX_IN_ITEMS     = 800;
 
     /**
      * Global security mode.
@@ -61,31 +61,6 @@ final class Security
      * Shared rate limiter instance.
      */
     private static ?RateLimiter $rateLimiter = null;
-
-    /**
-     * Get current security mode.
-     */
-    public static function getMode(): SecurityMode
-    {
-        return self::$mode;
-    }
-
-    /**
-     * Set global security mode.
-     */
-    public static function setMode(SecurityMode $mode): void
-    {
-        self::$mode = $mode;
-    }
-
-    private static function limiter(): RateLimiter
-    {
-        if (self::$rateLimiter === null) {
-            self::$rateLimiter = new RateLimiter();
-        }
-
-        return self::$rateLimiter;
-    }
 
     /**
      * Check rate limits (per-second & per-minute) for an identifier.
@@ -128,7 +103,7 @@ final class Security
 
         if ($elapsed > $maxTime) {
             throw SecurityException::unsafeOperation(
-              "Transaction exceeded max time of {$maxTime}s (elapsed: " . round($elapsed, 3) . 's).'
+                "Transaction exceeded max time of {$maxTime}s (elapsed: " . round($elapsed, 3) . 's).'
             );
         }
     }
@@ -139,6 +114,57 @@ final class Security
     public static function clearAllRateLimits(): void
     {
         self::limiter()->clear();
+    }
+
+    /**
+     * Detect SQL injection attempts with logging, respecting SecurityMode.
+     *
+     * @throws SecurityException
+     */
+    public static function detectSqlInjection(string $sql): void
+    {
+        if (self::$mode === SecurityMode::OFF) {
+            return;
+        }
+
+        $validator = new QueryValidator();
+
+        try {
+            $validator->detectSqlInjection($sql);
+        } catch (SecurityException $e) {
+            self::logSecurityEvent(
+                'injection_attempt',
+                'Possible SQL injection detected',
+                [
+                'sql'   => mb_substr($sql, 0, 512, 'UTF-8'),
+                'error' => $e->getMessage(),
+              ]
+            );
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Generate secure token.
+     *
+     * NOTE: Output length is 2 * $length hex characters.
+     */
+    public static function generateToken(int $length = 32): string
+    {
+        if ($length <= 0) {
+            return '';
+        }
+
+        return bin2hex(random_bytes($length));
+    }
+
+    /**
+     * Get current security mode.
+     */
+    public static function getMode(): SecurityMode
+    {
+        return self::$mode;
     }
 
     /**
@@ -164,32 +190,127 @@ final class Security
     }
 
     /**
-     * Detect SQL injection attempts with logging, respecting SecurityMode.
+     * Hash sensitive data.
+     */
+    public static function hashSensitiveData(string $data, string $algo = 'sha256'): string
+    {
+        return hash($algo, $data);
+    }
+
+    /**
+     * Check if operation is obviously dangerous by leading keyword.
+     */
+    public static function isDangerousOperation(string $sql): bool
+    {
+        $sql = strtolower(ltrim($sql));
+
+        $dangerous = [
+          'drop table',
+          'drop database',
+          'truncate',
+          'delete from',
+          'grant ',
+          'revoke ',
+          'alter table',
+          'create table',
+        ];
+        return array_any($dangerous, fn ($operation) => str_starts_with($sql, $operation));
+    }
+
+    /**
+     * Log a security event (kept simple and JSON-structured).
+     *
+     * @param array<string, mixed> $context
+     */
+    public static function logSecurityEvent(string $type, string $message, array $context = []): void
+    {
+        $payload = [
+          'type'       => 'security',
+          'event'      => $type,
+          'message'    => $message,
+          'context'    => $context,
+          'timestamp'  => date('Y-m-d H:i:s'),
+          'ip'         => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+          'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
+        ];
+
+        error_log(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
+     * Require confirmation for dangerous operation.
      *
      * @throws SecurityException
      */
-    public static function detectSqlInjection(string $sql): void
+    public static function requireConfirmation(string $sql, bool $confirmed = false): void
     {
         if (self::$mode === SecurityMode::OFF) {
             return;
         }
 
-        $validator = new QueryValidator();
-
-        try {
-            $validator->detectSqlInjection($sql);
-        } catch (SecurityException $e) {
-            self::logSecurityEvent(
-              'injection_attempt',
-              'Possible SQL injection detected',
-              [
-                'sql'   => mb_substr($sql, 0, 512, 'UTF-8'),
-                'error' => $e->getMessage(),
-              ]
+        if (self::isDangerousOperation($sql) && ! $confirmed) {
+            throw SecurityException::unsafeOperation(
+                'Dangerous SQL operation requires explicit confirmation.'
             );
-
-            throw $e;
         }
+    }
+
+    /**
+     * Reset rate limits for identifier.
+     */
+    public static function resetRateLimit(string $identifier): void
+    {
+        $limiter = self::limiter();
+        $limiter->reset($identifier . ':sec');
+        $limiter->reset($identifier . ':min');
+    }
+
+    /**
+     * Sanitize input value.
+     */
+    public static function sanitizeInput(mixed $value): mixed
+    {
+        return SecurityValidator::sanitizeInput($value);
+    }
+
+    /**
+     * Sanitize LIKE pattern.
+     */
+    public static function sanitizeLikePattern(string $pattern): string
+    {
+        return SecurityValidator::sanitizeLikePattern($pattern);
+    }
+
+    /**
+     * Set global security mode.
+     */
+    public static function setMode(SecurityMode $mode): void
+    {
+        self::$mode = $mode;
+    }
+
+    /**
+     * Validate column name.
+     *
+     * @throws SecurityException
+     */
+    public static function validateColumnName(string $column): void
+    {
+        SecurityValidator::validateColumnName($column);
+    }
+
+    /**
+     * Validate IN clause size using mode-appropriate max.
+     *
+     * @throws SecurityException
+     */
+    public static function validateInClauseSize(array $values): void
+    {
+        $maxItems = self::$mode === SecurityMode::STRICT
+          ? self::STRICT_MAX_IN_ITEMS
+          : self::DEFAULT_MAX_IN_ITEMS;
+
+        SecurityValidator::validateInClauseSize($values, $maxItems);
     }
 
     /**
@@ -231,9 +352,9 @@ final class Security
             foreach (self::DANGEROUS_PATTERNS as $pattern) {
                 if (preg_match($pattern, $sql) === 1) {
                     self::logSecurityEvent(
-                      'dangerous_query',
-                      'Query contains dangerous pattern',
-                      [
+                        'dangerous_query',
+                        'Query contains dangerous pattern',
+                        [
                         'sql'     => mb_substr($sql, 0, 512, 'UTF-8'),
                         'pattern' => $pattern,
                       ]
@@ -250,131 +371,6 @@ final class Security
     }
 
     /**
-     * Generate secure token.
-     *
-     * NOTE: Output length is 2 * $length hex characters.
-     */
-    public static function generateToken(int $length = 32): string
-    {
-        if ($length <= 0) {
-            return '';
-        }
-
-        return bin2hex(random_bytes($length));
-    }
-
-    /**
-     * Hash sensitive data.
-     */
-    public static function hashSensitiveData(string $data, string $algo = 'sha256'): string
-    {
-        return hash($algo, $data);
-    }
-
-    /**
-     * Validate token equality in constant time.
-     */
-    public static function validateToken(string $token, string $expected): bool
-    {
-        return hash_equals($expected, $token);
-    }
-
-    /**
-     * Check if operation is obviously dangerous by leading keyword.
-     */
-    public static function isDangerousOperation(string $sql): bool
-    {
-        $sql = strtolower(ltrim($sql));
-
-        $dangerous = [
-          'drop table',
-          'drop database',
-          'truncate',
-          'delete from',
-          'grant ',
-          'revoke ',
-          'alter table',
-          'create table',
-        ];
-
-        foreach ($dangerous as $operation) {
-            if (str_starts_with($sql, $operation)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Require confirmation for dangerous operation.
-     *
-     * @throws SecurityException
-     */
-    public static function requireConfirmation(string $sql, bool $confirmed = false): void
-    {
-        if (self::$mode === SecurityMode::OFF) {
-            return;
-        }
-
-        if (self::isDangerousOperation($sql) && ! $confirmed) {
-            throw SecurityException::unsafeOperation(
-              'Dangerous SQL operation requires explicit confirmation.'
-            );
-        }
-    }
-
-    /**
-     * Reset rate limits for identifier.
-     */
-    public static function resetRateLimit(string $identifier): void
-    {
-        $limiter = self::limiter();
-        $limiter->reset($identifier . ':sec');
-        $limiter->reset($identifier . ':min');
-    }
-
-    /**
-     * Sanitize input value.
-     */
-    public static function sanitizeInput(mixed $value): mixed
-    {
-        return SecurityValidator::sanitizeInput($value);
-    }
-
-    /**
-     * Sanitize LIKE pattern.
-     */
-    public static function sanitizeLikePattern(string $pattern): string
-    {
-        return SecurityValidator::sanitizeLikePattern($pattern);
-    }
-
-    /**
-     * Validate column name.
-     *
-     * @throws SecurityException
-     */
-    public static function validateColumnName(string $column): void
-    {
-        SecurityValidator::validateColumnName($column);
-    }
-
-    /**
-     * Validate IN clause size using mode-appropriate max.
-     *
-     * @throws SecurityException
-     */
-    public static function validateInClauseSize(array $values): void
-    {
-        $maxItems = self::$mode === SecurityMode::STRICT
-          ? self::STRICT_MAX_IN_ITEMS
-          : self::DEFAULT_MAX_IN_ITEMS;
-
-        SecurityValidator::validateInClauseSize($values, $maxItems);
-    }
-
-    /**
      * Validate table name.
      *
      * @throws SecurityException
@@ -388,28 +384,25 @@ final class Security
 
         if (in_array(strtoupper($table), $keywords, true)) {
             throw SecurityException::invalidConfiguration(
-              "Invalid table name [{$table}]."
+                "Invalid table name [{$table}]."
             );
         }
     }
 
     /**
-     * Log a security event (kept simple and JSON-structured).
-     *
-     * @param array<string, mixed> $context
+     * Validate token equality in constant time.
      */
-    public static function logSecurityEvent(string $type, string $message, array $context = []): void
+    public static function validateToken(string $token, string $expected): bool
     {
-        $payload = [
-          'type'       => 'security',
-          'event'      => $type,
-          'message'    => $message,
-          'context'    => $context,
-          'timestamp'  => date('Y-m-d H:i:s'),
-          'ip'         => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
-          'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
-        ];
+        return hash_equals($expected, $token);
+    }
 
-        error_log(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    private static function limiter(): RateLimiter
+    {
+        if (self::$rateLimiter === null) {
+            self::$rateLimiter = new RateLimiter();
+        }
+
+        return self::$rateLimiter;
     }
 }

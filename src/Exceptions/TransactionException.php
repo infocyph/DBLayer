@@ -19,11 +19,6 @@ final class TransactionException extends DBException
         return new self('Failed to commit transaction: ' . $message);
     }
 
-    public static function rollBackFailed(string $message): self
-    {
-        return new self('Failed to roll back transaction: ' . $message);
-    }
-
     public static function deadlockDetected(string $message = ''): self
     {
         $base = 'Transaction deadlock detected';
@@ -33,21 +28,6 @@ final class TransactionException extends DBException
         }
 
         return new self($base);
-    }
-
-    public static function savepointError(string $savepoint, string $operation): self
-    {
-        return new self("Savepoint operation [{$operation}] failed for savepoint [{$savepoint}].");
-    }
-
-    public static function savepointNotFound(string $savepoint): self
-    {
-        return new self("Savepoint [{$savepoint}] does not exist.");
-    }
-
-    public static function nestedTransactionError(int $level, string $message): self
-    {
-        return new self("Nested transaction error at level {$level}: {$message}");
     }
 
     public static function isolationLevelError(string $level, string $reason): self
@@ -65,9 +45,9 @@ final class TransactionException extends DBException
         return new self("Maximum transaction nesting level [{$maxLevel}] exceeded.");
     }
 
-    public static function readOnlyViolation(): self
+    public static function nestedTransactionError(int $level, string $message): self
     {
-        return new self('Transaction attempted write in read-only mode.');
+        return new self("Nested transaction error at level {$level}: {$message}");
     }
 
     /**
@@ -78,6 +58,26 @@ final class TransactionException extends DBException
         return new self('No active transaction is currently in progress.');
     }
 
+    public static function readOnlyViolation(): self
+    {
+        return new self('Transaction attempted write in read-only mode.');
+    }
+
+    public static function rollBackFailed(string $message): self
+    {
+        return new self('Failed to roll back transaction: ' . $message);
+    }
+
+    public static function savepointError(string $savepoint, string $operation): self
+    {
+        return new self("Savepoint operation [{$operation}] failed for savepoint [{$savepoint}].");
+    }
+
+    public static function savepointNotFound(string $savepoint): self
+    {
+        return new self("Savepoint [{$savepoint}] does not exist.");
+    }
+
     /**
      * Transaction exceeded configured time limit.
      */
@@ -86,7 +86,7 @@ final class TransactionException extends DBException
         $elapsed = sprintf('%.4f', $elapsedSeconds);
 
         return new self(
-          "Transaction timeout after {$elapsed} seconds (max allowed: {$maxSeconds} seconds)."
+            "Transaction timeout after {$elapsed} seconds (max allowed: {$maxSeconds} seconds)."
         );
     }
 }

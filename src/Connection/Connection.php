@@ -1,14 +1,23 @@
 <?php
 
+// src/Connection/Connection.php
+
 declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection;
 
+use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
+use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
+use Infocyph\DBLayer\Driver\MySQL\MySQLGrammar;
+use Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLGrammar;
+use Infocyph\DBLayer\Driver\SQLite\SQLiteGrammar;
+use Infocyph\DBLayer\Driver\Support\Capabilities;
+use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Grammar\Grammar;
-use Infocyph\DBLayer\Grammar\MySQLGrammar;
-use Infocyph\DBLayer\Grammar\PostgreSQLGrammar;
-use Infocyph\DBLayer\Grammar\SQLiteGrammar;
+use Infocyph\DBLayer\Query\Core\CompiledQuery;
+use Infocyph\DBLayer\Query\Core\DriverResult;
+use Infocyph\DBLayer\Query\Core\QueryType;
 use Infocyph\DBLayer\Query\Executor;
 use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
@@ -22,12 +31,13 @@ use PDOStatement;
  * Database Connection Manager
  *
  * Manages PDO connections with support for:
- * - Multiple database drivers (MySQL, PostgreSQL, SQLite)
+ * - Multiple database drivers (MySQL, PostgreSQL, SQLite, custom)
  * - Read/write splitting
  * - Automatic reconnection on connection loss
  * - Lightweight health checks
  * - Query statistics
- * - Query builder / grammar wiring
+ * - Query builder / grammar wiring (legacy path)
+ * - Driver + compiler pipeline for structured queries
  * - Optional SQL security validation (config-driven)
  */
 final class Connection
@@ -41,6 +51,12 @@ final class Connection
      * Maximum reconnection attempts for a single failing operation.
      */
     private const MAX_RECONNECT_ATTEMPTS = 3;
+    private readonly QueryCompilerInterface $compiler;
+
+    /**
+     * Driver and compiler for this connection.
+     */
+    private readonly DriverInterface $driver;
 
     /**
      * Connection configuration.
@@ -48,14 +64,38 @@ final class Connection
     private ConnectionConfig $config;
 
     /**
+     * Query executor for this connection (legacy path).
+     */
+    private ?Executor $executor = null;
+
+    /**
+     * SQL grammar instance for this connection (legacy path).
+     */
+    private ?Grammar $grammar = null;
+
+    /**
      * Write PDO connection.
      */
     private ?PDO $pdo = null;
 
     /**
+     * Optional query recorder for "pretend" mode.
+     *
+     * @var null|callable(string,array<int|string,mixed>):void
+     */
+    private $queryRecorder = null;
+
+    /**
      * Read replica PDO connection.
      */
     private ?PDO $readPdo = null;
+
+    /**
+     * Whether to run SQL security checks (heuristics, length, bindings).
+     *
+     * Backed by ConnectionConfig::security['enabled'].
+     */
+    private bool $securityChecks;
 
     /**
      * Query statistics.
@@ -75,33 +115,9 @@ final class Connection
     private string $tablePrefix = '';
 
     /**
-     * SQL grammar instance for this connection.
-     */
-    private ?Grammar $grammar = null;
-
-    /**
-     * Query executor for this connection.
-     */
-    private ?Executor $executor = null;
-
-    /**
      * Transaction manager for this connection.
      */
     private ?Transaction $transaction = null;
-
-    /**
-     * Optional query recorder for "pretend" mode.
-     *
-     * @var null|callable(string,array<int|string,mixed>):void
-     */
-    private $queryRecorder = null;
-
-    /**
-     * Whether to run SQL security checks (heuristics, length, bindings).
-     *
-     * Backed by ConnectionConfig::security['enabled'].
-     */
-    private bool $securityChecks;
 
     /**
      * Create a new connection instance.
@@ -111,6 +127,10 @@ final class Connection
         $this->config         = $config;
         $this->tablePrefix    = (string) ($config->get('prefix') ?? '');
         $this->securityChecks = $config->isSecurityEnabled();
+
+        // Resolve driver and compiler up front; all engines go through DriverRegistry.
+        $this->driver   = DriverRegistry::resolve($config->getDriver());
+        $this->compiler = $this->driver->createCompiler();
     }
 
     /**
@@ -140,6 +160,14 @@ final class Connection
     }
 
     /**
+     * Disable SQL security checks for this connection instance.
+     */
+    public function disableSecurityChecks(): void
+    {
+        $this->securityChecks = false;
+    }
+
+    /**
      * Disconnect from database (write + read).
      */
     public function disconnect(): void
@@ -154,14 +182,6 @@ final class Connection
     public function enableSecurityChecks(): void
     {
         $this->securityChecks = true;
-    }
-
-    /**
-     * Disable SQL security checks for this connection instance.
-     */
-    public function disableSecurityChecks(): void
-    {
-        $this->securityChecks = false;
     }
 
     /**
@@ -198,9 +218,9 @@ final class Connection
 
             try {
                 $statement = $this->runStatement(
-                  $isWrite ? $this->getPdo() : $this->getReadPdo(),
-                  $sql,
-                  $bindings
+                    $isWrite ? $this->getPdo() : $this->getReadPdo(),
+                    $sql,
+                    $bindings
                 );
 
                 $this->recordQuery($isWrite);
@@ -214,6 +234,22 @@ final class Connection
                 throw ConnectionException::queryFailed($sql, $e2->getMessage());
             }
         }
+    }
+
+    /**
+     * Get declared capabilities for this driver.
+     */
+    public function getCapabilities(): Capabilities
+    {
+        return $this->driver->getCapabilities();
+    }
+
+    /**
+     * Get the query compiler for this connection.
+     */
+    public function getCompiler(): QueryCompilerInterface
+    {
+        return $this->compiler;
     }
 
     /**
@@ -233,14 +269,11 @@ final class Connection
     }
 
     /**
-     * Set database name (returns self for chaining).
+     * Get the resolved driver instance.
      */
-    public function setDatabaseName(string $database): self
+    public function getDriver(): DriverInterface
     {
-        $this->config = $this->config->with('database', $database);
-        $this->disconnect();
-
-        return $this;
+        return $this->driver;
     }
 
     /**
@@ -290,6 +323,14 @@ final class Connection
     }
 
     /**
+     * Get the table prefix.
+     */
+    public function getTablePrefix(): string
+    {
+        return $this->tablePrefix;
+    }
+
+    /**
      * Run an insert statement.
      *
      * @param  array<int|string, mixed>  $bindings
@@ -334,6 +375,76 @@ final class Connection
     }
 
     /**
+     * "Pretend" to execute queries and return the list of queries that would run.
+     *
+     * Note: for now this still executes queries; it only records them.
+     * It is primarily useful for inspecting generated SQL.
+     *
+     * @param  callable(self):void  $callback
+     *
+     * @return array<int, array{sql:string,bindings:array<int|string,mixed>}>
+     */
+    public function pretend(callable $callback): array
+    {
+        $logged           = [];
+        $previousRecorder = $this->queryRecorder;
+
+        $this->queryRecorder = static function (string $sql, array $bindings) use (&$logged): void {
+            $logged[] = [
+              'sql'      => $sql,
+              'bindings' => $bindings,
+            ];
+        };
+
+        try {
+            $callback($this);
+        } finally {
+            $this->queryRecorder = $previousRecorder;
+        }
+
+        return $logged;
+    }
+
+    /**
+     * Create a raw SQL expression.
+     */
+    public function raw(string $value): Expression
+    {
+        return new Expression($value);
+    }
+
+    /**
+     * Reconnect to database with exponential backoff (write or read).
+     */
+    public function reconnect(bool $isWrite): void
+    {
+        $attempt = 0;
+
+        while ($attempt < self::MAX_RECONNECT_ATTEMPTS) {
+            $attempt++;
+
+            try {
+                if ($isWrite) {
+                    $this->pdo = null;
+                    $this->connect();
+                } else {
+                    $this->readPdo = null;
+                    $this->connectRead();
+                }
+
+                return;
+            } catch (ConnectionException) {
+                if ($attempt >= self::MAX_RECONNECT_ATTEMPTS) {
+                    throw ConnectionException::maxReconnectAttemptsReached(self::MAX_RECONNECT_ATTEMPTS);
+                }
+
+                // Exponential-ish backoff: 100ms, 200ms, 300ms...
+                usleep(100_000 * $attempt);
+            }
+        }
+    }
+
+    /**
      * Reset statistics.
      */
     public function resetStats(): void
@@ -355,6 +466,52 @@ final class Connection
     }
 
     /**
+     * Run a compiled query (new pipeline: QueryPayload → CompiledQuery → DriverResult).
+     *
+     * For now this method reuses the existing string-based helpers so that
+     * reconnection logic, stats, security checks and pretend recording stay
+     * centralized. Later we can optimize to bypass SQL classification.
+     */
+    public function runCompiled(CompiledQuery $query, bool $readOnly = false): DriverResult
+    {
+        unset($readOnly); // reserved for future use when we bypass SQL classification
+
+        $type = $query->type;
+
+        if ($type === QueryType::SELECT) {
+            $rows = $this->select($query->sql, $query->bindings);
+
+            return new DriverResult($rows, count($rows));
+        }
+
+        if ($type === QueryType::INSERT) {
+            $success  = $this->insert($query->sql, $query->bindings);
+            $rowCount = $success ? 1 : 0;
+            $id       = $this->lastInsertId();
+            $lastId   = $id !== '' ? $id : null;
+
+            return new DriverResult(null, $rowCount, $lastId);
+        }
+
+        if ($type === QueryType::UPDATE) {
+            $rowCount = $this->update($query->sql, $query->bindings);
+
+            return new DriverResult(null, $rowCount);
+        }
+
+        if ($type === QueryType::DELETE) {
+            $rowCount = $this->delete($query->sql, $query->bindings);
+
+            return new DriverResult(null, $rowCount);
+        }
+
+        // TRUNCATE or anything else
+        $this->statement($query->sql, $query->bindings);
+
+        return new DriverResult(null, 0);
+    }
+
+    /**
      * Run a select statement.
      *
      * @param  array<int|string, mixed>  $bindings
@@ -371,13 +528,28 @@ final class Connection
     }
 
     /**
-     * Run an update statement.
-     *
-     * @param  array<int|string, mixed>  $bindings
+     * Set database name (returns self for chaining).
      */
-    public function update(string $sql, array $bindings = []): int
+    public function setDatabaseName(string $database): self
     {
-        return $this->execute($sql, $bindings)->rowCount();
+        $this->config = $this->config->with('database', $database);
+        $this->disconnect();
+
+        return $this;
+    }
+
+    /**
+     * Set the table prefix (updates grammar if already created).
+     */
+    public function setTablePrefix(string $prefix): self
+    {
+        $this->tablePrefix = $prefix;
+
+        if ($this->grammar !== null) {
+            $this->grammar->setTablePrefix($prefix);
+        }
+
+        return $this;
     }
 
     /**
@@ -390,6 +562,36 @@ final class Connection
         $this->execute($sql, $bindings);
 
         return true;
+    }
+
+    /**
+     * Get a query builder for the given table.
+     */
+    public function table(string $table): QueryBuilder
+    {
+        return new QueryBuilder(
+            $this,
+            $this->getGrammar(),
+            $this->getExecutor()
+        )->from($table);
+    }
+
+    /**
+     * Execute a callback within a transaction using the Transaction manager.
+     *
+     * @param  callable(self):mixed  $callback
+     */
+    public function transaction(callable $callback, int $attempts = 1): mixed
+    {
+        return $this->getTransactionManager()->execute($callback, $attempts);
+    }
+
+    /**
+     * Get the transaction nesting level (via Transaction manager).
+     */
+    public function transactionLevel(): int
+    {
+        return $this->getTransactionManager()->level();
     }
 
     /**
@@ -437,233 +639,113 @@ final class Connection
     }
 
     /**
-     * Get the table prefix.
-     */
-    public function getTablePrefix(): string
-    {
-        return $this->tablePrefix;
-    }
-
-    /**
-     * Set the table prefix (updates grammar if already created).
-     */
-    public function setTablePrefix(string $prefix): self
-    {
-        $this->tablePrefix = $prefix;
-
-        if ($this->grammar !== null) {
-            $this->grammar->setTablePrefix($prefix);
-        }
-
-        return $this;
-    }
-
-    /**
-     * Create a raw SQL expression.
-     */
-    public function raw(string $value): Expression
-    {
-        return new Expression($value);
-    }
-
-    /**
-     * Execute a callback within a transaction using the Transaction manager.
+     * Run an update statement.
      *
-     * @param  callable(self):mixed  $callback
+     * @param  array<int|string, mixed>  $bindings
      */
-    public function transaction(callable $callback, int $attempts = 1): mixed
+    public function update(string $sql, array $bindings = []): int
     {
-        return $this->getTransactionManager()->execute($callback, $attempts);
+        return $this->execute($sql, $bindings)->rowCount();
     }
 
     /**
-     * Get the transaction nesting level (via Transaction manager).
-     */
-    public function transactionLevel(): int
-    {
-        return $this->getTransactionManager()->level();
-    }
-
-    /**
-     * Get a query builder for the given table.
-     */
-    public function table(string $table): QueryBuilder
-    {
-        return new QueryBuilder(
-          $this,
-          $this->getGrammar(),
-          $this->getExecutor()
-        )->from($table);
-    }
-
-    /**
-     * "Pretend" to execute queries and return the list of queries that would run.
-     *
-     * Note: for now this still executes queries; it only records them.
-     * It is primarily useful for inspecting generated SQL.
-     *
-     * @param  callable(self):void  $callback
-     *
-     * @return array<int, array{sql:string,bindings:array<int|string,mixed>}>
-     */
-    public function pretend(callable $callback): array
-    {
-        $logged           = [];
-        $previousRecorder = $this->queryRecorder;
-
-        $this->queryRecorder = static function (string $sql, array $bindings) use (&$logged): void {
-            $logged[] = [
-              'sql'      => $sql,
-              'bindings' => $bindings,
-            ];
-        };
-
-        try {
-            $callback($this);
-        } finally {
-            $this->queryRecorder = $previousRecorder;
-        }
-
-        return $logged;
-    }
-
-    /**
-     * Build DSN string for the configured driver.
-     *
-     * @param  array<string, mixed>|null  $config
-     */
-    private function buildDsn(?array $config = null): string
-    {
-        $config = $config ?? $this->config->toArray();
-        $driver = $config['driver'] ?? $this->config->getDriver();
-
-        return match ($driver) {
-            'mysql'  => $this->buildMySqlDsn($config),
-            'pgsql'  => $this->buildPostgreSqlDsn($config),
-            'sqlite' => $this->buildSqliteDsn($config),
-            default  => throw ConnectionException::unsupportedDriver($driver),
-        };
-    }
-
-    /**
-     * Build MySQL DSN.
-     *
-     * @param  array<string, mixed>  $config
-     */
-    private function buildMySqlDsn(array $config): string
-    {
-        if (! empty($config['unix_socket'])) {
-            return "mysql:unix_socket={$config['unix_socket']};dbname={$config['database']}";
-        }
-
-        $dsn = "mysql:host={$config['host']};port={$config['port']};dbname={$config['database']}";
-
-        if (! empty($config['charset'])) {
-            $dsn .= ";charset={$config['charset']}";
-        }
-
-        return $dsn;
-    }
-
-    /**
-     * Build PostgreSQL DSN.
-     *
-     * @param  array<string, mixed>  $config
-     */
-    private function buildPostgreSqlDsn(array $config): string
-    {
-        $dsn = "pgsql:host={$config['host']};port={$config['port']};dbname={$config['database']}";
-
-        if (! empty($config['schema'])) {
-            $dsn .= ";options='--search_path={$config['schema']}'";
-        }
-
-        return $dsn;
-    }
-
-    /**
-     * Build SQLite DSN.
-     *
-     * @param  array<string, mixed>  $config
-     */
-    private function buildSqliteDsn(array $config): string
-    {
-        return "sqlite:{$config['database']}";
-    }
-
-    /**
-     * Establish write database connection.
+     * Establish write database connection via the driver.
      */
     private function connect(): void
     {
         try {
-            $this->pdo = new PDO(
-              $this->buildDsn(),
-              $this->config->getUsername(),
-              $this->config->getPassword(),
-              $this->getConnectionOptions()
-            );
-
-            $this->runPostConnectCommands($this->pdo);
+            $this->pdo = $this->driver->createPdo($this->config, false);
         } catch (PDOException $e) {
             throw ConnectionException::connectionFailed(
-              $this->config->getDriver(),
-              $e->getMessage()
+                $this->config->getDriver(),
+                $e->getMessage()
             );
         }
     }
 
     /**
-     * Establish read replica connection.
+     * Establish read replica connection via the driver.
      */
     private function connectRead(): void
     {
         $readConfig = $this->config->getReadConfig();
 
-        try {
-            $this->readPdo = new PDO(
-              $this->buildDsn($readConfig),
-              $readConfig['username'] ?? $this->config->getUsername(),
-              $readConfig['password'] ?? $this->config->getPassword(),
-              $this->getConnectionOptions()
-            );
+        if ($readConfig === []) {
+            $this->readPdo = null;
 
-            $this->runPostConnectCommands($this->readPdo);
-        } catch (PDOException) {
+            return;
+        }
+
+        try {
+            $merged = array_merge($this->config->toArray(), $readConfig);
+            $config = ConnectionConfig::fromArray($merged);
+
+            $this->readPdo = $this->driver->createPdo($config, true);
+        } catch (PDOException | ConnectionException) {
             // Silent fallback to write connection; readPdo stays null.
             $this->readPdo = null;
         }
     }
 
     /**
-     * Reconnect to database with exponential backoff (write or read).
+     * Get the query executor for this connection (legacy).
      */
-    public function reconnect(bool $isWrite): void
+    private function getExecutor(): Executor
     {
-        $attempt = 0;
-
-        while ($attempt < self::MAX_RECONNECT_ATTEMPTS) {
-            $attempt++;
-
-            try {
-                if ($isWrite) {
-                    $this->pdo = null;
-                    $this->connect();
-                } else {
-                    $this->readPdo = null;
-                    $this->connectRead();
-                }
-
-                return;
-            } catch (ConnectionException) {
-                if ($attempt >= self::MAX_RECONNECT_ATTEMPTS) {
-                    throw ConnectionException::maxReconnectAttemptsReached(self::MAX_RECONNECT_ATTEMPTS);
-                }
-
-                // Exponential-ish backoff: 100ms, 200ms, 300ms...
-                usleep(100_000 * $attempt);
-            }
+        if ($this->executor === null) {
+            $this->executor = new Executor($this, $this->getGrammar());
         }
+
+        return $this->executor;
+    }
+
+    /**
+     * Get the grammar instance for this connection (legacy).
+     */
+    private function getGrammar(): Grammar
+    {
+        if ($this->grammar !== null) {
+            return $this->grammar;
+        }
+
+        $driverName    = $this->config->getDriver();
+        $this->grammar = match ($driverName) {
+            'mysql'  => new MySQLGrammar(),
+            'pgsql'  => new PostgreSQLGrammar(),
+            'sqlite' => new SQLiteGrammar(),
+            default  => throw ConnectionException::unsupportedDriver($driverName),
+        };
+
+        if ($this->tablePrefix !== '') {
+            $this->grammar->setTablePrefix($this->tablePrefix);
+        }
+
+        return $this->grammar;
+    }
+
+    /**
+     * Get PDO parameter type.
+     */
+    private function getParameterType(mixed $value): int
+    {
+        return match (true) {
+            is_int($value)  => PDO::PARAM_INT,
+            is_bool($value) => PDO::PARAM_BOOL,
+            $value === null => PDO::PARAM_NULL,
+            default         => PDO::PARAM_STR,
+        };
+    }
+
+    /**
+     * Get the Transaction manager for this connection.
+     */
+    private function getTransactionManager(): Transaction
+    {
+        if ($this->transaction === null) {
+            $this->transaction = new Transaction($this);
+        }
+
+        return $this->transaction;
     }
 
     /**
@@ -674,95 +756,6 @@ final class Connection
         $isRead = ($this->readPdo !== null && $pdo === $this->readPdo);
 
         $this->reconnect(! $isRead);
-    }
-
-    /**
-     * Get PDO connection options.
-     *
-     * @return array<int|string, mixed>
-     */
-    private function getConnectionOptions(): array
-    {
-        $defaults = [
-          PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-          PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-          PDO::ATTR_EMULATE_PREPARES   => false,
-          PDO::ATTR_STRINGIFY_FETCHES  => false,
-          PDO::ATTR_TIMEOUT            => self::CONNECTION_TIMEOUT,
-        ];
-
-        return array_replace($defaults, $this->config->getOptions());
-    }
-
-    /**
-     * MySQL post-connect commands.
-     *
-     * @return list<string>
-     */
-    private function getMySqlPostConnectCommands(): array
-    {
-        $commands = [];
-
-        $timezone = $this->config->get('timezone');
-        if (is_string($timezone) && $timezone !== '') {
-            $commands[] = "SET time_zone = '{$timezone}'";
-        }
-
-        if ($this->config->get('strict', true)) {
-            $commands[] = "SET sql_mode = 'STRICT_ALL_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE'";
-        }
-
-        return $commands;
-    }
-
-    /**
-     * PostgreSQL post-connect commands.
-     *
-     * @return list<string>
-     */
-    private function getPostgreSqlPostConnectCommands(): array
-    {
-        $commands = [];
-
-        $timezone = $this->config->get('timezone');
-        if (is_string($timezone) && $timezone !== '') {
-            $commands[] = "SET TIME ZONE '{$timezone}'";
-        }
-
-        $schema = $this->config->get('schema');
-        if (is_string($schema) && $schema !== '') {
-            $commands[] = "SET search_path TO {$schema}";
-        }
-
-        return $commands;
-    }
-
-    /**
-     * SQLite post-connect commands.
-     *
-     * @return list<string>
-     */
-    private function getSqlitePostConnectCommands(): array
-    {
-        return [
-          'PRAGMA foreign_keys = ON',
-          'PRAGMA journal_mode = WAL',
-        ];
-    }
-
-    /**
-     * Determine if query is a write operation.
-     */
-    private function isWriteQuery(string $sql): bool
-    {
-        $sql       = ltrim($sql);
-        $firstWord = strtoupper(substr($sql, 0, strcspn($sql, " \t\n\r")));
-
-        return in_array(
-          $firstWord,
-          ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE'],
-          true
-        );
     }
 
     /**
@@ -796,67 +789,43 @@ final class Connection
     }
 
     /**
-     * Get the grammar instance for this connection.
+     * Determine if query is a write operation.
      */
-    private function getGrammar(): Grammar
+    private function isWriteQuery(string $sql): bool
     {
-        if ($this->grammar !== null) {
-            return $this->grammar;
-        }
+        $sql       = ltrim($sql);
+        $firstWord = strtoupper(substr($sql, 0, strcspn($sql, " \t\n\r")));
 
-        $driver        = $this->config->getDriver();
-        $this->grammar = match ($driver) {
-            'mysql'  => new MySQLGrammar(),
-            'pgsql'  => new PostgreSQLGrammar(),
-            'sqlite' => new SQLiteGrammar(),
-            default  => throw ConnectionException::unsupportedDriver($driver),
-        };
-
-        if ($this->tablePrefix !== '') {
-            $this->grammar->setTablePrefix($this->tablePrefix);
-        }
-
-        return $this->grammar;
+        return in_array(
+            $firstWord,
+            ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE'],
+            true
+        );
     }
 
     /**
-     * Get the query executor for this connection.
+     * Record a query for pretend mode if enabled.
+     *
+     * @param  array<int|string, mixed>  $bindings
      */
-    private function getExecutor(): Executor
+    private function recordPretend(string $sql, array $bindings): void
     {
-        if ($this->executor === null) {
-            $this->executor = new Executor($this, $this->getGrammar());
+        if ($this->queryRecorder !== null) {
+            ($this->queryRecorder)($sql, $bindings);
         }
-
-        return $this->executor;
     }
 
     /**
-     * Get the Transaction manager for this connection.
+     * Record query statistics based on read/write classification.
      */
-    private function getTransactionManager(): Transaction
+    private function recordQuery(bool $isWrite): void
     {
-        if ($this->transaction === null) {
-            $this->transaction = new Transaction($this);
-        }
+        $this->stats['queries']++;
 
-        return $this->transaction;
-    }
-
-    /**
-     * Run post-connection commands for a given PDO.
-     */
-    private function runPostConnectCommands(PDO $pdo): void
-    {
-        $commands = match ($this->config->getDriver()) {
-            'mysql'  => $this->getMySqlPostConnectCommands(),
-            'pgsql'  => $this->getPostgreSqlPostConnectCommands(),
-            'sqlite' => $this->getSqlitePostConnectCommands(),
-            default  => [],
-        };
-
-        foreach ($commands as $command) {
-            $pdo->exec($command);
+        if ($isWrite) {
+            $this->stats['writes']++;
+        } else {
+            $this->stats['reads']++;
         }
     }
 
@@ -877,44 +846,5 @@ final class Connection
         $statement->execute();
 
         return $statement;
-    }
-
-    /**
-     * Get PDO parameter type.
-     */
-    private function getParameterType(mixed $value): int
-    {
-        return match (true) {
-            is_int($value)  => PDO::PARAM_INT,
-            is_bool($value) => PDO::PARAM_BOOL,
-            $value === null => PDO::PARAM_NULL,
-            default         => PDO::PARAM_STR,
-        };
-    }
-
-    /**
-     * Record query statistics based on read/write classification.
-     */
-    private function recordQuery(bool $isWrite): void
-    {
-        $this->stats['queries']++;
-
-        if ($isWrite) {
-            $this->stats['writes']++;
-        } else {
-            $this->stats['reads']++;
-        }
-    }
-
-    /**
-     * Record a query for pretend mode if enabled.
-     *
-     * @param  array<int|string, mixed>  $bindings
-     */
-    private function recordPretend(string $sql, array $bindings): void
-    {
-        if ($this->queryRecorder !== null) {
-            ($this->queryRecorder)($sql, $bindings);
-        }
     }
 }

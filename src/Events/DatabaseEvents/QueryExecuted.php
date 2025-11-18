@@ -13,15 +13,8 @@ use Infocyph\DBLayer\Connection\Connection;
  */
 final class QueryExecuted
 {
-    public readonly string $sql;
-
     /** @var array<int|string, mixed> */
     public readonly array $bindings;
-
-    /**
-     * Execution time in milliseconds.
-     */
-    public readonly float $time;
 
     public readonly Connection $connection;
 
@@ -29,16 +22,22 @@ final class QueryExecuted
      * Rows affected (for INSERT/UPDATE/DELETE); null for SELECT etc.
      */
     public readonly ?int $rowsAffected;
+    public readonly string $sql;
+
+    /**
+     * Execution time in milliseconds.
+     */
+    public readonly float $time;
 
     /**
      * @param array<int|string, mixed> $bindings
      */
     public function __construct(
-      string $sql,
-      array $bindings,
-      float $time,
-      Connection $connection,
-      ?int $rowsAffected = null
+        string $sql,
+        array $bindings,
+        float $time,
+        Connection $connection,
+        ?int $rowsAffected = null
     ) {
         $this->sql          = $sql;
         $this->bindings     = $bindings;

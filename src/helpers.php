@@ -9,14 +9,6 @@ declare(strict_types=1);
  *
  * @package Infocyph\DBLayer
  */
-
-use ArrayAccess;
-use Closure;
-use Countable;
-use DateTime;
-use DateTimeZone;
-use Exception;
-use Throwable;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
@@ -302,13 +294,7 @@ if (! function_exists('array_all')) {
      */
     function array_all(array $array, callable $callback): bool
     {
-        foreach ($array as $key => $value) {
-            if (! $callback($value, $key)) {
-                return false;
-            }
-        }
-
-        return true;
+        return array_all($array, fn ($value, $key) => $callback($value, $key));
     }
 }
 
@@ -497,8 +483,8 @@ if (! function_exists('now')) {
     function now(DateTimeZone|string|null $tz = null): DateTime
     {
         return new DateTime(
-          'now',
-          $tz instanceof DateTimeZone
+            'now',
+            $tz instanceof DateTimeZone
             ? $tz
             : new DateTimeZone($tz ?? date_default_timezone_get())
         );
