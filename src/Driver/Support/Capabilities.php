@@ -19,7 +19,8 @@ final readonly class Capabilities
         public bool $supportsUpsert = false,
         public bool $supportsSavepoints = true,
         public bool $supportsSchemas = false,
-    ) {}
+    ) {
+    }
 
     public function withInsertIgnore(bool $enabled = true): self
     {

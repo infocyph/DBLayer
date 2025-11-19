@@ -1,17 +1,13 @@
 <?php
 
-// src/Connection/Connection.php
-
 declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection;
 
 use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
-use Infocyph\DBLayer\Driver\MySQL\MySQLGrammar;
-use Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLGrammar;
-use Infocyph\DBLayer\Driver\SQLite\SQLiteGrammar;
 use Infocyph\DBLayer\Driver\Support\Capabilities;
+use Infocyph\DBLayer\Driver\Support\DriverProfile;
 use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Grammar\Grammar;
@@ -51,17 +47,18 @@ final class Connection
      * Maximum reconnection attempts for a single failing operation.
      */
     private const MAX_RECONNECT_ATTEMPTS = 3;
-    private readonly QueryCompilerInterface $compiler;
 
-    /**
-     * Driver and compiler for this connection.
-     */
-    private readonly DriverInterface $driver;
+    private QueryCompilerInterface $compiler;
 
     /**
      * Connection configuration.
      */
     private ConnectionConfig $config;
+
+    /**
+     * Driver and compiler for this connection.
+     */
+    private DriverInterface $driver;
 
     /**
      * Query executor for this connection (legacy path).
@@ -92,8 +89,6 @@ final class Connection
 
     /**
      * Whether to run SQL security checks (heuristics, length, bindings).
-     *
-     * Backed by ConnectionConfig::security['enabled'].
      */
     private bool $securityChecks;
 
@@ -708,17 +703,14 @@ final class Connection
             return $this->grammar;
         }
 
-        $driverName    = $this->config->getDriver();
-        $this->grammar = match ($driverName) {
-            'mysql'  => new MySQLGrammar(),
-            'pgsql'  => new PostgreSQLGrammar(),
-            'sqlite' => new SQLiteGrammar(),
-            default  => throw ConnectionException::unsupportedDriver($driverName),
-        };
+        $driverName = $this->config->getDriver();
+        $grammar    = DriverProfile::createGrammar($driverName);
 
         if ($this->tablePrefix !== '') {
-            $this->grammar->setTablePrefix($this->tablePrefix);
+            $grammar->setTablePrefix($this->tablePrefix);
         }
+
+        $this->grammar = $grammar;
 
         return $this->grammar;
     }
