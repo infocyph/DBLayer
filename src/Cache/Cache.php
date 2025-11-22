@@ -18,7 +18,7 @@ use Throwable;
  * - Cache statistics and monitoring
  * - Automatic cache key generation
  */
-class Cache
+final class Cache
 {
     /**
      * Default TTL in seconds.
@@ -306,6 +306,10 @@ class Cache
         $key = $this->makeKey($key);
         $ttl = $ttl ?? $this->defaultTtl;
 
+        if ($ttl < 0) {
+            $ttl = 0;
+        }
+
         try {
             $result = $this->strategy->put($key, $value, $ttl);
 
@@ -369,7 +373,7 @@ class Cache
      */
     public function setDefaultTtl(int $ttl): void
     {
-        $this->defaultTtl = $ttl;
+        $this->defaultTtl = max(0, $ttl);
     }
 
     /**

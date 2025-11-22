@@ -43,6 +43,8 @@ interface CacheStrategy
 
     /**
      * Store item in cache.
+     *
+     * @param int $ttl Time-to-live in seconds (0 = forever)
      */
     public function put(string $key, mixed $value, int $ttl): bool;
 }

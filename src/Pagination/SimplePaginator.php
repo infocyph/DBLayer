@@ -18,8 +18,12 @@ final class SimplePaginator extends AbstractPaginator
     /**
      * @param list<mixed> $items
      */
-    public function __construct(array $items, int $perPage, int $currentPage = 1, bool $hasMore = false)
-    {
+    public function __construct(
+      array $items,
+      int $perPage,
+      int $currentPage = 1,
+      bool $hasMore = false
+    ) {
         parent::__construct($items, $perPage, $currentPage);
 
         $this->hasMore = $hasMore;
@@ -36,7 +40,7 @@ final class SimplePaginator extends AbstractPaginator
     }
 
     /**
-     * @return array<string,mixed>
+     * @return array<string, mixed>
      */
     public function meta(): array
     {
@@ -53,7 +57,7 @@ final class SimplePaginator extends AbstractPaginator
     }
 
     /**
-     * @return array<string,mixed>
+     * @return array<string, mixed>
      */
     public function toArray(): array
     {

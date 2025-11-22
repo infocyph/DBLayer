@@ -34,7 +34,13 @@ final class Str
      */
     public static function contains(string $haystack, string|array $needles): bool
     {
-        return array_any((array) $needles, fn ($needle) => $needle !== '' && str_contains($haystack, $needle));
+        foreach ((array) $needles as $needle) {
+            if ($needle !== '' && str_contains($haystack, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -44,7 +50,13 @@ final class Str
      */
     public static function endsWith(string $haystack, string|array $needles): bool
     {
-        return array_any((array) $needles, fn ($needle) => $needle !== '' && str_ends_with($haystack, $needle));
+        foreach ((array) $needles as $needle) {
+            if ($needle !== '' && str_ends_with($haystack, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -82,12 +94,12 @@ final class Str
         }
 
         if (
-            str_ends_with($value, 'y')
-            && ! str_ends_with($value, 'ay')
-            && ! str_ends_with($value, 'ey')
-            && ! str_ends_with($value, 'iy')
-            && ! str_ends_with($value, 'oy')
-            && ! str_ends_with($value, 'uy')
+          str_ends_with($value, 'y')
+          && ! str_ends_with($value, 'ay')
+          && ! str_ends_with($value, 'ey')
+          && ! str_ends_with($value, 'iy')
+          && ! str_ends_with($value, 'oy')
+          && ! str_ends_with($value, 'uy')
         ) {
             return substr($value, 0, -1) . 'ies';
         }
@@ -152,9 +164,9 @@ final class Str
 
         // Remove unwanted characters (just in case).
         $title = preg_replace(
-            '/[^' . preg_quote($separator, '/') . '\w]+/u',
-            '',
-            $title
+          '/[^' . preg_quote($separator, '/') . '\w]+/u',
+          '',
+          $title
         ) ?? '';
 
         return $title;
@@ -188,7 +200,13 @@ final class Str
      */
     public static function startsWith(string $haystack, string|array $needles): bool
     {
-        return array_any((array) $needles, fn ($needle) => $needle !== '' && str_starts_with($haystack, $needle));
+        foreach ((array) $needles as $needle) {
+            if ($needle !== '' && str_starts_with($haystack, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

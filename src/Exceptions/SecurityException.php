@@ -14,16 +14,20 @@ final class SecurityException extends DBException
         return new self('Invalid security configuration: ' . $message);
     }
 
-    public static function rateLimitExceeded(string $key, int $maxAttempts, int $ttlSeconds): self
-    {
+    public static function rateLimitExceeded(
+      string $key,
+      int $maxAttempts,
+      int $ttlSeconds
+    ): self {
         return new self(
-            "Rate limit exceeded for key [{$key}]: max {$maxAttempts} attempts within {$ttlSeconds} seconds."
+          "Rate limit exceeded for key [{$key}]: max {$maxAttempts} attempts within {$ttlSeconds} seconds."
         );
     }
+
     public static function sqlInjectionDetected(string $pattern, string $fragment): self
     {
         return new self(
-            'Potential SQL injection detected using pattern [' .
+          'Potential SQL injection detected using pattern [' .
           $pattern .
           '] in fragment [' .
           $fragment .

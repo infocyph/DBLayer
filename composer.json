@@ -1,6 +1,6 @@
 {
   "name": "infocyph/dblayer",
-  "description": "High-performance, secure database layer for PHP with ORM, async support, and multi-driver capabilities",
+  "description": "High-performance, secure database layer for PHP and multi-driver capabilities",
   "type": "library",
   "keywords": [
     "database",
@@ -10,9 +10,7 @@
     "sql",
     "mysql",
     "postgresql",
-    "sqlite",
-    "async",
-    "swoole"
+    "sqlite"
   ],
   "license": "MIT",
   "authors": [

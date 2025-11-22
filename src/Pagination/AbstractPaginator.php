@@ -18,6 +18,7 @@ abstract class AbstractPaginator implements PaginatorInterface
      * Current page (1-based).
      */
     protected int $currentPage;
+
     /**
      * Current page items.
      *
@@ -48,12 +49,12 @@ abstract class AbstractPaginator implements PaginatorInterface
     abstract public function lastPage(): ?int;
 
     /**
-     * @return array<string,mixed>
+     * @return array<string, mixed>
      */
     abstract public function meta(): array;
 
     /**
-     * @return array<string,mixed>
+     * @return array<string, mixed>
      */
     abstract public function toArray(): array;
 
@@ -79,7 +80,7 @@ abstract class AbstractPaginator implements PaginatorInterface
     }
 
     /**
-     * @return Traversable<int,mixed>
+     * @return Traversable<int, mixed>
      */
     public function getIterator(): Traversable
     {

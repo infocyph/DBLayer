@@ -33,6 +33,7 @@ final class CacheException extends DBException
     {
         return new self('Cache serialization error: ' . $message);
     }
+
     public static function writeFailed(string $key, string $reason): self
     {
         return new self("Failed to write cache entry [{$key}]: {$reason}");

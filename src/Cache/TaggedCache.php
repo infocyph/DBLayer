@@ -10,7 +10,7 @@ namespace Infocyph\DBLayer\Cache;
  * Manages cache items with tags for group operations.
  * Allows invalidating multiple cache items by tag.
  */
-class TaggedCache
+final class TaggedCache
 {
     /**
      * Tag namespace separator.

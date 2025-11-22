@@ -43,7 +43,7 @@ final class LengthAwarePaginator extends AbstractPaginator
     }
 
     /**
-     * @return array<string,mixed>
+     * @return array<string, mixed>
      */
     public function meta(): array
     {
@@ -60,7 +60,7 @@ final class LengthAwarePaginator extends AbstractPaginator
     }
 
     /**
-     * @return array<string,mixed>
+     * @return array<string, mixed>
      */
     public function toArray(): array
     {

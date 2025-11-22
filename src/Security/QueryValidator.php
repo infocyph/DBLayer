@@ -18,29 +18,25 @@ final class QueryValidator
     /**
      * SQL injection patterns (focused on classic payloads):
      *  - UNION SELECT
-     *  - OR/AND tautologies
-     *  - comment abuse
-     *  - "col = col --" patterns
+     *  - OR/AND tautologies (1=1, 'x'='x')
+     *  - comment truncation with trailing comment operators
      *
      * NOTE: This is intentionally conservative; patterns may be tuned
      * via Security facade mode (NORMAL/STRICT/OFF).
      */
     private const INJECTION_PATTERNS = [
-        // UNION-based injections
-      '/\bunion\b\s+.*\bselect\b/i',
+        // UNION-based injections (covers UNION SELECT / UNION ALL SELECT).
+      '/\bunion\b\s+all?\s+\bselect\b/i',
 
-        // "SELECT ... WHERE ... OR ..." style injections
-      '/\bselect\b.*\bfrom\b.*\bwhere\b.*\bor\b.*=.*\b/i',
+        // Tautologies / OR/AND 1=1 style.
+      '/\b(or|and)\s+1\s*=\s*1\b/i',
 
-        // Tautologies / OR 1=1 style
-      '/(\s|^)(or|and)\s+[\w\'"]+\s*=\s*[\w\'"]+/i',
-      '/[\'"]\s*(or|and)\s+[\'"]/i',
-      '/[\w]+\s*=\s*[\w]+\s*--/i',
+        // String tautologies: 'x'='x' pattern.
+      '/\b(or|and)\s+\'[^\']*\'\s*=\s*\'[^\']*\'/i',
 
-        // Comment-based truncation
-      '/\/\*.*\*\//s',
-      '/--\s*$/m',
-      '/#.*$/m',
+        // Comment-based truncation after a statement terminator.
+      '/;\s*--/m',
+      '/;\s*#/m',
     ];
 
     /**

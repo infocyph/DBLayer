@@ -10,7 +10,7 @@ namespace Infocyph\DBLayer\Cache\Strategies;
  * File-based cache storage for persistent caching.
  * Survives between requests but slower than memory.
  */
-class FileStrategy implements CacheStrategy
+final class FileStrategy implements CacheStrategy
 {
     /**
      * File extension.
@@ -185,6 +185,10 @@ class FileStrategy implements CacheStrategy
      */
     public function put(string $key, mixed $value, int $ttl): bool
     {
+        if ($ttl < 0) {
+            $ttl = 0;
+        }
+
         $path    = $this->getPath($key);
         $expires = $ttl > 0 ? time() + $ttl : 0;
 

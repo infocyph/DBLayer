@@ -33,7 +33,7 @@ interface PaginatorInterface extends Countable, IteratorAggregate, JsonSerializa
     /**
      * Iterate over items (IteratorAggregate).
      *
-     * @return Traversable<int,mixed>
+     * @return Traversable<int, mixed>
      */
     public function getIterator(): Traversable;
 
@@ -41,6 +41,7 @@ interface PaginatorInterface extends Countable, IteratorAggregate, JsonSerializa
      * Whether there are more items after this page.
      */
     public function hasMorePages(): bool;
+
     /**
      * Get the current page's items.
      *
@@ -64,7 +65,7 @@ interface PaginatorInterface extends Countable, IteratorAggregate, JsonSerializa
     /**
      * Pagination metadata only (no items).
      *
-     * @return array<string,mixed>
+     * @return array<string, mixed>
      */
     public function meta(): array;
 
@@ -82,7 +83,7 @@ interface PaginatorInterface extends Countable, IteratorAggregate, JsonSerializa
      *      'meta' => [...pagination meta...],
      *  ]
      *
-     * @return array<string,mixed>
+     * @return array<string, mixed>
      */
     public function toArray(): array;
 

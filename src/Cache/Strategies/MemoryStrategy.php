@@ -10,7 +10,7 @@ namespace Infocyph\DBLayer\Cache\Strategies;
  * In-memory cache storage for single request lifecycle.
  * Fast but volatile - cleared between requests.
  */
-class MemoryStrategy implements CacheStrategy
+final class MemoryStrategy implements CacheStrategy
 {
     /**
      * Cache storage.
@@ -135,6 +135,10 @@ class MemoryStrategy implements CacheStrategy
      */
     public function put(string $key, mixed $value, int $ttl): bool
     {
+        if ($ttl < 0) {
+            $ttl = 0;
+        }
+
         $this->cache[$key] = $value;
 
         if ($ttl > 0) {

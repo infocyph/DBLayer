@@ -34,11 +34,11 @@ final class CursorPaginator extends AbstractPaginator
      * @param list<mixed> $items
      */
     public function __construct(
-        array $items,
-        int $perPage,
-        ?string $cursor,
-        ?string $nextCursor,
-        bool $hasMore
+      array $items,
+      int $perPage,
+      ?string $cursor,
+      ?string $nextCursor,
+      bool $hasMore
     ) {
         // Page number is mostly meaningless for cursor-based pagination,
         // but we keep it as 1 for interface compatibility.
@@ -65,7 +65,7 @@ final class CursorPaginator extends AbstractPaginator
     }
 
     /**
-     * @return array<string,mixed>
+     * @return array<string, mixed>
      */
     public function meta(): array
     {
@@ -84,7 +84,7 @@ final class CursorPaginator extends AbstractPaginator
     }
 
     /**
-     * @return array<string,mixed>
+     * @return array<string, mixed>
      */
     public function toArray(): array
     {

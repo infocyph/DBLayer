@@ -37,6 +37,7 @@ final class Security
       '/exec\s*\(/i',
       '/execute\s+immediate/i',
     ];
+
     private const DEFAULT_MAX_IN_ITEMS       = 1000;
     private const DEFAULT_MAX_QUERY_LENGTH   = 10000;
 
@@ -45,7 +46,7 @@ final class Security
      */
     private const DEFAULT_QUERIES_PER_MINUTE = 1000;
     private const DEFAULT_QUERIES_PER_SECOND = 100;
-    private const STRICT_MAX_IN_ITEMS     = 800;
+    private const STRICT_MAX_IN_ITEMS        = 800;
 
     /**
      * STRICT mode can be a bit tighter.
@@ -103,7 +104,7 @@ final class Security
 
         if ($elapsed > $maxTime) {
             throw SecurityException::unsafeOperation(
-                "Transaction exceeded max time of {$maxTime}s (elapsed: " . round($elapsed, 3) . 's).'
+              "Transaction exceeded max time of {$maxTime}s (elapsed: " . round($elapsed, 3) . 's).'
             );
         }
     }
@@ -133,9 +134,9 @@ final class Security
             $validator->detectSqlInjection($sql);
         } catch (SecurityException $e) {
             self::logSecurityEvent(
-                'injection_attempt',
-                'Possible SQL injection detected',
-                [
+              'injection_attempt',
+              'Possible SQL injection detected',
+              [
                 'sql'   => mb_substr($sql, 0, 512, 'UTF-8'),
                 'error' => $e->getMessage(),
               ]
@@ -214,7 +215,14 @@ final class Security
           'alter table',
           'create table',
         ];
-        return array_any($dangerous, fn ($operation) => str_starts_with($sql, $operation));
+
+        foreach ($dangerous as $operation) {
+            if (str_starts_with($sql, $operation)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -234,7 +242,12 @@ final class Security
           'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
         ];
 
-        error_log(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($json === false) {
+            $json = '{"type":"security","event":"encoding_error"}';
+        }
+
+        error_log($json);
     }
 
     /**
@@ -250,7 +263,7 @@ final class Security
 
         if (self::isDangerousOperation($sql) && ! $confirmed) {
             throw SecurityException::unsafeOperation(
-                'Dangerous SQL operation requires explicit confirmation.'
+              'Dangerous SQL operation requires explicit confirmation.'
             );
         }
     }
@@ -352,9 +365,9 @@ final class Security
             foreach (self::DANGEROUS_PATTERNS as $pattern) {
                 if (preg_match($pattern, $sql) === 1) {
                     self::logSecurityEvent(
-                        'dangerous_query',
-                        'Query contains dangerous pattern',
-                        [
+                      'dangerous_query',
+                      'Query contains dangerous pattern',
+                      [
                         'sql'     => mb_substr($sql, 0, 512, 'UTF-8'),
                         'pattern' => $pattern,
                       ]
@@ -384,7 +397,7 @@ final class Security
 
         if (in_array(strtoupper($table), $keywords, true)) {
             throw SecurityException::invalidConfiguration(
-                "Invalid table name [{$table}]."
+              "Invalid table name [{$table}]."
             );
         }
     }

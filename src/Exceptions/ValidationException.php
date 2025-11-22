@@ -20,10 +20,10 @@ final class ValidationException extends DBException
      * @param array<string, array<int, string>|string> $errors
      */
     public function __construct(
-        string $message = 'Validation failed.',
-        array $errors = [],
-        int $code = 0,
-        ?Throwable $previous = null
+      string $message = 'Validation failed.',
+      array $errors = [],
+      int $code = 0,
+      ?Throwable $previous = null
     ) {
         parent::__construct($message, $code, $previous);
 
@@ -51,5 +51,29 @@ final class ValidationException extends DBException
     public function hasErrors(): bool
     {
         return $this->errors !== [];
+    }
+
+    /**
+     * Get the first error message if available.
+     */
+    public function firstError(): ?string
+    {
+        if ($this->errors === []) {
+            return null;
+        }
+
+        foreach ($this->errors as $error) {
+            if (is_array($error)) {
+                if ($error === []) {
+                    continue;
+                }
+
+                return (string) reset($error);
+            }
+
+            return (string) $error;
+        }
+
+        return null;
     }
 }
