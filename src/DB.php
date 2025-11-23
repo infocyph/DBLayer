@@ -6,6 +6,7 @@ namespace Infocyph\DBLayer;
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Driver\Support\Capabilities;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
@@ -723,4 +724,24 @@ class DB
             }
         });
     }
+
+    /**
+     * Get driver capabilities for the given connection.
+     */
+    public static function capabilities(?string $connection = null): Capabilities
+    {
+        return static::connection($connection)->getCapabilities();
+    }
+
+    public static function supportsReturning(?string $connection = null): bool
+    {
+        return static::connection($connection)->supportsReturning();
+    }
+
+    public static function supportsJson(?string $connection = null): bool
+    {
+        return static::connection($connection)->supportsJson();
+    }
+
+
 }

@@ -917,4 +917,50 @@ final class Connection
 
         return $statement;
     }
+
+    /**
+     * Alias for getCapabilities() to improve readability in higher-level code.
+     */
+    public function capabilities(): Capabilities
+    {
+        return $this->getCapabilities();
+    }
+
+    /**
+     * Capability helpers – useful for QueryBuilder / grammar decisions.
+     */
+    public function supportsReturning(): bool
+    {
+        return $this->driver->getCapabilities()->supportsReturning;
+    }
+
+    public function supportsInsertIgnore(): bool
+    {
+        return $this->driver->getCapabilities()->supportsInsertIgnore;
+    }
+
+    public function supportsUpsert(): bool
+    {
+        return $this->driver->getCapabilities()->supportsUpsert;
+    }
+
+    public function supportsSavepoints(): bool
+    {
+        return $this->driver->getCapabilities()->supportsSavepoints;
+    }
+
+    public function supportsSchemas(): bool
+    {
+        return $this->driver->getCapabilities()->supportsSchemas;
+    }
+
+    public function supportsJson(): bool
+    {
+        return $this->driver->getCapabilities()->supportsJson;
+    }
+
+    public function supportsWindowFunctions(): bool
+    {
+        return $this->driver->getCapabilities()->supportsWindowFunctions;
+    }
 }
