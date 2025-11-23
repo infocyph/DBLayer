@@ -32,8 +32,8 @@ final class DriverProfile
      */
     private const DEADLOCK_ERROR_CODES = [
         // MySQL / MariaDB: ER_LOCK_DEADLOCK
-        'mysql' => ['1213'],
-        'mariadb' => ['1213'],
+      'mysql'   => ['1213'],
+      'mariadb' => ['1213'],
         // PostgreSQL typically uses only SQLSTATE for deadlock ⇒ no extra here
     ];
 
@@ -43,29 +43,29 @@ final class DriverProfile
      * @var array<string,list<string>>
      */
     private const DEADLOCK_MESSAGE_HINTS = [
-        'mysql' => [
-            'deadlock found when trying to get lock',
-            'lock wait timeout exceeded; try restarting transaction',
-            'deadlock',
-        ],
-        'mariadb' => [
-            'deadlock',
-        ],
-        'pgsql' => [
-            'deadlock detected',
-            'deadlock',
-        ],
-        'postgres' => [
-            'deadlock detected',
-            'deadlock',
-        ],
-        'sqlite' => [
-            'database is locked',
-            'deadlock',
-        ],
-        'default' => [
-            'deadlock',
-        ],
+      'mysql' => [
+        'deadlock found when trying to get lock',
+        'lock wait timeout exceeded; try restarting transaction',
+        'deadlock',
+      ],
+      'mariadb' => [
+        'deadlock',
+      ],
+      'pgsql' => [
+        'deadlock detected',
+        'deadlock',
+      ],
+      'postgres' => [
+        'deadlock detected',
+        'deadlock',
+      ],
+      'sqlite' => [
+        'database is locked',
+        'deadlock',
+      ],
+      'default' => [
+        'deadlock',
+      ],
     ];
 
     /**
@@ -75,12 +75,12 @@ final class DriverProfile
      */
     private const DEADLOCK_SQLSTATES = [
         // MySQL / MariaDB
-        'mysql' => ['40001'],
-        'mariadb' => ['40001'],
+      'mysql'   => ['40001'],
+      'mariadb' => ['40001'],
 
         // PostgreSQL
-        'pgsql' => ['40P01', '40001'],
-        'postgres' => ['40P01', '40001'],
+      'pgsql'    => ['40P01', '40001'],
+      'postgres' => ['40P01', '40001'],
     ];
 
     /**
@@ -89,11 +89,11 @@ final class DriverProfile
      * @var array<string,int|null>
      */
     private const DEFAULT_PORTS = [
-        'mysql' => 3306,
-        'mariadb' => 3306,
-        'pgsql' => 5432,
-        'postgres' => 5432,
-        'sqlite' => null,
+      'mysql'   => 3306,
+      'mariadb' => 3306,
+      'pgsql'   => 5432,
+      'postgres'=> 5432,
+      'sqlite'  => null,
     ];
 
     private function __construct()
@@ -145,6 +145,7 @@ final class DriverProfile
 
             case 'pgsql':
             case 'postgres':
+            case 'postgresql':
                 if (! isset($config['charset']) || ! is_string($config['charset']) || $config['charset'] === '') {
                     $config['charset'] = 'utf8';
                 }
@@ -169,7 +170,7 @@ final class DriverProfile
      */
     public static function causedByDeadlock(string $driver, Throwable $e): bool
     {
-        $driver = strtolower($driver);
+        $driver  = strtolower($driver);
         $message = $e->getMessage();
 
         $hints = self::DEADLOCK_MESSAGE_HINTS[$driver]
@@ -189,13 +190,13 @@ final class DriverProfile
             return false;
         }
 
-        $errorInfo = $e->errorInfo;
-        $sqlState = is_array($errorInfo) && isset($errorInfo[0]) ? (string) $errorInfo[0] : null;
+        $errorInfo  = $e->errorInfo;
+        $sqlState   = is_array($errorInfo) && isset($errorInfo[0]) ? (string) $errorInfo[0] : null;
         $vendorCode = is_array($errorInfo) && isset($errorInfo[1]) ? (string) $errorInfo[1] : null;
-        $code = (string) $e->getCode();
+        $code       = (string) $e->getCode();
 
         $states = self::DEADLOCK_SQLSTATES[$driver] ?? [];
-        $codes = self::DEADLOCK_ERROR_CODES[$driver] ?? [];
+        $codes  = self::DEADLOCK_ERROR_CODES[$driver] ?? [];
 
         if ($sqlState !== null && $sqlState !== '' && in_array($sqlState, $states, true)) {
             return true;
@@ -220,10 +221,10 @@ final class DriverProfile
         $driver = strtolower($driver);
 
         return match ($driver) {
-            'mysql', 'mariadb' => new MySQLGrammar(),
-            'pgsql', 'postgres' => new PostgreSQLGrammar(),
-            'sqlite', 'sqlite3' => new SQLiteGrammar(),
-            default => throw ConnectionException::unsupportedDriver($driver),
+            'mysql', 'mariadb'              => new MySQLGrammar(),
+            'pgsql', 'postgres', 'postgresql' => new PostgreSQLGrammar(),
+            'sqlite', 'sqlite3'             => new SQLiteGrammar(),
+            default                         => throw ConnectionException::unsupportedDriver($driver),
         };
     }
 }

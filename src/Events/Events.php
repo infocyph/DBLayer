@@ -72,11 +72,7 @@ final class Events
      */
     public static function dispatch(string $event, array $payload = []): void
     {
-        if (! self::$enabled) {
-            return;
-        }
-
-        if (self::$listeners === []) {
+        if (! self::$enabled || self::$listeners === []) {
             return;
         }
 
@@ -148,7 +144,7 @@ final class Events
             }
         }
 
-        self::$listeners[$event] = array_values(self::$listeners[$event]);
+        self::$listeners[$event] = \array_values(self::$listeners[$event]);
     }
 
     /**
@@ -166,7 +162,7 @@ final class Events
      */
     public static function getEvents(): array
     {
-        return array_keys(self::$listeners);
+        return \array_keys(self::$listeners);
     }
 
     /**
@@ -176,6 +172,7 @@ final class Events
      */
     public static function getListeners(string $event): array
     {
+        /** @var list<callable> */
         return self::$listeners[$event] ?? [];
     }
 
@@ -192,13 +189,13 @@ final class Events
      */
     public static function getStats(): array
     {
-        $totalListeners = array_sum(array_map('count', self::$listeners));
+        $totalListeners = \array_sum(\array_map('count', self::$listeners));
 
         return [
           'dispatched'        => self::$stats['dispatched'],
           'queued'            => self::$stats['queued'],
-          'registered_events' => count(self::$listeners),
-          'queued_events'     => count(self::$queue),
+          'registered_events' => \count(self::$listeners),
+          'queued_events'     => \count(self::$queue),
           'total_listeners'   => $totalListeners,
         ];
     }
@@ -261,7 +258,7 @@ final class Events
     public static function subscribe(EventSubscriber $subscriber): void
     {
         foreach ($subscriber->subscribe() as $event => $listener) {
-            if (is_string($listener)) {
+            if (\is_string($listener)) {
                 $listener = [$subscriber, $listener];
             }
 
@@ -284,13 +281,13 @@ final class Events
         }
 
         // No wildcards
-        if (! str_contains($pattern, '*')) {
+        if (! \str_contains($pattern, '*')) {
             return false;
         }
 
         // Convert pattern to regex
-        $regex = '/^' . str_replace('\*', '.*', preg_quote($pattern, '/')) . '$/';
+        $regex = '/^' . \str_replace('\*', '.*', \preg_quote($pattern, '/')) . '$/';
 
-        return preg_match($regex, $event) === 1;
+        return \preg_match($regex, $event) === 1;
     }
 }

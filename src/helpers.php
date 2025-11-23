@@ -7,6 +7,13 @@ declare(strict_types=1);
  *
  * Global helper functions for database operations.
  */
+
+use DateTime;
+use DateTimeZone;
+use Exception;
+use Throwable;
+use ArrayAccess;
+use Countable;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
@@ -146,6 +153,18 @@ if (! function_exists('db_raw')) {
     }
 }
 
+if (! function_exists('db_health')) {
+    /**
+     * Get a health report for the given connection.
+     *
+     * @return array<string,mixed>
+     */
+    function db_health(?string $connection = null): array
+    {
+        return DB::connection($connection)->getHealthCheck()->getReport();
+    }
+}
+
 if (! function_exists('collect')) {
     /**
      * Create a collection from the given value.
@@ -239,7 +258,7 @@ if (! function_exists('data_set')) {
     function data_set(mixed &$target, string|array $key, mixed $value, bool $overwrite = true): mixed
     {
         $segments = is_array($key) ? $key : explode('.', $key);
-        $segment = array_shift($segments);
+        $segment  = array_shift($segments);
 
         if ($segment === null) {
             return $target;
@@ -291,7 +310,13 @@ if (! function_exists('array_all')) {
      */
     function array_all(array $array, callable $callback): bool
     {
-        return array_all($array, fn ($value, $key) => $callback($value, $key));
+        foreach ($array as $key => $value) {
+            if (! $callback($value, $key)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 
@@ -480,8 +505,8 @@ if (! function_exists('now')) {
     function now(DateTimeZone|string|null $tz = null): DateTime
     {
         return new DateTime(
-            'now',
-            $tz instanceof DateTimeZone
+          'now',
+          $tz instanceof DateTimeZone
             ? $tz
             : new DateTimeZone($tz ?? date_default_timezone_get())
         );

@@ -23,7 +23,7 @@ class ResultProcessor
      */
     public function filter(array $results, callable $callback): array
     {
-        return array_values(array_filter($results, $callback));
+        return \array_values(\array_filter($results, $callback));
     }
 
     /**
@@ -49,7 +49,7 @@ class ResultProcessor
 
         $result = $results[0];
 
-        return $result['aggregate'] ?? ($result[array_key_first($result)] ?? null);
+        return $result['aggregate'] ?? ($result[\array_key_first($result)] ?? null);
     }
 
     /**
@@ -60,7 +60,7 @@ class ResultProcessor
      */
     public function processColumn(array $results, string $column): array
     {
-        return array_column($results, $column);
+        return \array_column($results, $column);
     }
 
     /**
@@ -97,7 +97,7 @@ class ResultProcessor
         $processed = [];
 
         foreach ($results as $row) {
-            if (! array_key_exists($key, $row) || ! array_key_exists($value, $row)) {
+            if (! \array_key_exists($key, $row) || ! \array_key_exists($value, $row)) {
                 continue;
             }
 
@@ -121,14 +121,14 @@ class ResultProcessor
     /**
      * Transform results using callback.
      *
-     * @param list<array<string,mixed>>                        $results
+     * @param list<array<string,mixed>>                         $results
      * @param callable(array<string,mixed>):array<string,mixed> $callback
      * @return list<array<string,mixed>>
      */
     public function transform(array $results, callable $callback): array
     {
         /** @var list<array<string,mixed>> $mapped */
-        $mapped = array_map($callback, $results);
+        $mapped = \array_map($callback, $results);
 
         return $mapped;
     }

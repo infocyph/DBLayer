@@ -1,7 +1,5 @@
 <?php
 
-// src/Driver/Contracts/QueryCompilerInterface.php
-
 declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Driver\Contracts;

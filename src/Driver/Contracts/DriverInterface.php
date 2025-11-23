@@ -1,7 +1,5 @@
 <?php
 
-// src/Driver/Contracts/DriverInterface.php
-
 declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Driver\Contracts;
@@ -31,6 +29,7 @@ interface DriverInterface
      * Describe driver capabilities / dialect features.
      */
     public function getCapabilities(): Capabilities;
+
     /**
      * Canonical engine name, e.g. "mysql", "pgsql", "sqlite".
      */
@@ -46,6 +45,9 @@ interface DriverInterface
 
     /**
      * Validate driver-specific configuration.
+     *
+     * Implementations SHOULD throw a descriptive exception if a required
+     * setting is missing or malformed (e.g. missing "database" for MySQL).
      *
      * @param  array<string,mixed>  $config
      */

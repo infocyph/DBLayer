@@ -25,19 +25,19 @@ final class ConnectionConfig
      * @var array<string,mixed>
      */
     private const DEFAULTS = [
-      'driver'   => 'mysql',
-      'host'     => '127.0.0.1',
-      'port'     => null,
-      'database' => '',
-      'username' => '',
-      'password' => '',
-      'charset'  => null,
+      'driver'    => 'mysql',
+      'host'      => '127.0.0.1',
+      'port'      => null,
+      'database'  => '',
+      'username'  => '',
+      'password'  => '',
+      'charset'   => null,
       'collation' => null,
-      'schema'   => null,
-      'prefix'   => '',
-      'options'  => [],
-      'read'     => [],
-      'security' => [],
+      'schema'    => null,
+      'prefix'    => '',
+      'options'   => [],
+      'read'      => [],
+      'security'  => [],
     ];
 
     /**
@@ -46,15 +46,15 @@ final class ConnectionConfig
      * @var array<string,string>
      */
     private const DRIVER_ALIASES = [
-      'pdo_mysql'   => 'mysql',
-      'mysqli'      => 'mysql',
-      'mariadb'     => 'mysql',
+      'pdo_mysql'  => 'mysql',
+      'mysqli'     => 'mysql',
+      'mariadb'    => 'mysql',
 
-      'pgsql'       => 'pgsql',
-      'postgres'    => 'pgsql',
-      'postgresql'  => 'pgsql',
+      'pgsql'      => 'pgsql',
+      'postgres'   => 'pgsql',
+      'postgresql' => 'pgsql',
 
-      'sqlite3'     => 'sqlite',
+      'sqlite3'    => 'sqlite',
     ];
 
     /**
@@ -170,7 +170,9 @@ final class ConnectionConfig
      */
     public function hasReadConfig(): bool
     {
-        return isset($this->config['read']) && is_array($this->config['read']) && $this->config['read'] !== [];
+        return isset($this->config['read'])
+          && is_array($this->config['read'])
+          && $this->config['read'] !== [];
     }
 
     /**
@@ -181,6 +183,18 @@ final class ConnectionConfig
         $security = $this->config['security'] ?? [];
 
         return is_array($security) && ! empty($security['enabled']);
+    }
+
+    /**
+     * Get the full security configuration array.
+     *
+     * @return array<string,mixed>
+     */
+    public function securityConfig(): array
+    {
+        $security = $this->config['security'] ?? [];
+
+        return is_array($security) ? $security : self::SECURITY_DEFAULT;
     }
 
     /**
@@ -198,8 +212,8 @@ final class ConnectionConfig
      */
     public function with(string $key, mixed $value): self
     {
-        $config         = $this->config;
-        $config[$key]   = $value;
+        $config       = $this->config;
+        $config[$key] = $value;
 
         return new self($config);
     }
@@ -229,9 +243,13 @@ final class ConnectionConfig
 
         // Built-in relational engines: require database name.
         if (in_array($driver, ['mysql', 'pgsql', 'sqlite'], true)) {
-            if (! isset($config['database']) || ! is_string($config['database']) || $config['database'] === '') {
+            if (
+              ! isset($config['database'])
+              || ! is_string($config['database'])
+              || $config['database'] === ''
+            ) {
                 throw ConnectionException::invalidConfig(
-                    sprintf("Config key 'database' is required for driver '%s'.", $driver)
+                  sprintf("Config key 'database' is required for driver '%s'.", $driver)
                 );
             }
         }
@@ -239,9 +257,13 @@ final class ConnectionConfig
         // Host/username for typical client/server engines (skip sqlite).
         if (in_array($driver, ['mysql', 'pgsql'], true)) {
             foreach (['host', 'username'] as $key) {
-                if (! isset($config[$key]) || ! is_string($config[$key]) || $config[$key] === '') {
+                if (
+                  ! isset($config[$key])
+                  || ! is_string($config[$key])
+                  || $config[$key] === ''
+                ) {
                     throw ConnectionException::invalidConfig(
-                        sprintf("Config key '%s' is required for driver '%s'.", $key, $driver)
+                      sprintf("Config key '%s' is required for driver '%s'.", $key, $driver)
                     );
                 }
             }

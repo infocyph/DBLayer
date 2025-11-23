@@ -14,6 +14,7 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
  * - Maximum pool size limits
  * - Connection health checking
  * - Idle connection timeout
+ * - Max lifetime per connection
  * - Pool statistics
  */
 final class Pool
@@ -33,28 +34,28 @@ final class Pool
       'min_connections'       => 1,
       'max_connections'       => 10,
       'idle_timeout'          => 60,
-      'max_lifetime'          => 3600,
+      'max_lifetime'          => 3_600,
       'health_check_interval' => 30,
     ];
 
     /**
      * Connection configurations.
      *
-     * @var array<string, ConnectionConfig>
+     * @var array<string,ConnectionConfig>
      */
     private array $configs = [];
 
     /**
-     * Pool of active connections.
+     * Pool of known connections (active + idle).
      *
-     * @var array<string, array<int, array{connection:Connection,created_at:float}>>
+     * @var array<string,array<int,array{connection:Connection,created_at:float}>>
      */
     private array $connections = [];
 
     /**
-     * Pool of idle connections.
+     * Pool of idle connections (subset of $connections).
      *
-     * @var array<string, array<int, array{connection:Connection,idle_since:float}>>
+     * @var array<string,array<int,array{connection:Connection,idle_since:float}>>
      */
     private array $idle = [];
 
@@ -98,7 +99,7 @@ final class Pool
     /**
      * Create a new connection pool.
      *
-     * @param array<string, int> $poolConfig
+     * @param  array<string,int>  $poolConfig
      */
     public function __construct(array $poolConfig = [])
     {
@@ -145,7 +146,7 @@ final class Pool
     /**
      * Get pool configuration.
      *
-     * @return array<string, int>
+     * @return array<string,int>
      */
     public function getConfig(): array
     {
@@ -181,21 +182,22 @@ final class Pool
     /**
      * Get pool statistics.
      *
-     * @return array<string, float|int>
+     * @return array<string,float|int>
      */
     public function getStats(): array
     {
-        $activeCount = 0;
-        $idleCount   = 0;
+        $totalConnections = 0;
+        $idleCount        = 0;
 
         foreach ($this->connections as $connections) {
-            $activeCount += count($connections);
+            $totalConnections += count($connections);
         }
 
         foreach ($this->idle as $connections) {
             $idleCount += count($connections);
         }
 
+        $activeCount = max(0, $totalConnections - $idleCount);
         $max         = $this->poolConfig['max_connections'];
         $utilization = $max > 0 ? ($activeCount / $max) * 100.0 : 0.0;
 
@@ -207,7 +209,7 @@ final class Pool
           'health_failures'    => $this->stats['health_failures'],
           'active_connections' => $activeCount,
           'idle_connections'   => $idleCount,
-          'total_connections'  => $activeCount + $idleCount,
+          'total_connections'  => $totalConnections,
           'max_connections'    => $max,
           'pool_utilization'   => $utilization,
         ];
@@ -215,6 +217,8 @@ final class Pool
 
     /**
      * Perform health check on all connections.
+     *
+     * Uses Connection::isHealthy(), which delegates to HealthCheck when attached.
      */
     public function healthCheck(): void
     {
@@ -232,7 +236,7 @@ final class Pool
         $this->lastHealthCheck = $now;
         $this->stats['health_checks']++;
 
-        // Check all active connections.
+        // Check all known connections.
         foreach ($this->connections as $name => $connections) {
             foreach ($connections as $data) {
                 if (! $data['connection']->isHealthy()) {
@@ -290,7 +294,7 @@ final class Pool
     {
         $connectionId = spl_object_id($connection);
 
-        // Remove from active connections.
+        // Remove from known connections.
         if (isset($this->connections[$name][$connectionId])) {
             unset($this->connections[$name][$connectionId]);
         }
@@ -330,20 +334,27 @@ final class Pool
             $totalConnections += count($connections);
         }
 
-        foreach ($this->idle as $connections) {
-            $totalConnections += count($connections);
-        }
-
         return $totalConnections < $this->poolConfig['max_connections'];
     }
 
     /**
      * Create a new connection.
+     *
+     * Each pooled connection gets its own HealthCheck instance
+     * tuned with the pool's health_check_interval.
      */
     private function createConnection(string $name): Connection
     {
-        $config      = $this->configs[$name];
-        $connection  = new Connection($config);
+        $config     = $this->configs[$name];
+        $connection = new Connection($config);
+
+        // Attach HealthCheck monitor tuned with pool config.
+        $connection->attachHealthCheck(
+          new HealthCheck($connection, [
+            'check_interval' => $this->poolConfig['health_check_interval'],
+          ])
+        );
+
         $connectionId = spl_object_id($connection);
 
         if (! isset($this->connections[$name])) {
@@ -389,7 +400,7 @@ final class Pool
         // Remove from idle pool.
         unset($this->idle[$name][$connectionId]);
 
-        // Check health before returning.
+        // Check health before returning (uses HealthCheck if attached).
         if (! $data['connection']->isHealthy()) {
             $this->removeConnection($name, $data['connection']);
 

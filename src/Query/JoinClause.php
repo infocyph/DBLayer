@@ -12,7 +12,7 @@ namespace Infocyph\DBLayer\Query;
  * - OR conditions
  * - WHERE / WHERE IN / NULL checks inside JOIN
  */
-class JoinClause
+final class JoinClause
 {
     /**
      * Bound values for where/whereIn conditions.
@@ -20,6 +20,7 @@ class JoinClause
      * @var list<mixed>
      */
     private array $bindings = [];
+
     /**
      * The join conditions.
      *

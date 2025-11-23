@@ -10,7 +10,11 @@ use Infocyph\DBLayer\Exceptions\TransactionException;
 use Throwable;
 
 /**
- * Transaction manager with nesting, savepoints and deadlock retry semantics.
+ * Transaction wrapper with nesting, savepoints and deadlock retry semantics.
+ *
+ * Designed to:
+ *  - Work standalone via Connection::transaction()
+ *  - Cooperate with TransactionManager for global stats
  */
 final class Transaction
 {
@@ -18,17 +22,53 @@ final class Transaction
      * Base backoff in microseconds for deadlock retries.
      */
     private const BASE_BACKOFF_US = 100_000;
+
     /**
      * Maximum number of retry attempts for deadlocks.
      */
     private const MAX_ATTEMPTS = 3;
 
+    /**
+     * Underlying connection.
+     */
     private Connection $connection;
 
     /**
      * Current nesting level.
      */
     private int $level = 0;
+
+    /**
+     * Stats for this connection.
+     *
+     * @var array{
+     *   total:int,
+     *   committed:int,
+     *   rolled_back:int,
+     *   deadlocks:int,
+     *   timeouts:int,
+     *   in_transaction:bool,
+     *   current_level:int,
+     *   savepoints:int,
+     *   elapsed_time:float
+     * }
+     */
+    private array $stats = [
+      'total'           => 0,
+      'committed'       => 0,
+      'rolled_back'     => 0,
+      'deadlocks'       => 0,
+      'timeouts'        => 0,
+      'in_transaction'  => false,
+      'current_level'   => 0,
+      'savepoints'      => 0,
+      'elapsed_time'    => 0.0,
+    ];
+
+    /**
+     * Timestamp when the top-level transaction started (microtime).
+     */
+    private ?float $startedAt = null;
 
     public function __construct(Connection $connection)
     {
@@ -42,11 +82,16 @@ final class Transaction
     {
         if ($this->level === 0) {
             $this->connection->beginTransaction();
+            $this->stats['total']++;
+            $this->stats['in_transaction'] = true;
+            $this->startedAt               = microtime(true);
         } else {
             $this->createSavepoint($this->level);
+            $this->stats['savepoints']++;
         }
 
         $this->level++;
+        $this->stats['current_level'] = $this->level;
     }
 
     /**
@@ -60,9 +105,12 @@ final class Transaction
         }
 
         $this->level--;
+        $this->stats['current_level'] = $this->level;
 
         if ($this->level === 0) {
             $this->connection->commit();
+            $this->stats['committed']++;
+            $this->finishTopLevel();
         } else {
             $this->releaseSavepoint($this->level);
         }
@@ -94,6 +142,7 @@ final class Transaction
             $this->rollBack();
 
             if ($attempt < $attempts && $this->causedByDeadlock($e)) {
+                $this->stats['deadlocks']++;
                 $this->backoff($attempt);
                 goto beginning;
             }
@@ -111,6 +160,14 @@ final class Transaction
     }
 
     /**
+     * Check if there is an active transaction.
+     */
+    public function inTransaction(): bool
+    {
+        return $this->level > 0;
+    }
+
+    /**
      * Rollback the current transaction or rollback to a savepoint.
      */
     public function rollBack(): void
@@ -120,12 +177,63 @@ final class Transaction
         }
 
         $this->level--;
+        $this->stats['current_level'] = $this->level;
 
         if ($this->level === 0) {
             $this->connection->rollBack();
+            $this->stats['rolled_back']++;
+            $this->finishTopLevel();
         } else {
             $this->rollbackToSavepoint($this->level);
         }
+    }
+
+    /**
+     * Get underlying connection.
+     */
+    public function getConnection(): Connection
+    {
+        return $this->connection;
+    }
+
+    /**
+     * Get stats for this transaction wrapper.
+     *
+     * @return array{
+     *   total:int,
+     *   committed:int,
+     *   rolled_back:int,
+     *   deadlocks:int,
+     *   timeouts:int,
+     *   in_transaction:bool,
+     *   current_level:int,
+     *   savepoints:int,
+     *   elapsed_time:float
+     * }
+     */
+    public function getStats(): array
+    {
+        return $this->stats;
+    }
+
+    /**
+     * Reset stats for this transaction wrapper.
+     */
+    public function resetStats(): void
+    {
+        $this->stats = [
+          'total'           => 0,
+          'committed'       => 0,
+          'rolled_back'     => 0,
+          'deadlocks'       => 0,
+          'timeouts'        => 0,
+          'in_transaction'  => $this->level > 0,
+          'current_level'   => $this->level,
+          'savepoints'      => 0,
+          'elapsed_time'    => 0.0,
+        ];
+
+        $this->startedAt = $this->level > 0 ? (microtime(true)) : null;
     }
 
     /**
@@ -149,6 +257,19 @@ final class Transaction
     }
 
     /**
+     * Finalize stats for a completed top-level transaction.
+     */
+    private function finishTopLevel(): void
+    {
+        if ($this->startedAt !== null) {
+            $this->stats['elapsed_time'] += microtime(true) - $this->startedAt;
+        }
+
+        $this->startedAt              = null;
+        $this->stats['in_transaction'] = false;
+    }
+
+    /**
      * Create a savepoint for a given nesting level.
      */
     private function createSavepoint(int $level): void
@@ -159,7 +280,7 @@ final class Transaction
             return;
         }
 
-        $this->connection->statement('SAVEPOINT trans_' . $level);
+        $this->connection->statement('SAVEPOINT trans_'.$level);
     }
 
     /**
@@ -173,7 +294,7 @@ final class Transaction
             return;
         }
 
-        $this->connection->statement('RELEASE SAVEPOINT trans_' . $level);
+        $this->connection->statement('RELEASE SAVEPOINT trans_'.$level);
     }
 
     /**
@@ -187,6 +308,6 @@ final class Transaction
             return;
         }
 
-        $this->connection->statement('ROLLBACK TO SAVEPOINT trans_' . $level);
+        $this->connection->statement('ROLLBACK TO SAVEPOINT trans_'.$level);
     }
 }

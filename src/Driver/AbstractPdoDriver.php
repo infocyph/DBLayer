@@ -15,6 +15,7 @@ use PDO;
  *
  * - Normalises createPdo() so concrete drivers only care about DSN + capabilities.
  * - Leaves config validation to ConnectionConfig by default (drivers can override).
+ * - Provides a consistent set of secure, production-grade PDO attributes.
  */
 abstract class AbstractPdoDriver implements DriverInterface
 {
@@ -24,6 +25,7 @@ abstract class AbstractPdoDriver implements DriverInterface
     abstract public function createCompiler(): QueryCompilerInterface;
 
     abstract public function getCapabilities(): Capabilities;
+
     /**
      * Canonical engine name, e.g. "mysql", "pgsql", "sqlite".
      */
@@ -43,9 +45,13 @@ abstract class AbstractPdoDriver implements DriverInterface
      */
     final public function createPdo(ConnectionConfig $config, bool $readOnly = false): PDO
     {
+        /** @var array<string,mixed> $data */
         $data = method_exists($config, 'toArray') ? $config->toArray() : [];
 
-        /** @var array<string,mixed> $data */
+        // Allow drivers to stamp their defaults and validate config.
+        $data = $this->mergeDefaults($data);
+        $this->validateConfig($data);
+
         $dsn = $this->buildDsn($data, $readOnly);
 
         $username = (string) ($data['username'] ?? '');
@@ -56,6 +62,10 @@ abstract class AbstractPdoDriver implements DriverInterface
             $options = [];
         }
 
+        // Derive PDO attributes from config if not explicitly set.
+        $options = $this->applyDerivedOptions($options, $data);
+
+        // Driver-provided defaults (secure by default).
         $defaults = $this->defaultPdoOptions($data);
 
         // User-specified options should win.
@@ -100,10 +110,39 @@ abstract class AbstractPdoDriver implements DriverInterface
      */
     protected function defaultPdoOptions(array $config): array
     {
+        unset($config); // reserved for future driver-specific tuning
+
         return [
           PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
           PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
           PDO::ATTR_EMULATE_PREPARES   => false,
+          PDO::ATTR_STRINGIFY_FETCHES  => false,
         ];
+    }
+
+    /**
+     * Apply derived PDO options based on generic config keys.
+     *
+     * @param  array<int,mixed>      $options
+     * @param  array<string,mixed>   $config
+     * @return array<int,mixed>
+     */
+    protected function applyDerivedOptions(array $options, array $config): array
+    {
+        // Connection timeout (seconds) → ATTR_TIMEOUT (if not explicitly set).
+        if (isset($config['timeout']) && is_numeric($config['timeout'])) {
+            $timeout = (int) $config['timeout'];
+
+            if ($timeout > 0 && ! array_key_exists(PDO::ATTR_TIMEOUT, $options)) {
+                $options[PDO::ATTR_TIMEOUT] = $timeout;
+            }
+        }
+
+        // Persistent connections.
+        if (! empty($config['persistent']) && ! array_key_exists(PDO::ATTR_PERSISTENT, $options)) {
+            $options[PDO::ATTR_PERSISTENT] = true;
+        }
+
+        return $options;
     }
 }

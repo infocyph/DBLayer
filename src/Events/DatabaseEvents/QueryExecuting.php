@@ -13,10 +13,13 @@ use Infocyph\DBLayer\Connection\Connection;
  */
 final class QueryExecuting
 {
-    /** @var array<int|string, mixed> */
+    /**
+     * @var array<int|string, mixed>
+     */
     public readonly array $bindings;
 
     public readonly Connection $connection;
+
     public readonly string $sql;
 
     /**
@@ -28,10 +31,10 @@ final class QueryExecuting
      * @param array<int|string, mixed> $bindings
      */
     public function __construct(
-        string $sql,
-        array $bindings,
-        Connection $connection,
-        ?float $time = null
+      string $sql,
+      array $bindings,
+      Connection $connection,
+      ?float $time = null
     ) {
         $this->sql        = $sql;
         $this->bindings   = $bindings;

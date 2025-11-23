@@ -27,20 +27,20 @@ final readonly class QueryPayload
      * @param list<mixed>                             $bindings
      */
     public function __construct(
-        public QueryType $type,
-        public ?string $table,
-        public array $columns,
-        public array $wheres,
-        public array $joins,
-        public array $groups,
-        public array $havings,
-        public array $orders,
-        public ?int $limit,
-        public ?int $offset,
-        public array $unions,
-        public ?string $lock,
-        public ?array $aggregate,
-        public array $bindings,
+      public QueryType $type,
+      public ?string $table,
+      public array $columns,
+      public array $wheres,
+      public array $joins,
+      public array $groups,
+      public array $havings,
+      public array $orders,
+      public ?int $limit,
+      public ?int $offset,
+      public array $unions,
+      public ?string $lock,
+      public ?array $aggregate,
+      public array $bindings,
     ) {
     }
 
@@ -67,20 +67,20 @@ final readonly class QueryPayload
     public function with(array $overrides): self
     {
         return new self(
-            $overrides['type']      ?? $this->type,
-            $overrides['table']     ?? $this->table,
-            $overrides['columns']   ?? $this->columns,
-            $overrides['wheres']    ?? $this->wheres,
-            $overrides['joins']     ?? $this->joins,
-            $overrides['groups']    ?? $this->groups,
-            $overrides['havings']   ?? $this->havings,
-            $overrides['orders']    ?? $this->orders,
-            $overrides['limit']     ?? $this->limit,
-            $overrides['offset']    ?? $this->offset,
-            $overrides['unions']    ?? $this->unions,
-            $overrides['lock']      ?? $this->lock,
-            $overrides['aggregate'] ?? $this->aggregate,
-            $overrides['bindings']  ?? $this->bindings,
+          $overrides['type']      ?? $this->type,
+          $overrides['table']     ?? $this->table,
+          $overrides['columns']   ?? $this->columns,
+          $overrides['wheres']    ?? $this->wheres,
+          $overrides['joins']     ?? $this->joins,
+          $overrides['groups']    ?? $this->groups,
+          $overrides['havings']   ?? $this->havings,
+          $overrides['orders']    ?? $this->orders,
+          $overrides['limit']     ?? $this->limit,
+          $overrides['offset']    ?? $this->offset,
+          $overrides['unions']    ?? $this->unions,
+          $overrides['lock']      ?? $this->lock,
+          $overrides['aggregate'] ?? $this->aggregate,
+          $overrides['bindings']  ?? $this->bindings,
         );
     }
 }

@@ -9,6 +9,7 @@ namespace Infocyph\DBLayer\Grammar;
 use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\JoinClause;
 use Infocyph\DBLayer\Query\QueryBuilder;
+use InvalidArgumentException;
 
 /**
  * SQL Grammar Base
@@ -59,7 +60,7 @@ abstract class Grammar
      */
     public function columnize(array $columns): string
     {
-        return implode(', ', array_map([$this, 'wrap'], $columns));
+        return \implode(', ', \array_map([$this, 'wrap'], $columns));
     }
 
     /**
@@ -71,7 +72,7 @@ abstract class Grammar
         $table      = $this->wrapTable($components['from']);
         $where      = $this->compileWheres($query, $components['wheres']);
 
-        return trim("delete from {$table} {$where}");
+        return \trim("delete from {$table} {$where}");
     }
 
     /**
@@ -128,19 +129,19 @@ abstract class Grammar
         $components = $query->getComponents();
         $table      = $this->wrapTable($components['from']);
 
-        $columns = implode(', ', array_map(
-            function (mixed $value, string $key): string {
-                unset($value); // signature alignment only
+        $columns = \implode(', ', \array_map(
+          function (mixed $value, string $key): string {
+              unset($value); // signature alignment only
 
-                return $this->wrap($key).' = ?';
-            },
-            array_values($values),
-            array_keys($values)
+              return $this->wrap($key).' = ?';
+          },
+          \array_values($values),
+          \array_keys($values)
         ));
 
         $where = $this->compileWheres($query, $components['wheres']);
 
-        return trim("update {$table} set {$columns} {$where}");
+        return \trim("update {$table} set {$columns} {$where}");
     }
 
     /**
@@ -170,7 +171,7 @@ abstract class Grammar
             return '';
         }
 
-        return implode(', ', array_fill(0, count($values), '?'));
+        return \implode(', ', \array_fill(0, \count($values), '?'));
     }
 
     /**
@@ -191,13 +192,13 @@ abstract class Grammar
         }
 
         // Handle table.column format.
-        if (str_contains($value, '.')) {
-            return $this->wrapSegments(explode('.', $value));
+        if (\str_contains($value, '.')) {
+            return $this->wrapSegments(\explode('.', $value));
         }
 
         // Handle raw values with * or AS (already full SQL fragments).
-        $lower = strtolower($value);
-        if (str_contains($value, '*') || str_contains($lower, ' as ')) {
+        $lower = \strtolower($value);
+        if (\str_contains($value, '*') || \str_contains($lower, ' as ')) {
             return $value;
         }
 
@@ -217,8 +218,8 @@ abstract class Grammar
           : $this->wrap($aggregate['column']);
 
         $sql = $this->compileColumns(
-            $query,
-            [new Expression("{$aggregate['function']}({$column}) as aggregate")]
+          $query,
+          [new Expression("{$aggregate['function']}({$column}) as aggregate")]
         );
 
         if (isset($components['from']) && $components['from'] !== null) {
@@ -268,7 +269,7 @@ abstract class Grammar
         $components = $query->getComponents();
 
         foreach ($this->selectComponents as $component) {
-            if (! array_key_exists($component, $components)) {
+            if (! \array_key_exists($component, $components)) {
                 continue;
             }
 
@@ -278,9 +279,9 @@ abstract class Grammar
                 continue;
             }
 
-            $method = 'compile'.ucfirst($component);
+            $method = 'compile'.\ucfirst($component);
 
-            if (! method_exists($this, $method)) {
+            if (! \method_exists($this, $method)) {
                 continue;
             }
 
@@ -326,16 +327,16 @@ abstract class Grammar
     {
         unset($query);
 
-        $sql = implode(' ', array_map(
-            function (array $having, int $i): string {
-                $boolean = $i === 0 ? '' : $having['boolean'].' ';
+        $sql = \implode(' ', \array_map(
+          function (array $having, int $i): string {
+              $boolean = $i === 0 ? '' : $having['boolean'].' ';
 
-                return $boolean
-                  .$this->wrap($having['column'])
-                  .' '.$having['operator'].' ?';
-            },
-            $havings,
-            array_keys($havings)
+              return $boolean
+                .$this->wrap($having['column'])
+                .' '.$having['operator'].' ?';
+          },
+          $havings,
+          \array_keys($havings)
         ));
 
         return 'having '.$this->removeLeadingBoolean($sql);
@@ -354,21 +355,21 @@ abstract class Grammar
      * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
      */
     protected function compileInsertWithVerb(
-        string $verb,
-        QueryBuilder $query,
-        array $values
+      string $verb,
+      QueryBuilder $query,
+      array $values
     ): string {
         $rows = $this->normalizeInsertValues($values);
 
         $components = $query->getComponents();
         $table      = $this->wrapTable($components['from']);
-        $columns    = $this->columnize(array_keys($rows[0]));
+        $columns    = $this->columnize(\array_keys($rows[0]));
 
-        $parameters = implode(', ', array_map(
-            function (array $record): string {
-                return '('.$this->parameterize($record).')';
-            },
-            $rows
+        $parameters = \implode(', ', \array_map(
+          function (array $record): string {
+              return '('.$this->parameterize($record).')';
+          },
+          $rows
         ));
 
         return "{$verb} into {$table} ({$columns}) values {$parameters}";
@@ -380,7 +381,7 @@ abstract class Grammar
     protected function compileJoinClause(JoinClause $join): string
     {
         $table      = $this->wrapTable($join->getTable());
-        $type       = strtoupper($join->getType());
+        $type       = \strtoupper($join->getType());
         $conditions = $join->getConditions();
 
         if ($conditions === []) {
@@ -427,7 +428,7 @@ abstract class Grammar
             }
         }
 
-        return "{$type} join {$table} on ".implode('', $clauses);
+        return "{$type} join {$table} on ".\implode('', $clauses);
     }
 
     /**
@@ -439,22 +440,22 @@ abstract class Grammar
     {
         unset($query);
 
-        return implode(' ', array_map(
-            function (JoinClause|array $join): string {
-                if ($join instanceof JoinClause) {
-                    return $this->compileJoinClause($join);
-                }
+        return \implode(' ', \array_map(
+          function (JoinClause|array $join): string {
+              if ($join instanceof JoinClause) {
+                  return $this->compileJoinClause($join);
+              }
 
-                $table = $this->wrapTable($join['table']);
-                $type  = strtoupper($join['type']);
+              $table = $this->wrapTable($join['table']);
+              $type  = \strtoupper($join['type']);
 
-                if (isset($join['first'])) {
-                    return "{$type} join {$table} on {$this->wrap($join['first'])} {$join['operator']} {$this->wrap($join['second'])}";
-                }
+              if (isset($join['first'])) {
+                  return "{$type} join {$table} on {$this->wrap($join['first'])} {$join['operator']} {$this->wrap($join['second'])}";
+              }
 
-                return "{$type} join {$table}";
-            },
-            $joins
+              return "{$type} join {$table}";
+          },
+          $joins
         ));
     }
 
@@ -497,11 +498,11 @@ abstract class Grammar
     {
         unset($query);
 
-        $sql = implode(', ', array_map(
-            function (array $order): string {
-                return $this->wrap($order['column']).' '.strtoupper($order['direction']);
-            },
-            $orders
+        $sql = \implode(', ', \array_map(
+          function (array $order): string {
+              return $this->wrap($order['column']).' '.\strtoupper($order['direction']);
+          },
+          $orders
         ));
 
         return 'order by '.$sql;
@@ -531,7 +532,7 @@ abstract class Grammar
             $sql .= $this->compileUnion($union);
         }
 
-        return ltrim($sql);
+        return \ltrim($sql);
     }
 
     /**
@@ -557,9 +558,9 @@ abstract class Grammar
      */
     protected function concatenate(array $segments): string
     {
-        return implode(' ', array_filter(
-            $segments,
-            static fn (string $value): bool => $value !== ''
+        return \implode(' ', \array_filter(
+          $segments,
+          static fn (string $value): bool => $value !== ''
         ));
     }
 
@@ -570,17 +571,17 @@ abstract class Grammar
      */
     protected function concatenateWhereClauses(QueryBuilder $query, array $wheres): string
     {
-        return implode(' ', array_map(
-            function (array $where, int $i) use ($query): string {
-                $boolean = $i === 0 ? '' : $where['boolean'].' ';
+        return \implode(' ', \array_map(
+          function (array $where, int $i) use ($query): string {
+              $boolean = $i === 0 ? '' : $where['boolean'].' ';
 
-                /** @var callable(QueryBuilder,array<string,mixed>):string $handler */
-                $handler = [$this, 'where'.ucfirst($where['type'])];
+              /** @var callable(QueryBuilder,array<string,mixed>):string $handler */
+              $handler = [$this, 'where'.\ucfirst($where['type'])];
 
-                return $boolean.$handler($query, $where);
-            },
-            $wheres,
-            array_keys($wheres)
+              return $boolean.$handler($query, $where);
+          },
+          $wheres,
+          \array_keys($wheres)
         ));
     }
 
@@ -593,10 +594,10 @@ abstract class Grammar
     protected function normalizeInsertValues(array $values): array
     {
         if ($values === []) {
-            throw new \InvalidArgumentException('Cannot compile INSERT with empty values.');
+            throw new InvalidArgumentException('Cannot compile INSERT with empty values.');
         }
 
-        if (! is_array(reset($values))) {
+        if (! \is_array(\reset($values))) {
             /** @var array<string,mixed> $row */
             $row    = $values;
             $values = [$row];
@@ -611,7 +612,7 @@ abstract class Grammar
      */
     protected function removeLeadingBoolean(string $value): string
     {
-        return (string) preg_replace('/^(and |or )/i', '', $value, 1);
+        return (string) \preg_replace('/^(and |or )/i', '', $value, 1);
     }
 
     /**
@@ -679,12 +680,12 @@ abstract class Grammar
         unset($query);
 
         $nested = $this->compileWheres(
-            $where['query'],
-            $where['query']->getComponents()['wheres']
+          $where['query'],
+          $where['query']->getComponents()['wheres']
         );
 
         // strip leading "where "
-        return '('.substr($nested, 6).')';
+        return '('.\substr($nested, 6).')';
     }
 
     /**
@@ -720,11 +721,11 @@ abstract class Grammar
      */
     protected function wrapSegments(array $segments): string
     {
-        return implode('.', array_map(
-            function (string $segment): string {
-                return $segment === '*' ? $segment : $this->wrapValue($segment);
-            },
-            $segments
+        return \implode('.', \array_map(
+          function (string $segment): string {
+              return $segment === '*' ? $segment : $this->wrapValue($segment);
+          },
+          $segments
         ));
     }
 

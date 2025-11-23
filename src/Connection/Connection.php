@@ -31,7 +31,7 @@ use PDOStatement;
  * - Read/write splitting
  * - Automatic reconnection on connection loss
  * - Lightweight health checks
- * - Query statistics
+ * - Query statistics & performance sampling
  * - Query builder / grammar wiring (legacy path)
  * - Driver + compiler pipeline for structured queries
  * - Optional SQL security validation (config-driven)
@@ -39,7 +39,7 @@ use PDOStatement;
 final class Connection
 {
     /**
-     * Connection timeout in seconds.
+     * Connection timeout in seconds (reserved; configured via driver options).
      */
     private const CONNECTION_TIMEOUT = 5;
 
@@ -48,6 +48,9 @@ final class Connection
      */
     private const MAX_RECONNECT_ATTEMPTS = 3;
 
+    /**
+     * Query compiler for this connection.
+     */
     private QueryCompilerInterface $compiler;
 
     /**
@@ -56,7 +59,7 @@ final class Connection
     private ConnectionConfig $config;
 
     /**
-     * Driver and compiler for this connection.
+     * Driver for this connection.
      */
     private DriverInterface $driver;
 
@@ -110,9 +113,14 @@ final class Connection
     private string $tablePrefix = '';
 
     /**
-     * Transaction manager for this connection.
+     * Transaction wrapper for this connection.
      */
     private ?Transaction $transaction = null;
+
+    /**
+     * Optional health monitor for this connection.
+     */
+    private ?HealthCheck $healthCheck = null;
 
     /**
      * Create a new connection instance.
@@ -126,6 +134,34 @@ final class Connection
         // Resolve driver and compiler up front; all engines go through DriverRegistry.
         $this->driver   = DriverRegistry::resolve($config->getDriver());
         $this->compiler = $this->driver->createCompiler();
+    }
+
+    /**
+     * Attach an explicit HealthCheck monitor to this connection.
+     */
+    public function attachHealthCheck(HealthCheck $healthCheck): void
+    {
+        $this->healthCheck = $healthCheck;
+    }
+
+    /**
+     * Lazily create / get the HealthCheck monitor for this connection.
+     */
+    public function getHealthCheck(): HealthCheck
+    {
+        if ($this->healthCheck === null) {
+            $this->healthCheck = new HealthCheck($this);
+        }
+
+        return $this->healthCheck;
+    }
+
+    /**
+     * Whether this connection has an attached HealthCheck.
+     */
+    public function hasHealthCheck(): bool
+    {
+        return $this->healthCheck !== null;
     }
 
     /**
@@ -147,7 +183,7 @@ final class Connection
     /**
      * Run a delete statement.
      *
-     * @param  array<int|string, mixed>  $bindings
+     * @param  array<int|string,mixed>  $bindings
      */
     public function delete(string $sql, array $bindings = []): int
     {
@@ -182,52 +218,62 @@ final class Connection
     /**
      * Execute a statement with automatic reconnection on connection loss.
      *
-     * @param  array<int|string, mixed>  $bindings
+     * @param  array<int|string,mixed>  $bindings
      */
     public function execute(string $sql, array $bindings = []): PDOStatement
     {
         if ($this->securityChecks) {
             // Will be a no-op when SecurityMode::OFF is set globally.
-            Security::validateQuery($sql, $bindings);
+            Security::validateQuery($sql, $bindings, $this->config->securityConfig());
         }
 
         $isWrite = $this->isWriteQuery($sql);
         $pdo     = $isWrite ? $this->getPdo() : $this->getReadPdo();
 
+        $start   = microtime(true);
+        $success = false;
+
         try {
-            $statement = $this->runStatement($pdo, $sql, $bindings);
-            $this->recordQuery($isWrite);
-            $this->recordPretend($sql, $bindings);
-
-            return $statement;
-        } catch (PDOException $e) {
-            if (! $this->isConnectionError($e)) {
-                $this->stats['errors']++;
-                $this->recordPretend($sql, $bindings);
-
-                throw ConnectionException::queryFailed($sql, $e->getMessage());
-            }
-
-            // Attempt reconnect (bounded backoff).
-            $this->handleReconnectForPdo($pdo);
-
             try {
-                $statement = $this->runStatement(
-                    $isWrite ? $this->getPdo() : $this->getReadPdo(),
-                    $sql,
-                    $bindings
-                );
-
+                $statement = $this->runStatement($pdo, $sql, $bindings);
                 $this->recordQuery($isWrite);
                 $this->recordPretend($sql, $bindings);
+                $success = true;
 
                 return $statement;
-            } catch (PDOException $e2) {
-                $this->stats['errors']++;
-                $this->recordPretend($sql, $bindings);
+            } catch (PDOException $e) {
+                if (! $this->isConnectionError($e)) {
+                    $this->stats['errors']++;
+                    $this->recordPretend($sql, $bindings);
 
-                throw ConnectionException::queryFailed($sql, $e2->getMessage());
+                    throw ConnectionException::queryFailed($sql, $e->getMessage());
+                }
+
+                // Attempt reconnect.
+                $this->handleReconnectForPdo($pdo);
+
+                try {
+                    $statement = $this->runStatement(
+                      $isWrite ? $this->getPdo() : $this->getReadPdo(),
+                      $sql,
+                      $bindings
+                    );
+
+                    $this->recordQuery($isWrite);
+                    $this->recordPretend($sql, $bindings);
+                    $success = true;
+
+                    return $statement;
+                } catch (PDOException $e2) {
+                    $this->stats['errors']++;
+                    $this->recordPretend($sql, $bindings);
+
+                    throw ConnectionException::queryFailed($sql, $e2->getMessage());
+                }
             }
+        } finally {
+            $durationMs = (microtime(true) - $start) * 1_000.0;
+            $this->recordPerformanceSample($durationMs, $success);
         }
     }
 
@@ -328,7 +374,7 @@ final class Connection
     /**
      * Run an insert statement.
      *
-     * @param  array<int|string, mixed>  $bindings
+     * @param  array<int|string,mixed>  $bindings
      */
     public function insert(string $sql, array $bindings = []): bool
     {
@@ -344,10 +390,17 @@ final class Connection
     }
 
     /**
-     * Check if connection is healthy (lightweight ping).
+     * Check if connection is healthy.
+     *
+     * If a HealthCheck is attached, delegates to it; otherwise falls back to a
+     * lightweight "SELECT 1" ping.
      */
     public function isHealthy(): bool
     {
+        if ($this->healthCheck !== null) {
+            return $this->healthCheck->isHealthy();
+        }
+
         if ($this->pdo === null) {
             return false;
         }
@@ -377,7 +430,7 @@ final class Connection
      *
      * @param  callable(self):void  $callback
      *
-     * @return array<int, array{sql:string,bindings:array<int|string,mixed>}>
+     * @return array<int,array{sql:string,bindings:array<int|string,mixed>}>
      */
     public function pretend(callable $callback): array
     {
@@ -433,7 +486,7 @@ final class Connection
                     throw ConnectionException::maxReconnectAttemptsReached(self::MAX_RECONNECT_ATTEMPTS);
                 }
 
-                // Exponential-ish backoff: 100ms, 200ms, 300ms...
+                // Linear backoff with mild scaling: 100ms, 200ms, 300ms...
                 usleep(100_000 * $attempt);
             }
         }
@@ -469,7 +522,7 @@ final class Connection
      */
     public function runCompiled(CompiledQuery $query, bool $readOnly = false): DriverResult
     {
-        unset($readOnly); // reserved for future use when we bypass SQL classification
+        unset($readOnly); // reserved for future use when bypassing SQL classification
 
         $type = $query->type;
 
@@ -509,14 +562,14 @@ final class Connection
     /**
      * Run a select statement.
      *
-     * @param  array<int|string, mixed>  $bindings
-     * @return array<int, array<string, mixed>>
+     * @param  array<int|string,mixed>  $bindings
+     * @return array<int,array<string,mixed>>
      */
     public function select(string $sql, array $bindings = []): array
     {
         $statement = $this->execute($sql, $bindings);
 
-        /** @var array<int, array<string, mixed>> $rows */
+        /** @var array<int,array<string,mixed>> $rows */
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
 
         return $rows;
@@ -550,7 +603,7 @@ final class Connection
     /**
      * Execute a general statement (INSERT, UPDATE, DELETE, DDL).
      *
-     * @param  array<int|string, mixed>  $bindings
+     * @param  array<int|string,mixed>  $bindings
      */
     public function statement(string $sql, array $bindings = []): bool
     {
@@ -565,24 +618,27 @@ final class Connection
     public function table(string $table): QueryBuilder
     {
         return new QueryBuilder(
-            $this,
-            $this->getGrammar(),
-            $this->getExecutor()
+          $this,
+          $this->getGrammar(),
+          $this->getExecutor()
         )->from($table);
     }
 
     /**
-     * Execute a callback within a transaction using the Transaction manager.
+     * Execute a callback within a transaction using the Transaction wrapper.
      *
      * @param  callable(self):mixed  $callback
      */
     public function transaction(callable $callback, int $attempts = 1): mixed
     {
-        return $this->getTransactionManager()->execute($callback, $attempts);
+        return $this->getTransactionManager()->execute(
+          static fn (self $connection): mixed => $callback($connection),
+          $attempts
+        );
     }
 
     /**
-     * Get the transaction nesting level (via Transaction manager).
+     * Get the transaction nesting level (via Transaction wrapper).
      */
     public function transactionLevel(): int
     {
@@ -595,48 +651,60 @@ final class Connection
     public function unprepared(string $sql): bool
     {
         if ($this->securityChecks) {
-            Security::validateQuery($sql, []);
+            Security::validateQuery($sql, [], $this->config->securityConfig());
         }
 
         $isWrite = $this->isWriteQuery($sql);
         $pdo     = $isWrite ? $this->getPdo() : $this->getReadPdo();
 
+        $start   = microtime(true);
+        $success = false;
+
         try {
-            $pdo->exec($sql);
-            $this->recordQuery($isWrite);
-            $this->recordPretend($sql, []);
-
-            return true;
-        } catch (PDOException $e) {
-            if (! $this->isConnectionError($e)) {
-                $this->stats['errors']++;
-                $this->recordPretend($sql, []);
-
-                throw ConnectionException::queryFailed($sql, $e->getMessage());
-            }
-
-            $this->handleReconnectForPdo($pdo);
-
             try {
-                $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
                 $pdo->exec($sql);
                 $this->recordQuery($isWrite);
                 $this->recordPretend($sql, []);
 
-                return true;
-            } catch (PDOException $e2) {
-                $this->stats['errors']++;
-                $this->recordPretend($sql, []);
+                $success = true;
 
-                throw ConnectionException::queryFailed($sql, $e2->getMessage());
+                return true;
+            } catch (PDOException $e) {
+                if (! $this->isConnectionError($e)) {
+                    $this->stats['errors']++;
+                    $this->recordPretend($sql, []);
+
+                    throw ConnectionException::queryFailed($sql, $e->getMessage());
+                }
+
+                $this->handleReconnectForPdo($pdo);
+
+                try {
+                    $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
+                    $pdo->exec($sql);
+                    $this->recordQuery($isWrite);
+                    $this->recordPretend($sql, []);
+
+                    $success = true;
+
+                    return true;
+                } catch (PDOException $e2) {
+                    $this->stats['errors']++;
+                    $this->recordPretend($sql, []);
+
+                    throw ConnectionException::queryFailed($sql, $e2->getMessage());
+                }
             }
+        } finally {
+            $durationMs = (microtime(true) - $start) * 1_000.0;
+            $this->recordPerformanceSample($durationMs, $success);
         }
     }
 
     /**
      * Run an update statement.
      *
-     * @param  array<int|string, mixed>  $bindings
+     * @param  array<int|string,mixed>  $bindings
      */
     public function update(string $sql, array $bindings = []): int
     {
@@ -652,8 +720,8 @@ final class Connection
             $this->pdo = $this->driver->createPdo($this->config, false);
         } catch (PDOException $e) {
             throw ConnectionException::connectionFailed(
-                $this->config->getDriver(),
-                $e->getMessage()
+              $this->config->getDriver(),
+              $e->getMessage()
             );
         }
     }
@@ -729,7 +797,7 @@ final class Connection
     }
 
     /**
-     * Get the Transaction manager for this connection.
+     * Get the Transaction wrapper for this connection.
      */
     private function getTransactionManager(): Transaction
     {
@@ -789,16 +857,16 @@ final class Connection
         $firstWord = strtoupper(substr($sql, 0, strcspn($sql, " \t\n\r")));
 
         return in_array(
-            $firstWord,
-            ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE'],
-            true
+          $firstWord,
+          ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'REPLACE'],
+          true
         );
     }
 
     /**
      * Record a query for pretend mode if enabled.
      *
-     * @param  array<int|string, mixed>  $bindings
+     * @param  array<int|string,mixed>  $bindings
      */
     private function recordPretend(string $sql, array $bindings): void
     {
@@ -822,9 +890,19 @@ final class Connection
     }
 
     /**
+     * Record a performance sample into HealthCheck, if attached.
+     */
+    private function recordPerformanceSample(float $durationMs, bool $success): void
+    {
+        if ($this->healthCheck !== null) {
+            $this->healthCheck->recordSample($durationMs, $success);
+        }
+    }
+
+    /**
      * Execute a prepared statement on a given PDO instance.
      *
-     * @param  array<int|string, mixed>  $bindings
+     * @param  array<int|string,mixed>  $bindings
      */
     private function runStatement(PDO $pdo, string $sql, array $bindings): PDOStatement
     {

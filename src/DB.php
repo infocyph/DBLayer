@@ -22,6 +22,8 @@ use Throwable;
  * Design goals:
  * - One shared Connection instance per DB name for the whole process lifetime.
  * - Ability to opt-in to a fresh Connection instance on demand (no caching).
+ * - Bridge query events into a simple query-log & listener system.
+ * - Expose per-connection health reports.
  */
 class DB
 {
@@ -402,9 +404,9 @@ class DB
      * @throws ConnectionException
      */
     public static function quote(
-        string $value,
-        int $type = PDO::PARAM_STR,
-        ?string $connection = null
+      string $value,
+      int $type = PDO::PARAM_STR,
+      ?string $connection = null
     ): string {
         return static::connection($connection)->getPdo()->quote($value, $type);
     }
@@ -566,6 +568,20 @@ class DB
     }
 
     /**
+     * Get a health report for the given connection.
+     *
+     * @return array<string,mixed>
+     *
+     * @throws ConnectionException
+     */
+    public static function health(?string $connection = null): array
+    {
+        $conn = static::connection($connection);
+
+        return $conn->getHealthCheck()->getReport();
+    }
+
+    /**
      * Get a query builder for a table.
      *
      * @throws ConnectionException
@@ -582,9 +598,9 @@ class DB
      * @throws ConnectionException
      */
     public static function transaction(
-        callable $callback,
-        int $attempts = 1,
-        ?string $connection = null
+      callable $callback,
+      int $attempts = 1,
+      ?string $connection = null
     ): mixed {
         return static::connection($connection)->transaction($callback, $attempts);
     }
@@ -668,7 +684,16 @@ class DB
             if (! static::$loggingQueries && static::$listeners === []) {
                 return;
             }
-            $connectionName = array_find_key(static::$connections, fn ($connection) => $connection === $event->connection);
+
+            // Resolve connection name by identity (if available).
+            $connectionName = null;
+
+            foreach (static::$connections as $name => $connection) {
+                if ($connection === $event->connection) {
+                    $connectionName = $name;
+                    break;
+                }
+            }
 
             $payload = [
               'query'      => $event->sql,
@@ -686,8 +711,8 @@ class DB
                 static::$queryLog[] = $payload;
 
                 if (
-                    static::$maxQueryLogEntries !== null
-                    && count(static::$queryLog) > static::$maxQueryLogEntries
+                  static::$maxQueryLogEntries !== null
+                  && count(static::$queryLog) > static::$maxQueryLogEntries
                 ) {
                     $overflow = count(static::$queryLog) - static::$maxQueryLogEntries;
 

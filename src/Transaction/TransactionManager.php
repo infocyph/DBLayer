@@ -11,9 +11,6 @@ use Infocyph\DBLayer\Connection\Connection;
  *
  * Manages multiple transaction instances across connections.
  * Provides factory methods and global transaction management.
- *
- * @package Infocyph\DBLayer\Transaction
- * @author Hasan
  */
 final class TransactionManager
 {
@@ -106,7 +103,7 @@ final class TransactionManager
      * Execute callback in a transaction on given connection.
      *
      * @template T
-     * @param callable(Connection):T $callback
+     * @param  callable(Connection):T  $callback
      * @return T
      */
     public function execute(Connection $connection, callable $callback, int $attempts = 1): mixed
@@ -232,7 +229,7 @@ final class TransactionManager
     public function rollback(Connection $connection): void
     {
         $transaction = $this->forConnection($connection);
-        $transaction->rollback();
+        $transaction->rollBack();
 
         if (! $transaction->inTransaction()) {
             $this->globalStats['active_transactions']--;

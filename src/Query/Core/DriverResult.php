@@ -17,9 +17,9 @@ final readonly class DriverResult
      * @param list<array<string,mixed>>|null $rows
      */
     public function __construct(
-        public ?array $rows,
-        public int $rowCount,
-        public ?string $lastInsertId = null,
+      public ?array $rows,
+      public int $rowCount,
+      public ?string $lastInsertId = null,
     ) {
     }
 

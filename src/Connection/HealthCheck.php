@@ -12,7 +12,7 @@ use Throwable;
  * Monitors database connection health and performance:
  * - Connection availability checks
  * - Latency monitoring
- * - Query performance tracking
+ * - Query performance tracking (duration samples in milliseconds)
  * - Error rate monitoring
  */
 final class HealthCheck
@@ -24,7 +24,7 @@ final class HealthCheck
      */
     private const DEFAULTS = [
       'check_interval' => 30,
-      'max_latency_ms' => 1000,
+      'max_latency_ms' => 1_000,
       'max_error_rate' => 0.1,
       'sample_size'    => 100,
     ];
@@ -67,14 +67,14 @@ final class HealthCheck
     /**
      * Query performance samples.
      *
-     * @var array<int, array{duration:float,success:bool,timestamp:float}>
+     * @var array<int,array{duration:float,success:bool,timestamp:float}>
      */
     private array $samples = [];
 
     /**
      * Create a new health check instance.
      *
-     * @param array<string, mixed> $config
+     * @param  array<string,mixed>  $config
      */
     public function __construct(Connection $connection, array $config = [])
     {
@@ -102,14 +102,14 @@ final class HealthCheck
             // Measure latency.
             $startTime = microtime(true);
             $this->connection->getPdo()->query('SELECT 1');
-            $latency = (microtime(true) - $startTime) * 1000.0;
+            $latency = (microtime(true) - $startTime) * 1_000.0;
 
             $this->metrics['latency_ms'] = round($latency, 2);
 
             // Check latency threshold.
             if ($latency > $this->config['max_latency_ms']) {
                 $this->metrics['is_healthy'] = false;
-                $this->metrics['last_error'] = 'High latency: ' . round($latency, 2) . 'ms';
+                $this->metrics['last_error'] = 'High latency: '.round($latency, 2).'ms';
 
                 return false;
             }
@@ -122,7 +122,7 @@ final class HealthCheck
 
                 if ($errorRate > $this->config['max_error_rate']) {
                     $this->metrics['is_healthy'] = false;
-                    $this->metrics['last_error'] = 'High error rate: ' . round($errorRate * 100, 2) . '%';
+                    $this->metrics['last_error'] = 'High error rate: '.round($errorRate * 100, 2).'%';
 
                     return false;
                 }
@@ -135,7 +135,7 @@ final class HealthCheck
         } catch (Throwable $e) {
             $this->metrics['failed_checks']++;
             $this->metrics['is_healthy'] = false;
-            $this->metrics['last_error'] = $e->getMessage();
+            $this->metrics['last_error']  = $e->getMessage();
 
             return false;
         }
@@ -264,6 +264,8 @@ final class HealthCheck
 
     /**
      * Record query performance sample.
+     *
+     * @param  float  $duration  Duration in milliseconds.
      */
     public function recordSample(float $duration, bool $success): void
     {
@@ -300,7 +302,7 @@ final class HealthCheck
     /**
      * Calculate percentile value.
      *
-     * @param list<float> $sorted
+     * @param  list<float>  $sorted
      */
     private function percentile(array $sorted, float $percentile): float
     {
@@ -310,9 +312,9 @@ final class HealthCheck
             return 0.0;
         }
 
-        $index  = ($percentile / 100.0) * ($count - 1);
-        $lower  = (int) floor($index);
-        $upper  = (int) ceil($index);
+        $index = ($percentile / 100.0) * ($count - 1);
+        $lower = (int) floor($index);
+        $upper = (int) ceil($index);
 
         if ($lower === $upper) {
             return (float) $sorted[$lower];

@@ -45,6 +45,7 @@ class QueryBuilder
      * SQL grammar compiler.
      */
     private readonly Grammar $grammar;
+
     /**
      * Aggregate function definition or null.
      *
@@ -142,9 +143,9 @@ class QueryBuilder
      * Create a new query builder instance.
      */
     public function __construct(
-        Connection $connection,
-        Grammar $grammar,
-        Executor $executor
+      Connection $connection,
+      Grammar $grammar,
+      Executor $executor
     ) {
         $this->connection = $connection;
         $this->grammar    = $grammar;
@@ -156,7 +157,7 @@ class QueryBuilder
      */
     public function addSelect(string|Expression $column): self
     {
-        if (! in_array($column, $this->columns, true)) {
+        if (! \in_array($column, $this->columns, true)) {
             $this->columns[] = $column;
         }
 
@@ -202,7 +203,7 @@ class QueryBuilder
             $clone->limit  = $count;
 
             $results = $clone->get();
-            $num     = count($results);
+            $num     = \count($results);
 
             if ($num === 0) {
                 break;
@@ -226,10 +227,10 @@ class QueryBuilder
      * @param  callable(list<array<string,mixed>>,int):bool  $callback
      */
     public function chunkById(
-        int $count,
-        callable $callback,
-        string $column = 'id',
-        ?int $fromId = null
+      int $count,
+      callable $callback,
+      string $column = 'id',
+      ?int $fromId = null
     ): bool {
         if ($count <= 0) {
             throw QueryException::invalidLimit($count);
@@ -249,7 +250,7 @@ class QueryBuilder
             $clone->limit = $count;
 
             $results = $clone->get();
-            $num     = count($results);
+            $num     = \count($results);
 
             if ($num === 0) {
                 break;
@@ -318,7 +319,7 @@ class QueryBuilder
             $clone->limit  = $chunkSize;
 
             $results = $clone->get();
-            $num     = count($results);
+            $num     = \count($results);
 
             if ($num === 0) {
                 break;
@@ -350,24 +351,24 @@ class QueryBuilder
      * @throws QueryException
      */
     public function cursorPaginate(
-        int $perPage = 15,
-        mixed $cursor = null,
-        string $column = 'id',
-        string $direction = 'asc'
+      int $perPage = 15,
+      mixed $cursor = null,
+      string $column = 'id',
+      string $direction = 'asc'
     ): CursorPaginator {
         if ($perPage <= 0) {
             throw QueryException::invalidLimit($perPage);
         }
 
-        $direction = strtolower($direction);
+        $direction = \strtolower($direction);
 
-        if (! in_array($direction, ['asc', 'desc'], true)) {
+        if (! \in_array($direction, ['asc', 'desc'], true)) {
             throw QueryException::invalidOrderDirection($direction);
         }
 
         $operator = $direction === 'asc' ? '>' : '<';
 
-        $clone           = $this->cloneBuilder();
+        $clone            = $this->cloneBuilder();
         $clone->aggregate = null;
         $clone->limit     = null;
         $clone->offset    = null;
@@ -381,10 +382,10 @@ class QueryBuilder
         $clone->limit = $perPage + 1;
 
         $results = $clone->get();
-        $hasMore = count($results) > $perPage;
+        $hasMore = \count($results) > $perPage;
 
         if ($hasMore) {
-            $items = array_slice($results, 0, $perPage);
+            $items = \array_slice($results, 0, $perPage);
         } else {
             $items = $results;
         }
@@ -392,7 +393,7 @@ class QueryBuilder
         $nextCursor = null;
 
         if ($hasMore && $items !== []) {
-            $lastRow       = $items[count($items) - 1];
+            $lastRow       = $items[\count($items) - 1];
             $nextCursorVal = $lastRow[$column] ?? null;
 
             if ($nextCursorVal !== null) {
@@ -403,11 +404,11 @@ class QueryBuilder
         $currentCursor = $cursor !== null ? (string) $cursor : null;
 
         return new CursorPaginator(
-            $items,
-            $perPage,
-            $currentCursor,
-            $nextCursor,
-            $hasMore
+          $items,
+          $perPage,
+          $currentCursor,
+          $nextCursor,
+          $hasMore
         );
     }
 
@@ -466,9 +467,9 @@ class QueryBuilder
      * @return array<string,mixed>|null
      */
     public function firstWhere(
-        string|callable $column,
-        mixed $operator = null,
-        mixed $value = null
+      string|callable $column,
+      mixed $operator = null,
+      mixed $value = null
     ): ?array {
         return $this->where($column, $operator, $value)->first();
     }
@@ -484,7 +485,7 @@ class QueryBuilder
             throw QueryException::invalidLimit($perPage);
         }
 
-        $page = max(1, $page);
+        $page = \max(1, $page);
 
         $this->offset(($page - 1) * $perPage);
         $this->limit($perPage);
@@ -583,7 +584,7 @@ class QueryBuilder
      */
     public function groupBy(string ...$groups): self
     {
-        $this->groups = array_merge($this->groups, $groups);
+        $this->groups = \array_merge($this->groups, $groups);
 
         return $this;
     }
@@ -592,12 +593,12 @@ class QueryBuilder
      * Add a HAVING clause.
      */
     public function having(
-        string $column,
-        mixed $operator = null,
-        mixed $value = null,
-        string $boolean = 'and'
+      string $column,
+      mixed $operator = null,
+      mixed $value = null,
+      string $boolean = 'and'
     ): self {
-        if (func_num_args() === 2) {
+        if (\func_num_args() === 2) {
             $value    = $operator;
             $operator = '=';
         }
@@ -639,7 +640,7 @@ class QueryBuilder
 
         $row = $this->insertReturning($values, $column);
 
-        if ($row !== null && array_key_exists($column, $row)) {
+        if ($row !== null && \array_key_exists($column, $row)) {
             return (string) $row[$column];
         }
 
@@ -678,11 +679,11 @@ class QueryBuilder
      * Add a simple JOIN clause.
      */
     public function join(
-        string $table,
-        string $first,
-        string $operator,
-        string $second,
-        string $type = 'inner'
+      string $table,
+      string $first,
+      string $operator,
+      string $second,
+      string $type = 'inner'
     ): self {
         $this->joins[] = [
           'type'     => $type,
@@ -710,7 +711,7 @@ class QueryBuilder
         $this->joins[] = $join;
 
         if ($join->getBindings() !== []) {
-            $this->bindings = array_merge($this->bindings, $join->getBindings());
+            $this->bindings = \array_merge($this->bindings, $join->getBindings());
         }
 
         return $this;
@@ -807,9 +808,9 @@ class QueryBuilder
      */
     public function orderBy(string $column, string $direction = 'asc'): self
     {
-        $direction = strtolower($direction);
+        $direction = \strtolower($direction);
 
-        if (! in_array($direction, ['asc', 'desc'], true)) {
+        if (! \in_array($direction, ['asc', 'desc'], true)) {
             throw QueryException::invalidOrderDirection($direction);
         }
 
@@ -834,7 +835,7 @@ class QueryBuilder
      */
     public function orWhere(string|callable $column, mixed $operator = null, mixed $value = null): self
     {
-        if (func_num_args() === 2) {
+        if (\func_num_args() === 2) {
             $value    = $operator;
             $operator = '=';
         }
@@ -853,13 +854,13 @@ class QueryBuilder
             throw QueryException::invalidLimit($perPage);
         }
 
-        $page = max(1, $page ?? 1);
+        $page = \max(1, $page ?? 1);
 
         // Total (ignores LIMIT/OFFSET).
         $total = $this->count();
 
         // Page items.
-        $clone           = $this->cloneBuilder();
+        $clone            = $this->cloneBuilder();
         $clone->aggregate = null;
 
         $clone->offset = ($page - 1) * $perPage;
@@ -889,7 +890,7 @@ class QueryBuilder
                 continue;
             }
 
-            if (! array_key_exists($key, $row)) {
+            if (! \array_key_exists($key, $row)) {
                 continue;
             }
 
@@ -919,7 +920,7 @@ class QueryBuilder
         }
 
         $this->type    = 'select';
-        $this->columns = is_array($columns[0]) ? $columns[0] : $columns;
+        $this->columns = \is_array($columns[0]) ? $columns[0] : $columns;
 
         return $this;
     }
@@ -945,20 +946,20 @@ class QueryBuilder
             throw QueryException::invalidLimit($perPage);
         }
 
-        $page = max(1, $page ?? 1);
+        $page = \max(1, $page ?? 1);
 
-        $clone           = $this->cloneBuilder();
+        $clone            = $this->cloneBuilder();
         $clone->aggregate = null;
 
-        $offset          = ($page - 1) * $perPage;
-        $clone->offset   = $offset;
-        $clone->limit    = $perPage + 1; // fetch one extra row
+        $offset        = ($page - 1) * $perPage;
+        $clone->offset = $offset;
+        $clone->limit  = $perPage + 1; // fetch one extra row
 
         $results = $clone->get();
-        $hasMore = count($results) > $perPage;
+        $hasMore = \count($results) > $perPage;
 
         if ($hasMore) {
-            $items = array_slice($results, 0, $perPage);
+            $items = \array_slice($results, 0, $perPage);
         } else {
             $items = $results;
         }
@@ -1022,20 +1023,20 @@ class QueryBuilder
         }
 
         return new QueryPayload(
-            type: $type,
-            table: $this->from,
-            columns: $this->columns,
-            wheres: $this->wheres,
-            joins: $this->joins,
-            groups: $this->groups,
-            havings: $this->havings,
-            orders: $this->orders,
-            limit: $this->limit,
-            offset: $this->offset,
-            unions: $unionPayloads,
-            lock: $this->lock,
-            aggregate: $this->aggregate,
-            bindings: $this->bindings,
+          type: $type,
+          table: $this->from,
+          columns: $this->columns,
+          wheres: $this->wheres,
+          joins: $this->joins,
+          groups: $this->groups,
+          havings: $this->havings,
+          orders: $this->orders,
+          limit: $this->limit,
+          offset: $this->offset,
+          unions: $unionPayloads,
+          lock: $this->lock,
+          aggregate: $this->aggregate,
+          bindings: $this->bindings,
         );
     }
 
@@ -1078,7 +1079,7 @@ class QueryBuilder
      */
     public function union(QueryBuilder|callable $query, bool $all = false): self
     {
-        if (is_callable($query)) {
+        if (\is_callable($query)) {
             $builder = $this->newQuery();
             $query($builder);
             $query = $builder;
@@ -1089,7 +1090,7 @@ class QueryBuilder
           'all'   => $all,
         ];
 
-        $this->bindings = array_merge($this->bindings, $query->getBindings());
+        $this->bindings = \array_merge($this->bindings, $query->getBindings());
 
         return $this;
     }
@@ -1185,18 +1186,18 @@ class QueryBuilder
      * @param  callable(QueryBuilder):void|non-empty-string  $column
      */
     public function where(
-        string|callable $column,
-        mixed $operator = null,
-        mixed $value = null,
-        string $boolean = 'and'
+      string|callable $column,
+      mixed $operator = null,
+      mixed $value = null,
+      string $boolean = 'and'
     ): self {
         // Handle closure for nested where.
-        if (is_callable($column)) {
+        if (\is_callable($column)) {
             return $this->whereNested($column, $boolean);
         }
 
         // Handle two arguments (column, value).
-        if (func_num_args() === 2) {
+        if (\func_num_args() === 2) {
             $value    = $operator;
             $operator = '=';
         }
@@ -1229,7 +1230,7 @@ class QueryBuilder
           'not'     => $not,
         ];
 
-        $this->bindings = array_merge($this->bindings, $values);
+        $this->bindings = \array_merge($this->bindings, $values);
 
         return $this;
     }
@@ -1251,7 +1252,7 @@ class QueryBuilder
           'not'     => $not,
         ];
 
-        $this->bindings = array_merge($this->bindings, $query->getBindings());
+        $this->bindings = \array_merge($this->bindings, $query->getBindings());
 
         return $this;
     }
@@ -1271,7 +1272,7 @@ class QueryBuilder
           'not'     => $not,
         ];
 
-        $this->bindings = array_merge($this->bindings, $values);
+        $this->bindings = \array_merge($this->bindings, $values);
 
         return $this;
     }
@@ -1293,7 +1294,7 @@ class QueryBuilder
               'boolean' => $boolean,
             ];
 
-            $this->bindings = array_merge($this->bindings, $query->getBindings());
+            $this->bindings = \array_merge($this->bindings, $query->getBindings());
         }
 
         return $this;
@@ -1355,7 +1356,7 @@ class QueryBuilder
           'boolean' => $boolean,
         ];
 
-        $this->bindings = array_merge($this->bindings, $bindings);
+        $this->bindings = \array_merge($this->bindings, $bindings);
 
         return $this;
     }
@@ -1365,7 +1366,7 @@ class QueryBuilder
      */
     private function mapTypeToEnum(?string $type): QueryType
     {
-        $type = $type !== null ? strtolower($type) : 'select';
+        $type = $type !== null ? \strtolower($type) : 'select';
 
         return match ($type) {
             'insert'   => QueryType::INSERT,
@@ -1387,15 +1388,15 @@ class QueryBuilder
         $clone = clone $this;
 
         if ($ignoreLimitOffset) {
-            $clone->limit   = null;
-            $clone->offset  = null;
-            $clone->orders  = [];
-            $clone->unions  = [];
-            $clone->lock    = null;
+            $clone->limit  = null;
+            $clone->offset = null;
+            $clone->orders = [];
+            $clone->unions = [];
+            $clone->lock   = null;
         }
 
         $clone->aggregate = [
-          'function' => strtoupper($function),
+          'function' => \strtoupper($function),
           'column'   => $column,
         ];
 
@@ -1407,6 +1408,6 @@ class QueryBuilder
 
         $row = $results[0];
 
-        return $row['aggregate'] ?? (array_values($row)[0] ?? null);
+        return $row['aggregate'] ?? (\array_values($row)[0] ?? null);
     }
 }
