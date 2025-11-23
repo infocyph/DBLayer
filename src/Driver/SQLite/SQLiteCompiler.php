@@ -17,7 +17,7 @@ final class SQLiteCompiler extends AbstractSqlCompiler
     {
         $identifier = trim($identifier);
 
-        if ($identifier === '*' || $identifier === '') {
+        if ($identifier === '' || $identifier === '*') {
             return $identifier;
         }
 
@@ -28,8 +28,8 @@ final class SQLiteCompiler extends AbstractSqlCompiler
         $parts = explode('.', $identifier);
 
         $wrapped = array_map(
-            static fn (string $part): string => $part === '*' ? '*' : sprintf('"%s"', $part),
-            $parts
+          static fn (string $part): string => $part === '*' ? '*' : sprintf('"%s"', $part),
+          $parts
         );
 
         return implode('.', $wrapped);

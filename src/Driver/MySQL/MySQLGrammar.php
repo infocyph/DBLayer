@@ -34,19 +34,19 @@ final class MySQLGrammar extends Grammar
      * @param  array<string,mixed>  $update
      */
     public function compileInsertOnDuplicateKeyUpdate(
-        QueryBuilder $query,
-        array $values,
-        array $update
+      QueryBuilder $query,
+      array $values,
+      array $update
     ): string {
         $insert = $this->compileInsert($query, $values);
 
         $updateColumns = implode(', ', array_map(
-            function (string $key): string {
-                $wrapped = $this->wrap($key);
+          function (string $key): string {
+              $wrapped = $this->wrap($key);
 
-                return "{$wrapped} = VALUES({$wrapped})";
-            },
-            array_keys($update)
+              return "{$wrapped} = VALUES({$wrapped})";
+          },
+          array_keys($update)
         ));
 
         return "{$insert} on duplicate key update {$updateColumns}";
@@ -86,7 +86,7 @@ final class MySQLGrammar extends Grammar
     protected function compileLimit(QueryBuilder $query, int $limit): string
     {
         $components = $query->getComponents();
-        $offset = $components['offset'];
+        $offset     = $components['offset'];
 
         if ($offset !== null) {
             return 'limit '.(int) $offset.', '.(int) $limit;
@@ -105,7 +105,7 @@ final class MySQLGrammar extends Grammar
         return match ($lock) {
             'update' => 'for update',
             'shared' => 'lock in share mode',
-            default => '',
+            default  => '',
         };
     }
 

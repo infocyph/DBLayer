@@ -22,20 +22,26 @@ final class SQLiteDriver extends AbstractPdoDriver
 
     public function getCapabilities(): Capabilities
     {
+        // Treat JSON + window functions as available (SQLite 3.25+ with JSON1).
         return new Capabilities(
-            supportsReturning: false, // SQLite >= 3.35.0 has RETURNING, but we treat it as off by default.
-            supportsInsertIgnore: true,
-            supportsUpsert: true,
-            supportsSavepoints: true,
-            supportsSchemas: false,
+          supportsReturning: false, // SQLite >= 3.35.0 has RETURNING, but we treat as off by default.
+          supportsInsertIgnore: true,
+          supportsUpsert: true,
+          supportsSavepoints: true,
+          supportsSchemas: false,
+          supportsJson: true,
+          supportsWindowFunctions: true,
         );
     }
+
     public function getName(): string
     {
         return 'sqlite';
     }
 
     /**
+     * Merge driver-specific defaults (database path).
+     *
      * @param  array<string,mixed>  $config
      * @return array<string,mixed>
      */
@@ -50,6 +56,8 @@ final class SQLiteDriver extends AbstractPdoDriver
     }
 
     /**
+     * Build the PDO DSN for SQLite.
+     *
      * @param  array<string,mixed>  $config
      */
     protected function buildDsn(array $config, bool $readOnly): string
@@ -60,12 +68,11 @@ final class SQLiteDriver extends AbstractPdoDriver
             return 'sqlite::memory:';
         }
 
-        // SQLite read-only can be expressed via URI with mode=ro; keep this simple.
+        // SQLite read-only can be expressed via URI with mode=ro.
         if ($readOnly && ! str_contains($database, 'mode=')) {
-            // Use query parameter mode=ro on file path.
             return sprintf('sqlite:%s?mode=ro', $database);
         }
 
-        return 'sqlite:' . $database;
+        return 'sqlite:'.$database;
     }
 }

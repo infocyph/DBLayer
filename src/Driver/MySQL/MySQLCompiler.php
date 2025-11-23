@@ -9,7 +9,7 @@ use Infocyph\DBLayer\Driver\AbstractSqlCompiler;
 /**
  * MySQL/MariaDB SQL compiler.
  *
- * Currently inherits generic SELECT compilation and only customises
+ * Inherits generic SELECT compilation and customises
  * identifier quoting (`schema`.`table`).
  */
 final class MySQLCompiler extends AbstractSqlCompiler
@@ -18,7 +18,7 @@ final class MySQLCompiler extends AbstractSqlCompiler
     {
         $identifier = trim($identifier);
 
-        if ($identifier === '*' || $identifier === '') {
+        if ($identifier === '' || $identifier === '*') {
             return $identifier;
         }
 
@@ -30,8 +30,8 @@ final class MySQLCompiler extends AbstractSqlCompiler
         $parts = explode('.', $identifier);
 
         $wrapped = array_map(
-            static fn (string $part): string => $part === '*' ? '*' : sprintf('`%s`', $part),
-            $parts
+          static fn (string $part): string => $part === '*' ? '*' : sprintf('`%s`', $part),
+          $parts
         );
 
         return implode('.', $wrapped);

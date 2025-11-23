@@ -53,7 +53,7 @@ final class SQLiteGrammar extends Grammar
     public function compileTruncate(QueryBuilder $query): string
     {
         $components = $query->getComponents();
-        $table = $this->wrapTable($components['from']);
+        $table      = $this->wrapTable($components['from']);
 
         // SQLite doesn't have TRUNCATE, use DELETE instead.
         return "delete from {$table}";
@@ -130,7 +130,7 @@ final class SQLiteGrammar extends Grammar
     }
 
     /**
-     * Compile the lock into SQL (SQLite doesn't support locking).
+     * Compile the lock into SQL (SQLite doesn't support locking hints).
      */
     protected function compileLock(QueryBuilder $query, string $lock): string
     {
