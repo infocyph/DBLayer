@@ -7,6 +7,7 @@ namespace Infocyph\DBLayer\Driver\SQLite;
 use Infocyph\DBLayer\Driver\AbstractPdoDriver;
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
 use Infocyph\DBLayer\Driver\Support\Capabilities;
+use Infocyph\DBLayer\Exceptions\ConnectionException;
 
 /**
  * SQLite driver.
@@ -17,20 +18,20 @@ final class SQLiteDriver extends AbstractPdoDriver
 {
     public function createCompiler(): QueryCompilerInterface
     {
-        return new SQLiteCompiler();
+        return new SQLiteCompiler;
     }
 
     public function getCapabilities(): Capabilities
     {
         // Treat JSON + window functions as available (SQLite 3.25+ with JSON1).
         return new Capabilities(
-          supportsReturning: false, // SQLite >= 3.35.0 has RETURNING, but we treat as off by default.
-          supportsInsertIgnore: true,
-          supportsUpsert: true,
-          supportsSavepoints: true,
-          supportsSchemas: false,
-          supportsJson: true,
-          supportsWindowFunctions: true,
+            supportsReturning: false, // SQLite >= 3.35.0 has RETURNING, but we treat as off by default.
+            supportsInsertIgnore: true,
+            supportsUpsert: true,
+            supportsSavepoints: true,
+            supportsSchemas: false,
+            supportsJson: true,
+            supportsWindowFunctions: true,
         );
     }
 
@@ -53,6 +54,30 @@ final class SQLiteDriver extends AbstractPdoDriver
         $config['database'] ??= ':memory:';
 
         return $config;
+    }
+
+    /**
+     * @param  array<string,mixed>  $config
+     */
+    public function validateConfig(array $config): void
+    {
+        $driver = $this->getName();
+        $database = $config['database'] ?? null;
+
+        if (! is_string($database) || $database === '') {
+            throw ConnectionException::invalidConfiguration(
+                $driver,
+                'Missing "database" for SQLite connection. Use a file path or ":memory:".'
+            );
+        }
+
+        // Optional: guard against accidentally passing a directory.
+        if ($database !== ':memory:' && str_ends_with($database, DIRECTORY_SEPARATOR)) {
+            throw ConnectionException::invalidConfiguration(
+                $driver,
+                'SQLite "database" looks like a directory path; expected a file path or ":memory:".'
+            );
+        }
     }
 
     /**

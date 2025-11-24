@@ -74,6 +74,11 @@ final class Connection
     private ?Grammar $grammar = null;
 
     /**
+     * Optional health monitor for this connection.
+     */
+    private ?HealthCheck $healthCheck = null;
+
+    /**
      * Write PDO connection.
      */
     private ?PDO $pdo = null;
@@ -101,10 +106,10 @@ final class Connection
      * @var array{queries:int,writes:int,reads:int,errors:int}
      */
     private array $stats = [
-      'queries' => 0,
-      'writes'  => 0,
-      'reads'   => 0,
-      'errors'  => 0,
+        'queries' => 0,
+        'writes' => 0,
+        'reads' => 0,
+        'errors' => 0,
     ];
 
     /**
@@ -118,21 +123,16 @@ final class Connection
     private ?Transaction $transaction = null;
 
     /**
-     * Optional health monitor for this connection.
-     */
-    private ?HealthCheck $healthCheck = null;
-
-    /**
      * Create a new connection instance.
      */
     public function __construct(ConnectionConfig $config)
     {
-        $this->config         = $config;
-        $this->tablePrefix    = (string) ($config->get('prefix') ?? '');
+        $this->config = $config;
+        $this->tablePrefix = (string) ($config->get('prefix') ?? '');
         $this->securityChecks = $config->isSecurityEnabled();
 
         // Resolve driver and compiler up front; all engines go through DriverRegistry.
-        $this->driver   = DriverRegistry::resolve($config->getDriver());
+        $this->driver = DriverRegistry::resolve($config->getDriver());
         $this->compiler = $this->driver->createCompiler();
     }
 
@@ -145,31 +145,19 @@ final class Connection
     }
 
     /**
-     * Lazily create / get the HealthCheck monitor for this connection.
-     */
-    public function getHealthCheck(): HealthCheck
-    {
-        if ($this->healthCheck === null) {
-            $this->healthCheck = new HealthCheck($this);
-        }
-
-        return $this->healthCheck;
-    }
-
-    /**
-     * Whether this connection has an attached HealthCheck.
-     */
-    public function hasHealthCheck(): bool
-    {
-        return $this->healthCheck !== null;
-    }
-
-    /**
      * Begin a transaction (raw PDO-level).
      */
     public function beginTransaction(): bool
     {
         return $this->getPdo()->beginTransaction();
+    }
+
+    /**
+     * Alias for getCapabilities() to improve readability in higher-level code.
+     */
+    public function capabilities(): Capabilities
+    {
+        return $this->getCapabilities();
     }
 
     /**
@@ -203,7 +191,7 @@ final class Connection
      */
     public function disconnect(): void
     {
-        $this->pdo     = null;
+        $this->pdo = null;
         $this->readPdo = null;
     }
 
@@ -228,9 +216,9 @@ final class Connection
         }
 
         $isWrite = $this->isWriteQuery($sql);
-        $pdo     = $isWrite ? $this->getPdo() : $this->getReadPdo();
+        $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
 
-        $start   = microtime(true);
+        $start = microtime(true);
         $success = false;
 
         try {
@@ -254,9 +242,9 @@ final class Connection
 
                 try {
                     $statement = $this->runStatement(
-                      $isWrite ? $this->getPdo() : $this->getReadPdo(),
-                      $sql,
-                      $bindings
+                        $isWrite ? $this->getPdo() : $this->getReadPdo(),
+                        $sql,
+                        $bindings
                     );
 
                     $this->recordQuery($isWrite);
@@ -326,6 +314,18 @@ final class Connection
     }
 
     /**
+     * Lazily create / get the HealthCheck monitor for this connection.
+     */
+    public function getHealthCheck(): HealthCheck
+    {
+        if ($this->healthCheck === null) {
+            $this->healthCheck = new HealthCheck($this);
+        }
+
+        return $this->healthCheck;
+    }
+
+    /**
      * Get the write PDO connection.
      */
     public function getPdo(): PDO
@@ -369,6 +369,14 @@ final class Connection
     public function getTablePrefix(): string
     {
         return $this->tablePrefix;
+    }
+
+    /**
+     * Whether this connection has an attached HealthCheck.
+     */
+    public function hasHealthCheck(): bool
+    {
+        return $this->healthCheck !== null;
     }
 
     /**
@@ -429,18 +437,17 @@ final class Connection
      * It is primarily useful for inspecting generated SQL.
      *
      * @param  callable(self):void  $callback
-     *
      * @return array<int,array{sql:string,bindings:array<int|string,mixed>}>
      */
     public function pretend(callable $callback): array
     {
-        $logged           = [];
+        $logged = [];
         $previousRecorder = $this->queryRecorder;
 
         $this->queryRecorder = static function (string $sql, array $bindings) use (&$logged): void {
             $logged[] = [
-              'sql'      => $sql,
-              'bindings' => $bindings,
+                'sql' => $sql,
+                'bindings' => $bindings,
             ];
         };
 
@@ -498,10 +505,10 @@ final class Connection
     public function resetStats(): void
     {
         $this->stats = [
-          'queries' => 0,
-          'writes'  => 0,
-          'reads'   => 0,
-          'errors'  => 0,
+            'queries' => 0,
+            'writes' => 0,
+            'reads' => 0,
+            'errors' => 0,
         ];
     }
 
@@ -533,10 +540,10 @@ final class Connection
         }
 
         if ($type === QueryType::INSERT) {
-            $success  = $this->insert($query->sql, $query->bindings);
+            $success = $this->insert($query->sql, $query->bindings);
             $rowCount = $success ? 1 : 0;
-            $id       = $this->lastInsertId();
-            $lastId   = $id !== '' ? $id : null;
+            $id = $this->lastInsertId();
+            $lastId = $id !== '' ? $id : null;
 
             return new DriverResult(null, $rowCount, $lastId);
         }
@@ -612,15 +619,53 @@ final class Connection
         return true;
     }
 
+    public function supportsInsertIgnore(): bool
+    {
+        return $this->driver->getCapabilities()->supportsInsertIgnore;
+    }
+
+    public function supportsJson(): bool
+    {
+        return $this->driver->getCapabilities()->supportsJson;
+    }
+
+    /**
+     * Capability helpers – useful for QueryBuilder / grammar decisions.
+     */
+    public function supportsReturning(): bool
+    {
+        return $this->driver->getCapabilities()->supportsReturning;
+    }
+
+    public function supportsSavepoints(): bool
+    {
+        return $this->driver->getCapabilities()->supportsSavepoints;
+    }
+
+    public function supportsSchemas(): bool
+    {
+        return $this->driver->getCapabilities()->supportsSchemas;
+    }
+
+    public function supportsUpsert(): bool
+    {
+        return $this->driver->getCapabilities()->supportsUpsert;
+    }
+
+    public function supportsWindowFunctions(): bool
+    {
+        return $this->driver->getCapabilities()->supportsWindowFunctions;
+    }
+
     /**
      * Get a query builder for the given table.
      */
     public function table(string $table): QueryBuilder
     {
         return new QueryBuilder(
-          $this,
-          $this->getGrammar(),
-          $this->getExecutor()
+            $this,
+            $this->getGrammar(),
+            $this->getExecutor()
         )->from($table);
     }
 
@@ -632,8 +677,8 @@ final class Connection
     public function transaction(callable $callback, int $attempts = 1): mixed
     {
         return $this->getTransactionManager()->execute(
-          static fn (self $connection): mixed => $callback($connection),
-          $attempts
+            static fn (self $connection): mixed => $callback($connection),
+            $attempts
         );
     }
 
@@ -651,13 +696,13 @@ final class Connection
     public function unprepared(string $sql): bool
     {
         if ($this->securityChecks) {
-            Security::validateQuery($sql, [], $this->config->securityConfig());
+            Security::validateQuery($sql, []);
         }
 
         $isWrite = $this->isWriteQuery($sql);
-        $pdo     = $isWrite ? $this->getPdo() : $this->getReadPdo();
+        $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
 
-        $start   = microtime(true);
+        $start = microtime(true);
         $success = false;
 
         try {
@@ -720,8 +765,8 @@ final class Connection
             $this->pdo = $this->driver->createPdo($this->config, false);
         } catch (PDOException $e) {
             throw ConnectionException::connectionFailed(
-              $this->config->getDriver(),
-              $e->getMessage()
+                $this->config->getDriver(),
+                $e->getMessage()
             );
         }
     }
@@ -744,7 +789,7 @@ final class Connection
             $config = ConnectionConfig::fromArray($merged);
 
             $this->readPdo = $this->driver->createPdo($config, true);
-        } catch (PDOException | ConnectionException) {
+        } catch (PDOException|ConnectionException) {
             // Silent fallback to write connection; readPdo stays null.
             $this->readPdo = null;
         }
@@ -772,7 +817,7 @@ final class Connection
         }
 
         $driverName = $this->config->getDriver();
-        $grammar    = DriverProfile::createGrammar($driverName);
+        $grammar = DriverProfile::createGrammar($driverName);
 
         if ($this->tablePrefix !== '') {
             $grammar->setTablePrefix($this->tablePrefix);
@@ -789,10 +834,10 @@ final class Connection
     private function getParameterType(mixed $value): int
     {
         return match (true) {
-            is_int($value)  => PDO::PARAM_INT,
+            is_int($value) => PDO::PARAM_INT,
             is_bool($value) => PDO::PARAM_BOOL,
             $value === null => PDO::PARAM_NULL,
-            default         => PDO::PARAM_STR,
+            default => PDO::PARAM_STR,
         };
     }
 
@@ -853,14 +898,24 @@ final class Connection
      */
     private function isWriteQuery(string $sql): bool
     {
-        $sql       = ltrim($sql);
+        $sql = ltrim($sql);
         $firstWord = strtoupper(substr($sql, 0, strcspn($sql, " \t\n\r")));
 
         return in_array(
-          $firstWord,
-          ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'REPLACE'],
-          true
+            $firstWord,
+            ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'REPLACE'],
+            true
         );
+    }
+
+    /**
+     * Record a performance sample into HealthCheck, if attached.
+     */
+    private function recordPerformanceSample(float $durationMs, bool $success): void
+    {
+        if ($this->healthCheck !== null) {
+            $this->healthCheck->recordSample($durationMs, $success);
+        }
     }
 
     /**
@@ -890,16 +945,6 @@ final class Connection
     }
 
     /**
-     * Record a performance sample into HealthCheck, if attached.
-     */
-    private function recordPerformanceSample(float $durationMs, bool $success): void
-    {
-        if ($this->healthCheck !== null) {
-            $this->healthCheck->recordSample($durationMs, $success);
-        }
-    }
-
-    /**
      * Execute a prepared statement on a given PDO instance.
      *
      * @param  array<int|string,mixed>  $bindings
@@ -916,51 +961,5 @@ final class Connection
         $statement->execute();
 
         return $statement;
-    }
-
-    /**
-     * Alias for getCapabilities() to improve readability in higher-level code.
-     */
-    public function capabilities(): Capabilities
-    {
-        return $this->getCapabilities();
-    }
-
-    /**
-     * Capability helpers – useful for QueryBuilder / grammar decisions.
-     */
-    public function supportsReturning(): bool
-    {
-        return $this->driver->getCapabilities()->supportsReturning;
-    }
-
-    public function supportsInsertIgnore(): bool
-    {
-        return $this->driver->getCapabilities()->supportsInsertIgnore;
-    }
-
-    public function supportsUpsert(): bool
-    {
-        return $this->driver->getCapabilities()->supportsUpsert;
-    }
-
-    public function supportsSavepoints(): bool
-    {
-        return $this->driver->getCapabilities()->supportsSavepoints;
-    }
-
-    public function supportsSchemas(): bool
-    {
-        return $this->driver->getCapabilities()->supportsSchemas;
-    }
-
-    public function supportsJson(): bool
-    {
-        return $this->driver->getCapabilities()->supportsJson;
-    }
-
-    public function supportsWindowFunctions(): bool
-    {
-        return $this->driver->getCapabilities()->supportsWindowFunctions;
     }
 }
