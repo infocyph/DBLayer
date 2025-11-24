@@ -84,13 +84,13 @@ final class MySQLDriver extends AbstractPdoDriver
             );
         }
 
-        if (isset($config['port']) && $config['port'] !== null) {
-            if (! is_int($config['port']) && ! ctype_digit((string) $config['port'])) {
-                throw ConnectionException::invalidConfiguration(
-                    $driver,
-                    '"port" must be an integer for MySQL connection.'
-                );
-            }
+        if (isset($config['port']) &&
+          ! is_int($config['port']) &&
+          ! ctype_digit((string) $config['port'])) {
+            throw ConnectionException::invalidConfiguration(
+                $driver,
+                '"port" must be an integer for MySQL connection.'
+            );
         }
 
         if (isset($config['charset']) && ! is_string($config['charset'])) {
