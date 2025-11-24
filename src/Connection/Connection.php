@@ -696,7 +696,7 @@ final class Connection
     public function unprepared(string $sql): bool
     {
         if ($this->securityChecks) {
-            Security::validateQuery($sql, []);
+            Security::validateQuery($sql, [], $this->config->securityConfig());
         }
 
         $isWrite = $this->isWriteQuery($sql);
