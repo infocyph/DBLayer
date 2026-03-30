@@ -25,8 +25,8 @@ final class QueryValidator
      * via Security facade mode (NORMAL/STRICT/OFF).
      */
     private const INJECTION_PATTERNS = [
-        // UNION-based injections (covers UNION SELECT / UNION ALL SELECT).
-      '/\bunion\b\s+all?\s+\bselect\b/i',
+        // UNION-based injections usually chained after boolean bypass payloads.
+      '/\b(or|and)\b[\s\S]{0,128}\bunion\b(?:\s+all)?\s+\bselect\b/i',
 
         // Tautologies / OR/AND 1=1 style.
       '/\b(or|and)\s+1\s*=\s*1\b/i',

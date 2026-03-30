@@ -153,6 +153,14 @@ final class Connection
     }
 
     /**
+     * Begin transaction using the transaction manager (supports nesting/savepoints).
+     */
+    public function begin(): void
+    {
+        $this->getTransactionManager()->begin();
+    }
+
+    /**
      * Alias for getCapabilities() to improve readability in higher-level code.
      */
     public function capabilities(): Capabilities
@@ -166,6 +174,14 @@ final class Connection
     public function commit(): bool
     {
         return $this->getPdo()->commit();
+    }
+
+    /**
+     * Commit transaction using the transaction manager.
+     */
+    public function commitTransaction(): void
+    {
+        $this->getTransactionManager()->commit();
     }
 
     /**
@@ -521,6 +537,14 @@ final class Connection
     }
 
     /**
+     * Roll back transaction using the transaction manager.
+     */
+    public function rollbackTransaction(): void
+    {
+        $this->getTransactionManager()->rollBack();
+    }
+
+    /**
      * Run a compiled query (new pipeline: QueryPayload → CompiledQuery → DriverResult).
      *
      * For now this method reuses the existing string-based helpers so that
@@ -776,16 +800,20 @@ final class Connection
      */
     private function connectRead(): void
     {
-        $readConfig = $this->config->getReadConfig();
+        $readConfigs = $this->config->getReadConfigs();
 
-        if ($readConfig === []) {
+        if ($readConfigs === []) {
             $this->readPdo = null;
 
             return;
         }
 
+        $index = \array_rand($readConfigs);
+        $readConfig = $readConfigs[$index];
+
         try {
             $merged = array_merge($this->config->toArray(), $readConfig);
+            unset($merged['read'], $merged['write']);
             $config = ConnectionConfig::fromArray($merged);
 
             $this->readPdo = $this->driver->createPdo($config, true);

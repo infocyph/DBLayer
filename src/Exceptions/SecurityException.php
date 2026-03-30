@@ -9,9 +9,9 @@ namespace Infocyph\DBLayer\Exceptions;
  */
 final class SecurityException extends DBException
 {
-    public static function invalidConfiguration(string $message): self
+    public static function invalidConfiguration(string $message): static
     {
-        return new self('Invalid security configuration: ' . $message);
+        return new static('Invalid security configuration: ' . $message);
     }
 
     public static function rateLimitExceeded(

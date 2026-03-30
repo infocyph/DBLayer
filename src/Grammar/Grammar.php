@@ -103,7 +103,7 @@ abstract class Grammar
         $sql = $this->concatenate($this->compileComponents($query));
 
         if ($components['unions']) {
-            $sql = $this->wrapUnion($sql).' '.$this->compileUnions($query);
+            $sql .= ' '.$this->compileUnions($query);
         }
 
         return $sql;
@@ -517,7 +517,7 @@ abstract class Grammar
     {
         $keyword = $union['all'] ? 'union all' : 'union';
 
-        return $keyword.' '.$this->wrapUnion($this->compileSelect($union['query']));
+        return $keyword.' '.$this->compileSelect($union['query']);
     }
 
     /**
@@ -525,14 +525,14 @@ abstract class Grammar
      */
     protected function compileUnions(QueryBuilder $query): string
     {
-        $sql    = '';
         $unions = $query->getComponents()['unions'];
+        $segments = [];
 
         foreach ($unions as $union) {
-            $sql .= $this->compileUnion($union);
+            $segments[] = $this->compileUnion($union);
         }
 
-        return \ltrim($sql);
+        return \implode(' ', $segments);
     }
 
     /**

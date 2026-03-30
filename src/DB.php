@@ -86,6 +86,16 @@ class DB
     protected static array $queryLog = [];
 
     /**
+     * Number of retained log entries.
+     */
+    protected static int $queryLogCount = 0;
+
+    /**
+     * Ring-buffer start offset when bounded logging is enabled.
+     */
+    protected static int $queryLogStart = 0;
+
+    /**
      * Dynamically pass methods to the default connection.
      */
     public static function __callStatic(string $method, array $parameters): mixed
@@ -137,7 +147,7 @@ class DB
      */
     public static function beginTransaction(?string $connection = null): void
     {
-        static::connection($connection)->beginTransaction();
+        static::connection($connection)->begin();
     }
 
     /**
@@ -147,7 +157,7 @@ class DB
      */
     public static function commit(?string $connection = null): void
     {
-        static::connection($connection)->commit();
+        static::connection($connection)->commitTransaction();
     }
 
     /**
@@ -230,6 +240,8 @@ class DB
     public static function flushQueryLog(): void
     {
         static::$queryLog = [];
+        static::$queryLogCount = 0;
+        static::$queryLogStart = 0;
     }
 
     /**
@@ -299,7 +311,7 @@ class DB
      */
     public static function getQueryLog(): array
     {
-        return static::$queryLog;
+        return static::orderedQueryLog();
     }
 
     /**
@@ -393,6 +405,8 @@ class DB
         static::$connectionConfigs  = [];
         static::$defaultConnection  = null;
         static::$queryLog           = [];
+        static::$queryLogCount      = 0;
+        static::$queryLogStart      = 0;
         static::$listeners          = [];
         static::$loggingQueries     = false;
         static::$eventsHooked       = false;
@@ -452,7 +466,7 @@ class DB
      */
     public static function rollBack(?string $connection = null): void
     {
-        static::connection($connection)->rollBack();
+        static::connection($connection)->rollbackTransaction();
     }
 
     /**
@@ -508,14 +522,7 @@ class DB
     public static function setMaxQueryLogEntries(?int $max): void
     {
         static::$maxQueryLogEntries = $max !== null && $max > 0 ? $max : null;
-
-        if (static::$maxQueryLogEntries !== null && count(static::$queryLog) > static::$maxQueryLogEntries) {
-            $overflow = count(static::$queryLog) - static::$maxQueryLogEntries;
-
-            if ($overflow > 0) {
-                array_splice(static::$queryLog, 0, $overflow);
-            }
-        }
+        static::reconfigureQueryLogStorage();
     }
 
     /**
@@ -564,7 +571,7 @@ class DB
           'database'          => $conn->getDatabaseName(),
           'prefix'            => $conn->getTablePrefix(),
           'transaction_level' => $conn->transactionLevel(),
-          'total_queries'     => count(static::$queryLog),
+          'total_queries'     => static::$queryLogCount,
         ];
     }
 
@@ -709,20 +716,84 @@ class DB
             }
 
             if (static::$loggingQueries) {
-                static::$queryLog[] = $payload;
-
-                if (
-                  static::$maxQueryLogEntries !== null
-                  && count(static::$queryLog) > static::$maxQueryLogEntries
-                ) {
-                    $overflow = count(static::$queryLog) - static::$maxQueryLogEntries;
-
-                    if ($overflow > 0) {
-                        array_splice(static::$queryLog, 0, $overflow);
-                    }
-                }
+                static::appendQueryLogEntry($payload);
             }
         });
+    }
+
+    /**
+     * Append one query-log entry (supports bounded ring-buffer mode).
+     *
+     * @param  array<string,mixed>  $entry
+     */
+    private static function appendQueryLogEntry(array $entry): void
+    {
+        $max = static::$maxQueryLogEntries;
+
+        if ($max === null) {
+            static::$queryLog[] = $entry;
+            static::$queryLogCount++;
+
+            return;
+        }
+
+        if ($max <= 0) {
+            return;
+        }
+
+        if (static::$queryLogCount < $max) {
+            $index = (static::$queryLogStart + static::$queryLogCount) % $max;
+            static::$queryLog[$index] = $entry;
+            static::$queryLogCount++;
+
+            return;
+        }
+
+        static::$queryLog[static::$queryLogStart] = $entry;
+        static::$queryLogStart = (static::$queryLogStart + 1) % $max;
+    }
+
+    /**
+     * Return query log ordered from oldest to newest.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private static function orderedQueryLog(): array
+    {
+        if (static::$queryLogCount === 0) {
+            return [];
+        }
+
+        if (static::$maxQueryLogEntries === null) {
+            return static::$queryLog;
+        }
+
+        $ordered = [];
+        $max     = static::$maxQueryLogEntries;
+
+        for ($i = 0; $i < static::$queryLogCount; $i++) {
+            $index = (static::$queryLogStart + $i) % $max;
+            $ordered[] = static::$queryLog[$index];
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * Rebuild internal query-log storage after max-size changes.
+     */
+    private static function reconfigureQueryLogStorage(): void
+    {
+        $ordered = static::orderedQueryLog();
+        $max     = static::$maxQueryLogEntries;
+
+        if ($max !== null && \count($ordered) > $max) {
+            $ordered = \array_slice($ordered, -$max);
+        }
+
+        static::$queryLog = \array_values($ordered);
+        static::$queryLogCount = \count(static::$queryLog);
+        static::$queryLogStart = 0;
     }
 
     /**

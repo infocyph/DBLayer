@@ -71,6 +71,16 @@ final class Executor
     private array $queryLog = [];
 
     /**
+     * Number of retained log entries.
+     */
+    private int $queryLogCount = 0;
+
+    /**
+     * Ring-buffer start offset when bounded logging is enabled.
+     */
+    private int $queryLogStart = 0;
+
+    /**
      * Whether to perform binding count validation.
      */
     private bool $validateBindings = true;
@@ -90,6 +100,8 @@ final class Executor
     public function clearQueryLog(): void
     {
         $this->queryLog = [];
+        $this->queryLogCount = 0;
+        $this->queryLogStart = 0;
     }
 
     /**
@@ -202,9 +214,11 @@ final class Executor
      */
     public function getFailedQueries(): array
     {
+        $logs = $this->getQueryLog();
+
         /** @var list<array{sql:string,bindings:list<mixed>,time:float,timestamp:float,error:string}> $failed */
         $failed = \array_values(\array_filter(
-          $this->queryLog,
+          $logs,
           static fn (array $log): bool => isset($log['error'])
         ));
 
@@ -224,7 +238,7 @@ final class Executor
      */
     public function getQueryLog(): array
     {
-        return $this->queryLog;
+        return $this->orderedQueryLog();
     }
 
     /**
@@ -241,7 +255,7 @@ final class Executor
      */
     public function getQueryStats(): array
     {
-        if ($this->queryLog === []) {
+        if ($this->queryLogCount === 0) {
             return [
               'total_queries'  => 0,
               'total_time'     => 0.0,
@@ -252,14 +266,15 @@ final class Executor
             ];
         }
 
-        $times  = \array_column($this->queryLog, 'time');
+        $logs   = $this->getQueryLog();
+        $times  = \array_column($logs, 'time');
         $failed = $this->getFailedQueries();
 
         $totalTime = \array_sum($times);
         $count     = \count($times);
 
         return [
-          'total_queries'  => \count($this->queryLog),
+          'total_queries'  => $this->queryLogCount,
           'total_time'     => \round($totalTime, 4),          // ms
           'avg_time'       => \round($totalTime / $count, 4), // ms
           'min_time'       => \round((float) \min($times), 4),
@@ -281,7 +296,7 @@ final class Executor
      */
     public function getSlowestQueries(int $limit = 10): array
     {
-        $queries = $this->queryLog;
+        $queries = $this->getQueryLog();
 
         \usort(
           $queries,
@@ -559,30 +574,17 @@ final class Executor
      */
     public function select(QueryBuilder $query): array
     {
-        // New path: QueryBuilder → Payload → Driver Compiler → raw()
-        // Guarded with method_exists() for BC with older Connection
-        // implementations and to keep this safe until all drivers are ready.
-        if (\method_exists($query, 'toPayload') && \method_exists($this->connection, 'getCompiler')) {
-            try {
-                /** @var object $payload */
-                $payload  = $query->toPayload();
-                $compiler = $this->connection->getCompiler();
-                /** @var object $compiled */
-                $compiled = $compiler->compile($payload);
+        // Use compiler path only for query shapes known to be equivalent to grammar output.
+        if (
+            \method_exists($query, 'toPayload')
+            && \method_exists($this->connection, 'getCompiler')
+            && $this->canUseDriverCompiler($query)
+        ) {
+            $payload  = $query->toPayload();
+            $compiler = $this->connection->getCompiler();
+            $compiled = $compiler->compile($payload);
 
-                if ($compiled instanceof CompiledQuery) {
-                    return $this->raw($compiled->sql, $compiled->bindings);
-                }
-
-                if (isset($compiled->sql, $compiled->bindings) && \is_array($compiled->bindings)) {
-                    /** @var list<mixed> $bindings */
-                    $bindings = $compiled->bindings;
-
-                    return $this->raw($compiled->sql, $bindings);
-                }
-            } catch (\Throwable) {
-                // Silently fall back to Grammar-based compilation.
-            }
+            return $this->raw($compiled->sql, $compiled->bindings);
         }
 
         // Legacy path: Grammar-based compilation.
@@ -600,14 +602,7 @@ final class Executor
     public function setMaxQueryLogEntries(?int $max): void
     {
         $this->maxLogEntries = $max !== null && $max > 0 ? $max : null;
-
-        if ($this->maxLogEntries !== null && \count($this->queryLog) > $this->maxLogEntries) {
-            $overflow = \count($this->queryLog) - $this->maxLogEntries;
-
-            if ($overflow > 0) {
-                \array_splice($this->queryLog, 0, $overflow);
-            }
-        }
+        $this->reconfigureQueryLogStorage();
     }
 
     /**
@@ -863,6 +858,45 @@ final class Executor
     }
 
     /**
+     * Decide whether the driver compiler path can safely compile this query.
+     */
+    private function canUseDriverCompiler(QueryBuilder $query): bool
+    {
+        $components = $query->getComponents();
+
+        // Keep grammar as the canonical path for currently unsupported components.
+        if ($components['distinct'] || $components['unions'] !== [] || $components['lock'] !== null) {
+            return false;
+        }
+
+        foreach ($components['joins'] as $join) {
+            if ($join instanceof JoinClause) {
+                return false;
+            }
+        }
+
+        foreach ($components['wheres'] as $where) {
+            if (! $this->canCompileWhereClause($where)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Determine whether a where clause shape is supported by AbstractSqlCompiler.
+     *
+     * @param  array<string,mixed>  $where
+     */
+    private function canCompileWhereClause(array $where): bool
+    {
+        $type = (string) ($where['type'] ?? 'basic');
+
+        return \in_array($type, ['basic', 'in', 'between', 'null', 'raw'], true);
+    }
+
+    /**
      * Get bindings for INSERT-like queries.
      *
      * @param  array<int,array<string,mixed>>  $values
@@ -905,15 +939,7 @@ final class Executor
             $entry['error'] = $error;
         }
 
-        $this->queryLog[] = $entry;
-
-        if ($this->maxLogEntries !== null && \count($this->queryLog) > $this->maxLogEntries) {
-            $overflow = \count($this->queryLog) - $this->maxLogEntries;
-
-            if ($overflow > 0) {
-                \array_splice($this->queryLog, 0, $overflow);
-            }
-        }
+        $this->appendQueryLogEntry($entry);
     }
 
     /**
@@ -963,5 +989,92 @@ final class Executor
         if ($expected !== $given) {
             throw QueryException::bindingCountMismatch($sql, $expected, $given);
         }
+    }
+
+    /**
+     * Append one query-log entry (supports bounded ring-buffer mode).
+     *
+     * @param  array{
+     *   sql:string,
+     *   bindings:list<mixed>,
+     *   time:float,
+     *   timestamp:float,
+     *   error?:string
+     * }  $entry
+     */
+    private function appendQueryLogEntry(array $entry): void
+    {
+        $max = $this->maxLogEntries;
+
+        if ($max === null) {
+            $this->queryLog[] = $entry;
+            $this->queryLogCount++;
+
+            return;
+        }
+
+        if ($max <= 0) {
+            return;
+        }
+
+        if ($this->queryLogCount < $max) {
+            $index = ($this->queryLogStart + $this->queryLogCount) % $max;
+            $this->queryLog[$index] = $entry;
+            $this->queryLogCount++;
+
+            return;
+        }
+
+        $this->queryLog[$this->queryLogStart] = $entry;
+        $this->queryLogStart = ($this->queryLogStart + 1) % $max;
+    }
+
+    /**
+     * Return query log ordered from oldest to newest.
+     *
+     * @return list<array{
+     *   sql:string,
+     *   bindings:list<mixed>,
+     *   time:float,
+     *   timestamp:float,
+     *   error?:string
+     * }>
+     */
+    private function orderedQueryLog(): array
+    {
+        if ($this->queryLogCount === 0) {
+            return [];
+        }
+
+        if ($this->maxLogEntries === null) {
+            return $this->queryLog;
+        }
+
+        $ordered = [];
+        $max     = $this->maxLogEntries;
+
+        for ($i = 0; $i < $this->queryLogCount; $i++) {
+            $index = ($this->queryLogStart + $i) % $max;
+            $ordered[] = $this->queryLog[$index];
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * Rebuild internal query-log storage after max-size changes.
+     */
+    private function reconfigureQueryLogStorage(): void
+    {
+        $ordered = $this->orderedQueryLog();
+        $max     = $this->maxLogEntries;
+
+        if ($max !== null && \count($ordered) > $max) {
+            $ordered = \array_slice($ordered, -$max);
+        }
+
+        $this->queryLog = \array_values($ordered);
+        $this->queryLogCount = \count($this->queryLog);
+        $this->queryLogStart = 0;
     }
 }

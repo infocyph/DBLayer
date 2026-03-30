@@ -32,6 +32,13 @@ final class Events
     private static array $listeners = [];
 
     /**
+     * Wildcard listeners keyed by pattern.
+     *
+     * @var array<string, array<int, callable>>
+     */
+    private static array $wildcardListeners = [];
+
+    /**
      * Event queue for deferred dispatch.
      *
      * @var array<int, array{event:string,payload:array<int,mixed>,time:float}>
@@ -72,7 +79,10 @@ final class Events
      */
     public static function dispatch(string $event, array $payload = []): void
     {
-        if (! self::$enabled || self::$listeners === []) {
+        if (
+            ! self::$enabled
+            || (self::$listeners === [] && self::$wildcardListeners === [])
+        ) {
             return;
         }
 
@@ -86,11 +96,7 @@ final class Events
         }
 
         // 2) Wildcard listeners (skip exact key to avoid double-dispatch)
-        foreach (self::$listeners as $pattern => $listeners) {
-            if ($pattern === $event) {
-                continue;
-            }
-
+        foreach (self::$wildcardListeners as $pattern => $listeners) {
             if (! self::matchesPattern($event, $pattern)) {
                 continue;
             }
@@ -128,8 +134,30 @@ final class Events
      */
     public static function forget(string $event, ?callable $listener = null): void
     {
+        $bucket = \str_contains($event, '*') ? 'wildcard' : 'exact';
+
         if ($listener === null) {
-            unset(self::$listeners[$event]);
+            if ($bucket === 'wildcard') {
+                unset(self::$wildcardListeners[$event]);
+            } else {
+                unset(self::$listeners[$event]);
+            }
+
+            return;
+        }
+
+        if ($bucket === 'wildcard') {
+            if (! isset(self::$wildcardListeners[$event])) {
+                return;
+            }
+
+            foreach (self::$wildcardListeners[$event] as $key => $registered) {
+                if ($registered === $listener) {
+                    unset(self::$wildcardListeners[$event][$key]);
+                }
+            }
+
+            self::$wildcardListeners[$event] = \array_values(self::$wildcardListeners[$event]);
 
             return;
         }
@@ -153,6 +181,7 @@ final class Events
     public static function forgetAll(): void
     {
         self::$listeners = [];
+        self::$wildcardListeners = [];
     }
 
     /**
@@ -162,7 +191,10 @@ final class Events
      */
     public static function getEvents(): array
     {
-        return \array_keys(self::$listeners);
+        return \array_values(\array_merge(
+          \array_keys(self::$listeners),
+          \array_keys(self::$wildcardListeners)
+        ));
     }
 
     /**
@@ -189,12 +221,13 @@ final class Events
      */
     public static function getStats(): array
     {
-        $totalListeners = \array_sum(\array_map('count', self::$listeners));
+        $totalListeners = \array_sum(\array_map('count', self::$listeners))
+          + \array_sum(\array_map('count', self::$wildcardListeners));
 
         return [
           'dispatched'        => self::$stats['dispatched'],
           'queued'            => self::$stats['queued'],
-          'registered_events' => \count(self::$listeners),
+          'registered_events' => \count(self::$listeners) + \count(self::$wildcardListeners),
           'queued_events'     => \count(self::$queue),
           'total_listeners'   => $totalListeners,
         ];
@@ -221,6 +254,12 @@ final class Events
      */
     public static function listen(string $event, callable $listener): void
     {
+        if (\str_contains($event, '*')) {
+            self::$wildcardListeners[$event][] = $listener;
+
+            return;
+        }
+
         self::$listeners[$event][] = $listener;
     }
 

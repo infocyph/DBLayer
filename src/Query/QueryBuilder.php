@@ -224,13 +224,14 @@ class QueryBuilder
      *
      * Safer for large tables than OFFSET-based chunk() when rows are inserted/deleted.
      *
+     * @param  mixed  $fromId  Initial cursor value for the chunk column.
      * @param  callable(list<array<string,mixed>>,int):bool  $callback
      */
     public function chunkById(
       int $count,
       callable $callback,
       string $column = 'id',
-      ?int $fromId = null
+      mixed $fromId = null
     ): bool {
         if ($count <= 0) {
             throw QueryException::invalidLimit($count);
@@ -261,7 +262,7 @@ class QueryBuilder
             }
 
             $lastRow = $results[$num - 1];
-            $lastId  = (int) ($lastRow[$column] ?? $lastId);
+            $lastId  = $lastRow[$column] ?? $lastId;
 
             $page++;
         }

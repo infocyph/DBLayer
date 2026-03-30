@@ -39,6 +39,11 @@ final class Pool
     ];
 
     /**
+     * Max number of active connections to probe per health-check run.
+     */
+    private const HEALTH_CHECK_BATCH_SIZE = 5;
+
+    /**
      * Connection configurations.
      *
      * @var array<string,ConnectionConfig>
@@ -63,6 +68,11 @@ final class Pool
      * Last health check time.
      */
     private ?float $lastHealthCheck = null;
+
+    /**
+     * Rolling cursor used to probe active connections in batches.
+     */
+    private int $healthCursor = 0;
 
     /**
      * Pool configuration.
@@ -236,14 +246,36 @@ final class Pool
         $this->lastHealthCheck = $now;
         $this->stats['health_checks']++;
 
-        // Check all known connections.
+        // Probe active connections in bounded batches to avoid full scans.
+        $candidates = [];
+
         foreach ($this->connections as $name => $connections) {
             foreach ($connections as $data) {
-                if (! $data['connection']->isHealthy()) {
-                    $this->removeConnection($name, $data['connection']);
+                $candidates[] = [
+                  'name'       => $name,
+                  'connection' => $data['connection'],
+                ];
+            }
+        }
+
+        $total = \count($candidates);
+
+        if ($total > 0) {
+            $batchSize = \min(self::HEALTH_CHECK_BATCH_SIZE, $total);
+
+            for ($i = 0; $i < $batchSize; $i++) {
+                $index = ($this->healthCursor + $i) % $total;
+                $item  = $candidates[$index];
+
+                if (! $item['connection']->isHealthy()) {
+                    $this->removeConnection($item['name'], $item['connection']);
                     $this->stats['health_failures']++;
                 }
             }
+
+            $this->healthCursor = ($this->healthCursor + $batchSize) % $total;
+        } else {
+            $this->healthCursor = 0;
         }
 
         // Remove stale idle connections.

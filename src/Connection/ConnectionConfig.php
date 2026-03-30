@@ -36,6 +36,7 @@ final class ConnectionConfig
       'schema'    => null,
       'prefix'    => '',
       'options'   => [],
+      'write'     => [],
       'read'      => [],
       'security'  => [],
     ];
@@ -156,13 +157,35 @@ final class ConnectionConfig
     /**
      * Get the read replica configuration (if any).
      *
+     * Returns the first read replica config for backward compatibility.
+     *
      * @return array<string,mixed>
      */
     public function getReadConfig(): array
     {
+        $read = $this->getReadConfigs();
+
+        return $read[0] ?? [];
+    }
+
+    /**
+     * Get all read replica configurations.
+     *
+     * Supports:
+     *  - read => ['host' => 'replica']
+     *  - read => [['host' => 'replica1'], ['host' => 'replica2']]
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function getReadConfigs(): array
+    {
         $read = $this->config['read'] ?? [];
 
-        return is_array($read) ? $read : [];
+        if (! is_array($read) || $read === []) {
+            return [];
+        }
+
+        return $this->normalizeReplicaConfigs($read);
     }
 
     /**
@@ -170,9 +193,7 @@ final class ConnectionConfig
      */
     public function hasReadConfig(): bool
     {
-        return isset($this->config['read'])
-          && is_array($this->config['read'])
-          && $this->config['read'] !== [];
+        return $this->getReadConfigs() !== [];
     }
 
     /**
@@ -292,5 +313,43 @@ final class ConnectionConfig
 
         // Give driver a chance to throw a more specific exception.
         $driver->validateConfig($config);
+    }
+
+    /**
+     * Normalize replica configuration into a list of associative arrays.
+     *
+     * @param  array<int|string,mixed>  $replicas
+     * @return list<array<string,mixed>>
+     */
+    private function normalizeReplicaConfigs(array $replicas): array
+    {
+        if ($replicas === []) {
+            return [];
+        }
+
+        $first = reset($replicas);
+
+        // Single associative config: ['host' => 'replica']
+        if (! is_array($first)) {
+            return [];
+        }
+
+        if (\array_is_list($replicas)) {
+            $normalized = [];
+
+            foreach ($replicas as $replica) {
+                if (is_array($replica) && $replica !== []) {
+                    /** @var array<string,mixed> $replica */
+                    $normalized[] = $replica;
+                }
+            }
+
+            return $normalized;
+        }
+
+        /** @var array<string,mixed> $single */
+        $single = $replicas;
+
+        return $single === [] ? [] : [$single];
     }
 }

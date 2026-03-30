@@ -57,9 +57,9 @@ final class ConnectionException extends DBException
         return new self("Database driver [{$driver}] is not supported.");
     }
 
-    public static function invalidConfiguration(string $message): self
+    public static function invalidConfiguration(string $message): static
     {
-        return new self('Invalid connection configuration: ' . $message);
+        return new static('Invalid connection configuration: ' . $message);
     }
 
     public static function lostConnection(string $reason = ''): self

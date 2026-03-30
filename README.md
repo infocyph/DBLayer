@@ -1,27 +1,23 @@
 # DBLayer - High-Performance PHP Database Layer
 
-A robust, secure, and feature-rich database abstraction layer for PHP 8.2+ with ORM capabilities, async support, and multi-driver compatibility.
+A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with multi-driver compatibility.
 
 ## Features
 
 ### Core Features
 - ✅ **Query Builder** - Fluent, Laravel-like API
-- ✅ **Connection Manager** - Connection pooling + read/write split
+- ✅ **Connection Manager** - Connection pooling + read replicas
 - ✅ **Multi-Driver** - MySQL, PostgreSQL, SQLite
 - ✅ **Security** - Multi-layer SQL injection protection
 - ✅ **Transactions** - Nested transactions with savepoints
-- ✅ **Schema Builder** - Full DDL support
-- ✅ **Migrations** - Database versioning
-- ✅ **ORM** - Active Record pattern with relationships
-- ✅ **Async Support** - Swoole, ReactPHP, Amp, Revolt
 - ✅ **Caching** - Query result caching
 - ✅ **Profiling** - Performance monitoring
 - ✅ **Events** - Lifecycle hooks
+- ✅ **Pagination** - Length-aware, simple, and cursor pagination
 
 ### Performance
 - Near-PDO performance (<5% overhead for simple queries)
 - Connection pooling for reuse
-- Prepared statement caching
 - Memory-efficient cursor mode for large datasets
 
 ### Security
@@ -56,12 +52,9 @@ DB::addConnection([
     'charset' => 'utf8mb4',
 ]);
 
-// Read/Write split
+// Read replicas
 DB::addConnection([
     'driver' => 'mysql',
-    'write' => [
-        'host' => 'master.example.com',
-    ],
     'read' => [
         ['host' => 'replica1.example.com'],
         ['host' => 'replica2.example.com'],
@@ -69,7 +62,6 @@ DB::addConnection([
     'database' => 'myapp',
     'username' => 'root',
     'password' => 'secret',
-    'sticky' => true,
 ]);
 ```
 
@@ -122,8 +114,8 @@ $average = DB::table('products')->avg('price');
 ```php
 // Automatic transaction
 DB::transaction(function() {
-    DB::table('accounts')->where('id', 1)->decrement('balance', 100);
-    DB::table('accounts')->where('id', 2)->increment('balance', 100);
+    DB::table('accounts')->where('id', 1)->update(['balance' => 900]);
+    DB::table('accounts')->where('id', 2)->update(['balance' => 1100]);
     DB::table('transactions')->insert(['amount' => 100]);
 });
 
@@ -138,97 +130,11 @@ try {
 }
 ```
 
-### Schema & Migrations
-
-```php
-use Infocyph\DBLayer\Schema\Schema;
-
-// Create table
-Schema::create('users', function($table) {
-    $table->id();
-    $table->string('name', 100);
-    $table->string('email')->unique();
-    $table->boolean('active')->default(true);
-    $table->timestamps();
-    
-    $table->index(['email', 'active']);
-});
-
-// Modify table
-Schema::table('users', function($table) {
-    $table->string('phone', 20)->nullable();
-});
-```
-
-### ORM (Active Record)
-
-```php
-use Infocyph\DBLayer\ORM\Model;
-
-class User extends Model
-{
-    protected $fillable = ['name', 'email'];
-    protected $hidden = ['password'];
-    
-    public function posts()
-    {
-        return $this->hasMany(Post::class);
-    }
-    
-    public function profile()
-    {
-        return $this->hasOne(Profile::class);
-    }
-}
-
-// Usage
-$user = User::create([
-    'name' => 'John Doe',
-    'email' => 'john@example.com',
-]);
-
-$user = User::find(1);
-$user->name = 'Jane Doe';
-$user->save();
-
-// Eager loading (prevents N+1)
-$users = User::with('posts', 'profile')->get();
-
-// Query scopes
-$activeUsers = User::where('active', true)->get();
-```
-
-### Async Queries
-
-```php
-use Swoole\Coroutine;
-use Infocyph\DBLayer\Async\AsyncConnection;
-
-Coroutine\run(function() {
-    $async = new AsyncConnection(DB::connection(), 'swoole');
-    
-    // Single async query
-    $async->selectAsync('SELECT * FROM users WHERE id = ?', [1])
-        ->then(function($users) {
-            print_r($users);
-        });
-    
-    // Parallel queries
-    $async->parallel([
-        ['sql' => 'SELECT * FROM users'],
-        ['sql' => 'SELECT * FROM posts'],
-        ['sql' => 'SELECT * FROM comments']
-    ])->then(function($results) {
-        [$users, $posts, $comments] = $results;
-    });
-});
-```
-
 ## Testing
 
 ```bash
 composer test
-composer test-coverage
+composer tests
 ```
 
 ## Benchmarks
@@ -253,7 +159,7 @@ DBLayer implements multiple layers of security:
 
 ## Requirements
 
-- PHP 8.2+
+- PHP 8.4+
 - ext-pdo
 - ext-pdo_mysql (for MySQL)
 - ext-pdo_pgsql (for PostgreSQL)
