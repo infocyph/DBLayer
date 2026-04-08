@@ -34,19 +34,19 @@ final class MySQLGrammar extends Grammar
      * @param  array<string,mixed>  $update
      */
     public function compileInsertOnDuplicateKeyUpdate(
-      QueryBuilder $query,
-      array $values,
-      array $update
+        QueryBuilder $query,
+        array $values,
+        array $update
     ): string {
         $insert = $this->compileInsert($query, $values);
 
         $updateColumns = implode(', ', array_map(
-          function (string $key): string {
-              $wrapped = $this->wrap($key);
+            function (string $key): string {
+                $wrapped = $this->wrap($key);
 
-              return "{$wrapped} = VALUES({$wrapped})";
-          },
-          array_keys($update)
+                return "{$wrapped} = VALUES({$wrapped})";
+            },
+            array_keys($update)
         ));
 
         return "{$insert} on duplicate key update {$updateColumns}";

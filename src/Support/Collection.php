@@ -94,32 +94,7 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
             return 0;
         }
 
-        $total = 0;
-        $count = 0;
-
-        if ($key === null) {
-            foreach ($this->items as $value) {
-                if (is_numeric($value)) {
-                    $total += $value + 0;
-                    $count++;
-                }
-            }
-        } else {
-            foreach ($this->items as $item) {
-                $value = null;
-
-                if (is_array($item) && array_key_exists($key, $item)) {
-                    $value = $item[$key];
-                } elseif (is_object($item) && isset($item->{$key})) {
-                    $value = $item->{$key};
-                }
-
-                if (is_numeric($value)) {
-                    $total += $value + 0;
-                    $count++;
-                }
-            }
-        }
+        [$total, $count] = $this->aggregateAverage($key);
 
         if ($count === 0) {
             return 0;
@@ -424,8 +399,8 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     public function toJson(int $options = 0): string
     {
         $json = json_encode(
-          $this->jsonSerialize(),
-          $options | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            $this->jsonSerialize(),
+            $options | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
         );
 
         return $json === false ? '[]' : $json;
@@ -449,10 +424,54 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     public function where(string $key, mixed $value): static
     {
         return $this->filter(
-          static fn ($item) => (
-            (is_array($item) && array_key_exists($key, $item) && $item[$key] === $value)
+            static fn ($item) => (
+                (is_array($item) && array_key_exists($key, $item) && $item[$key] === $value)
             || (is_object($item) && isset($item->{$key}) && $item->{$key} === $value)
-          )
+            )
         );
+    }
+
+    /**
+     * Aggregate total and count for numeric average calculation.
+     *
+     * @return array{0:int|float,1:int}
+     */
+    private function aggregateAverage(?string $key): array
+    {
+        $total = 0;
+        $count = 0;
+
+        foreach ($this->items as $item) {
+            $value = $this->averageCandidateValue($item, $key);
+
+            if (! is_numeric($value)) {
+                continue;
+            }
+
+            $total += $value + 0;
+            $count++;
+        }
+
+        return [$total, $count];
+    }
+
+    /**
+     * Resolve the value candidate used by avg().
+     */
+    private function averageCandidateValue(mixed $item, ?string $key): mixed
+    {
+        if ($key === null) {
+            return $item;
+        }
+
+        if (is_array($item) && array_key_exists($key, $item)) {
+            return $item[$key];
+        }
+
+        if (is_object($item) && isset($item->{$key})) {
+            return $item->{$key};
+        }
+
+        return null;
     }
 }

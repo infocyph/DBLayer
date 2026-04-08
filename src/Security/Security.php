@@ -133,7 +133,7 @@ final class Security
             return;
         }
 
-        $validator = new QueryValidator;
+        $validator = new QueryValidator();
 
         try {
             $validator->detectSqlInjection($sql);
@@ -220,14 +220,7 @@ final class Security
             'alter table',
             'create table',
         ];
-
-        foreach ($dangerous as $operation) {
-            if (str_starts_with($sql, $operation)) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any($dangerous, fn ($operation) => str_starts_with($sql, $operation));
     }
 
     /**
@@ -384,7 +377,7 @@ final class Security
         }
 
         // 4) Always do injection + binding checks in NORMAL / STRICT.
-        (new QueryValidator)->validateQuery($sql, $bindings);
+        new QueryValidator()->validateQuery($sql, $bindings);
     }
 
     /**
@@ -497,7 +490,7 @@ final class Security
     private static function limiter(): RateLimiter
     {
         if (self::$rateLimiter === null) {
-            self::$rateLimiter = new RateLimiter;
+            self::$rateLimiter = new RateLimiter();
         }
 
         return self::$rateLimiter;

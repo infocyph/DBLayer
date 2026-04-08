@@ -151,6 +151,14 @@ class DB
     }
 
     /**
+     * Get driver capabilities for the given connection.
+     */
+    public static function capabilities(?string $connection = null): Capabilities
+    {
+        return static::connection($connection)->getCapabilities();
+    }
+
+    /**
      * Commit the active transaction.
      *
      * @throws ConnectionException
@@ -333,6 +341,20 @@ class DB
     }
 
     /**
+     * Get a health report for the given connection.
+     *
+     * @return array<string,mixed>
+     *
+     * @throws ConnectionException
+     */
+    public static function health(?string $connection = null): array
+    {
+        $conn = static::connection($connection);
+
+        return $conn->getHealthCheck()->getReport();
+    }
+
+    /**
      * Execute an insert statement.
      *
      * @param  array<int,mixed>  $bindings
@@ -419,9 +441,9 @@ class DB
      * @throws ConnectionException
      */
     public static function quote(
-      string $value,
-      int $type = PDO::PARAM_STR,
-      ?string $connection = null
+        string $value,
+        int $type = PDO::PARAM_STR,
+        ?string $connection = null
     ): string {
         return static::connection($connection)->getPdo()->quote($value, $type);
     }
@@ -575,18 +597,14 @@ class DB
         ];
     }
 
-    /**
-     * Get a health report for the given connection.
-     *
-     * @return array<string,mixed>
-     *
-     * @throws ConnectionException
-     */
-    public static function health(?string $connection = null): array
+    public static function supportsJson(?string $connection = null): bool
     {
-        $conn = static::connection($connection);
+        return static::connection($connection)->supportsJson();
+    }
 
-        return $conn->getHealthCheck()->getReport();
+    public static function supportsReturning(?string $connection = null): bool
+    {
+        return static::connection($connection)->supportsReturning();
     }
 
     /**
@@ -606,9 +624,9 @@ class DB
      * @throws ConnectionException
      */
     public static function transaction(
-      callable $callback,
-      int $attempts = 1,
-      ?string $connection = null
+        callable $callback,
+        int $attempts = 1,
+        ?string $connection = null
     ): mixed {
         return static::connection($connection)->transaction($callback, $attempts);
     }
@@ -674,54 +692,6 @@ class DB
     }
 
     /**
-     * Ensure the global query event listener is registered.
-     *
-     * Bridges typed QueryExecuted events into the DB facade
-     * listener list and query log.
-     */
-    private static function ensureEventsHooked(): void
-    {
-        if (static::$eventsHooked) {
-            return;
-        }
-
-        static::$eventsHooked = true;
-
-        Events::listen('db.query.executed', function (QueryExecuted $event): void {
-            // Skip work if nothing is interested.
-            if (! static::$loggingQueries && static::$listeners === []) {
-                return;
-            }
-
-            // Resolve connection name by identity (if available).
-            $connectionName = null;
-
-            foreach (static::$connections as $name => $connection) {
-                if ($connection === $event->connection) {
-                    $connectionName = $name;
-                    break;
-                }
-            }
-
-            $payload = [
-              'query'      => $event->sql,
-              'bindings'   => $event->bindings,
-              'time'       => $event->time, // ms
-              'connection' => $connectionName,
-              'rows'       => $event->rowsAffected,
-            ];
-
-            foreach (static::$listeners as $listener) {
-                $listener($payload);
-            }
-
-            if (static::$loggingQueries) {
-                static::appendQueryLogEntry($payload);
-            }
-        });
-    }
-
-    /**
      * Append one query-log entry (supports bounded ring-buffer mode).
      *
      * @param  array<string,mixed>  $entry
@@ -751,6 +721,45 @@ class DB
 
         static::$queryLog[static::$queryLogStart] = $entry;
         static::$queryLogStart = (static::$queryLogStart + 1) % $max;
+    }
+
+    /**
+     * Ensure the global query event listener is registered.
+     *
+     * Bridges typed QueryExecuted events into the DB facade
+     * listener list and query log.
+     */
+    private static function ensureEventsHooked(): void
+    {
+        if (static::$eventsHooked) {
+            return;
+        }
+
+        static::$eventsHooked = true;
+
+        Events::listen('db.query.executed', function (QueryExecuted $event): void {
+            // Skip work if nothing is interested.
+            if (! static::$loggingQueries && static::$listeners === []) {
+                return;
+            }
+            $connectionName = array_find_key(static::$connections, fn ($connection) => $connection === $event->connection);
+
+            $payload = [
+              'query'      => $event->sql,
+              'bindings'   => $event->bindings,
+              'time'       => $event->time, // ms
+              'connection' => $connectionName,
+              'rows'       => $event->rowsAffected,
+            ];
+
+            foreach (static::$listeners as $listener) {
+                $listener($payload);
+            }
+
+            if (static::$loggingQueries) {
+                static::appendQueryLogEntry($payload);
+            }
+        });
     }
 
     /**
@@ -794,24 +803,6 @@ class DB
         static::$queryLog = \array_values($ordered);
         static::$queryLogCount = \count(static::$queryLog);
         static::$queryLogStart = 0;
-    }
-
-    /**
-     * Get driver capabilities for the given connection.
-     */
-    public static function capabilities(?string $connection = null): Capabilities
-    {
-        return static::connection($connection)->getCapabilities();
-    }
-
-    public static function supportsReturning(?string $connection = null): bool
-    {
-        return static::connection($connection)->supportsReturning();
-    }
-
-    public static function supportsJson(?string $connection = null): bool
-    {
-        return static::connection($connection)->supportsJson();
     }
 
 

@@ -44,10 +44,10 @@ abstract class Repository
      * Create a new repository instance.
      */
     public function __construct(
-      Connection $connection,
-      Grammar $grammar,
-      Executor $executor,
-      ResultProcessor $results
+        Connection $connection,
+        Grammar $grammar,
+        Executor $executor,
+        ResultProcessor $results
     ) {
         $this->connection = $connection;
         $this->grammar    = $grammar;
@@ -90,8 +90,8 @@ abstract class Repository
     public function count(?callable $scope = null): int
     {
         $query = $this->applyScope(
-          $this->query(),
-          $scope
+            $this->query(),
+            $scope
         );
 
         return $query->count();
@@ -105,8 +105,8 @@ abstract class Repository
     public function exists(?callable $scope = null): bool
     {
         $query = $this->applyScope(
-          $this->query(),
-          $scope
+            $this->query(),
+            $scope
         );
 
         return $query->exists();
@@ -155,8 +155,8 @@ abstract class Repository
     public function first(?callable $scope = null, array $columns = ['*']): ?array
     {
         $query = $this->applyScope(
-          $this->query()->select($columns),
-          $scope
+            $this->query()->select($columns),
+            $scope
         );
 
         return $query->first();
@@ -170,8 +170,8 @@ abstract class Repository
     public function get(?callable $scope = null, array $columns = ['*']): Collection
     {
         $query = $this->applyScope(
-          $this->query()->select($columns),
-          $scope
+            $this->query()->select($columns),
+            $scope
         );
 
         $rows = $query->get();
@@ -188,8 +188,8 @@ abstract class Repository
     public function groupByKey(string $column, ?callable $scope = null): array
     {
         $query = $this->applyScope(
-          $this->query(),
-          $scope
+            $this->query(),
+            $scope
         );
 
         $rows = $query->get();
@@ -206,8 +206,8 @@ abstract class Repository
     public function pluck(string $column, ?string $keyColumn = null, ?callable $scope = null): array
     {
         $query = $this->applyScope(
-          $this->query(),
-          $scope
+            $this->query(),
+            $scope
         );
 
         $rows = $query->get();
@@ -228,8 +228,8 @@ abstract class Repository
     public function value(string $column, ?callable $scope = null): mixed
     {
         $query = $this->applyScope(
-          $this->query()->select([$column]),
-          $scope
+            $this->query()->select([$column]),
+            $scope
         );
 
         $rows = $query->get();

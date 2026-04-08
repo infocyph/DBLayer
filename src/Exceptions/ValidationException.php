@@ -20,10 +20,10 @@ final class ValidationException extends DBException
      * @param array<string, array<int, string>|string> $errors
      */
     public function __construct(
-      string $message = 'Validation failed.',
-      array $errors = [],
-      int $code = 0,
-      ?Throwable $previous = null
+        string $message = 'Validation failed.',
+        array $errors = [],
+        int $code = 0,
+        ?Throwable $previous = null
     ) {
         parent::__construct($message, $code, $previous);
 
@@ -38,19 +38,6 @@ final class ValidationException extends DBException
     public static function withErrors(array $errors): self
     {
         return new self('Validation failed.', $errors);
-    }
-
-    /**
-     * @return array<string, array<int, string>|string>
-     */
-    public function getErrors(): array
-    {
-        return $this->errors;
-    }
-
-    public function hasErrors(): bool
-    {
-        return $this->errors !== [];
     }
 
     /**
@@ -75,5 +62,18 @@ final class ValidationException extends DBException
         }
 
         return null;
+    }
+
+    /**
+     * @return array<string, array<int, string>|string>
+     */
+    public function getErrors(): array
+    {
+        return $this->errors;
+    }
+
+    public function hasErrors(): bool
+    {
+        return $this->errors !== [];
     }
 }

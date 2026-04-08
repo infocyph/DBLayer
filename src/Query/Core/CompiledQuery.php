@@ -15,9 +15,9 @@ final readonly class CompiledQuery
      * @param list<mixed> $bindings
      */
     public function __construct(
-      public string $sql,
-      public array $bindings,
-      public QueryType $type,
+        public string $sql,
+        public array $bindings,
+        public QueryType $type,
     ) {
     }
 }

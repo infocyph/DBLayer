@@ -10,7 +10,6 @@ use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuting;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Grammar\Grammar;
-use Infocyph\DBLayer\Query\Core\CompiledQuery;
 
 /**
  * Query Executor
@@ -118,8 +117,8 @@ final class Executor
 
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
-              'db.query.executing',
-              new QueryExecuting($sql, $bindings, $this->connection)
+                'db.query.executing',
+                new QueryExecuting($sql, $bindings, $this->connection)
             );
         }
 
@@ -131,8 +130,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected)
                 );
             }
 
@@ -144,8 +143,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
                 );
             }
 
@@ -218,8 +217,8 @@ final class Executor
 
         /** @var list<array{sql:string,bindings:list<mixed>,time:float,timestamp:float,error:string}> $failed */
         $failed = \array_values(\array_filter(
-          $logs,
-          static fn (array $log): bool => isset($log['error'])
+            $logs,
+            static fn (array $log): bool => isset($log['error'])
         ));
 
         return $failed;
@@ -299,8 +298,8 @@ final class Executor
         $queries = $this->getQueryLog();
 
         \usort(
-          $queries,
-          static fn (array $a, array $b): int => $b['time'] <=> $a['time']
+            $queries,
+            static fn (array $a, array $b): int => $b['time'] <=> $a['time']
         );
 
         return \array_slice($queries, 0, $limit);
@@ -328,8 +327,8 @@ final class Executor
 
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
-              'db.query.executing',
-              new QueryExecuting($sql, $bindings, $this->connection)
+                'db.query.executing',
+                new QueryExecuting($sql, $bindings, $this->connection)
             );
         }
 
@@ -343,8 +342,8 @@ final class Executor
                 $rowsCount = \count($rows);
 
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
                 );
             }
 
@@ -356,8 +355,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
                 );
             }
 
@@ -382,10 +381,8 @@ final class Executor
 
         // Prefer driver-specific ignore semantics when available.
         if (\method_exists($this->grammar, 'compileInsertIgnore')) {
-            /** @phpstan-ignore-next-line */
             $sql = $this->grammar->compileInsertIgnore($query, $rows);
         } elseif (\method_exists($this->grammar, 'compileInsertOrIgnore')) {
-            /** @phpstan-ignore-next-line */
             $sql = $this->grammar->compileInsertOrIgnore($query, $rows);
         } else {
             // Graceful fallback to regular insert().
@@ -400,8 +397,8 @@ final class Executor
 
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
-              'db.query.executing',
-              new QueryExecuting($sql, $bindings, $this->connection)
+                'db.query.executing',
+                new QueryExecuting($sql, $bindings, $this->connection)
             );
         }
 
@@ -415,8 +412,8 @@ final class Executor
                 $rowsCount = \count($rows);
 
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
                 );
             }
 
@@ -428,8 +425,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
                 );
             }
 
@@ -447,9 +444,9 @@ final class Executor
      * @return array<string,mixed>|null First returned row or simulated row from lastInsertId()
      */
     public function insertReturning(
-      QueryBuilder $query,
-      array $values,
-      ?string $column = null
+        QueryBuilder $query,
+        array $values,
+        ?string $column = null
     ): ?array {
         $rows = $this->normalizeInsertValues($values);
 
@@ -460,7 +457,6 @@ final class Executor
         $column ??= 'id';
 
         if (\method_exists($this->grammar, 'compileInsertGetId')) {
-            /** @phpstan-ignore-next-line */
             $sql      = $this->grammar->compileInsertGetId($query, $rows, $column);
             $bindings = $this->getInsertBindings($rows);
 
@@ -470,8 +466,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executing',
-                  new QueryExecuting($sql, $bindings, $this->connection)
+                    'db.query.executing',
+                    new QueryExecuting($sql, $bindings, $this->connection)
                 );
             }
 
@@ -483,8 +479,8 @@ final class Executor
 
                 if ($this->dispatchEvents) {
                     $this->dispatchEvent(
-                      'db.query.executed',
-                      new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, \count($resultRows))
+                        'db.query.executed',
+                        new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, \count($resultRows))
                     );
                 }
 
@@ -496,8 +492,8 @@ final class Executor
 
                 if ($this->dispatchEvents) {
                     $this->dispatchEvent(
-                      'db.query.executed',
-                      new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                        'db.query.executed',
+                        new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
                     );
                 }
 
@@ -529,8 +525,8 @@ final class Executor
 
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
-              'db.query.executing',
-              new QueryExecuting($sql, $bindings, $this->connection)
+                'db.query.executing',
+                new QueryExecuting($sql, $bindings, $this->connection)
             );
         }
 
@@ -542,8 +538,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
                 );
             }
 
@@ -555,8 +551,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
                 );
             }
 
@@ -616,8 +612,8 @@ final class Executor
 
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
-              'db.query.executing',
-              new QueryExecuting($sql, $bindings, $this->connection)
+                'db.query.executing',
+                new QueryExecuting($sql, $bindings, $this->connection)
             );
         }
 
@@ -629,8 +625,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
                 );
             }
 
@@ -642,8 +638,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
                 );
             }
 
@@ -662,8 +658,8 @@ final class Executor
 
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
-              'db.query.executing',
-              new QueryExecuting($sql, [], $this->connection)
+                'db.query.executing',
+                new QueryExecuting($sql, [], $this->connection)
             );
         }
 
@@ -675,8 +671,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null)
+                    'db.query.executed',
+                    new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null)
                 );
             }
 
@@ -688,8 +684,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null)
+                    'db.query.executed',
+                    new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null)
                 );
             }
 
@@ -717,8 +713,8 @@ final class Executor
 
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
-              'db.query.executing',
-              new QueryExecuting($sql, $bindings, $this->connection)
+                'db.query.executing',
+                new QueryExecuting($sql, $bindings, $this->connection)
             );
         }
 
@@ -730,8 +726,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected)
                 );
             }
 
@@ -743,8 +739,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
                 );
             }
 
@@ -762,10 +758,10 @@ final class Executor
      * @param  list<string>|null  $update
      */
     public function upsert(
-      QueryBuilder $query,
-      array $values,
-      array $uniqueBy,
-      ?array $update = null
+        QueryBuilder $query,
+        array $values,
+        array $uniqueBy,
+        ?array $update = null
     ): bool {
         $rows = $this->normalizeInsertValues($values);
 
@@ -790,10 +786,8 @@ final class Executor
         }
 
         if (\method_exists($this->grammar, 'compileUpsert')) {
-            /** @phpstan-ignore-next-line */
             $sql = $this->grammar->compileUpsert($query, $rows, $uniqueBy, $updateAssoc);
         } elseif (\method_exists($this->grammar, 'compileInsertOnDuplicateKeyUpdate')) {
-            /** @phpstan-ignore-next-line */
             $sql = $this->grammar->compileInsertOnDuplicateKeyUpdate($query, $rows, $updateAssoc);
         } else {
             // Graceful fallback: behave like insert().
@@ -808,8 +802,8 @@ final class Executor
 
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
-              'db.query.executing',
-              new QueryExecuting($sql, $bindings, $this->connection)
+                'db.query.executing',
+                new QueryExecuting($sql, $bindings, $this->connection)
             );
         }
 
@@ -823,8 +817,8 @@ final class Executor
                 $rowsCount = \count($rows);
 
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
                 );
             }
 
@@ -836,8 +830,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                  'db.query.executed',
-                  new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                    'db.query.executed',
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
                 );
             }
 
@@ -846,15 +840,53 @@ final class Executor
     }
 
     /**
-     * Dispatch an event if event dispatching is enabled.
+     * Append one query-log entry (supports bounded ring-buffer mode).
+     *
+     * @param  array{
+     *   sql:string,
+     *   bindings:list<mixed>,
+     *   time:float,
+     *   timestamp:float,
+     *   error?:string
+     * }  $entry
      */
-    private function dispatchEvent(string $event, object $payload): void
+    private function appendQueryLogEntry(array $entry): void
     {
-        if (! $this->dispatchEvents) {
+        $max = $this->maxLogEntries;
+
+        if ($max === null) {
+            $this->queryLog[] = $entry;
+            $this->queryLogCount++;
+
             return;
         }
 
-        Events::dispatch($event, [$payload]);
+        if ($max <= 0) {
+            return;
+        }
+
+        if ($this->queryLogCount < $max) {
+            $index = ($this->queryLogStart + $this->queryLogCount) % $max;
+            $this->queryLog[$index] = $entry;
+            $this->queryLogCount++;
+
+            return;
+        }
+
+        $this->queryLog[$this->queryLogStart] = $entry;
+        $this->queryLogStart = ($this->queryLogStart + 1) % $max;
+    }
+
+    /**
+     * Determine whether a where clause shape is supported by AbstractSqlCompiler.
+     *
+     * @param  array<string,mixed>  $where
+     */
+    private function canCompileWhereClause(array $where): bool
+    {
+        $type = (string) ($where['type'] ?? 'basic');
+
+        return \in_array($type, ['basic', 'in', 'between', 'null', 'raw'], true);
     }
 
     /**
@@ -885,15 +917,15 @@ final class Executor
     }
 
     /**
-     * Determine whether a where clause shape is supported by AbstractSqlCompiler.
-     *
-     * @param  array<string,mixed>  $where
+     * Dispatch an event if event dispatching is enabled.
      */
-    private function canCompileWhereClause(array $where): bool
+    private function dispatchEvent(string $event, object $payload): void
     {
-        $type = (string) ($where['type'] ?? 'basic');
+        if (! $this->dispatchEvents) {
+            return;
+        }
 
-        return \in_array($type, ['basic', 'in', 'between', 'null', 'raw'], true);
+        Events::dispatch($event, [$payload]);
     }
 
     /**
@@ -965,71 +997,6 @@ final class Executor
     }
 
     /**
-     * Basic validation for positional parameter binding counts.
-     *
-     * Only checks "?" placeholders (named parameters are left to PDO).
-     *
-     * @param  list<mixed>  $bindings
-     */
-    private function validateBindingCount(string $sql, array $bindings): void
-    {
-        if (! $this->validateBindings || $bindings === []) {
-            return;
-        }
-
-        $expected = \substr_count($sql, '?');
-
-        if ($expected === 0) {
-            // Likely named parameters or no placeholders; skip.
-            return;
-        }
-
-        $given = \count($bindings);
-
-        if ($expected !== $given) {
-            throw QueryException::bindingCountMismatch($sql, $expected, $given);
-        }
-    }
-
-    /**
-     * Append one query-log entry (supports bounded ring-buffer mode).
-     *
-     * @param  array{
-     *   sql:string,
-     *   bindings:list<mixed>,
-     *   time:float,
-     *   timestamp:float,
-     *   error?:string
-     * }  $entry
-     */
-    private function appendQueryLogEntry(array $entry): void
-    {
-        $max = $this->maxLogEntries;
-
-        if ($max === null) {
-            $this->queryLog[] = $entry;
-            $this->queryLogCount++;
-
-            return;
-        }
-
-        if ($max <= 0) {
-            return;
-        }
-
-        if ($this->queryLogCount < $max) {
-            $index = ($this->queryLogStart + $this->queryLogCount) % $max;
-            $this->queryLog[$index] = $entry;
-            $this->queryLogCount++;
-
-            return;
-        }
-
-        $this->queryLog[$this->queryLogStart] = $entry;
-        $this->queryLogStart = ($this->queryLogStart + 1) % $max;
-    }
-
-    /**
      * Return query log ordered from oldest to newest.
      *
      * @return list<array{
@@ -1076,5 +1043,32 @@ final class Executor
         $this->queryLog = \array_values($ordered);
         $this->queryLogCount = \count($this->queryLog);
         $this->queryLogStart = 0;
+    }
+
+    /**
+     * Basic validation for positional parameter binding counts.
+     *
+     * Only checks "?" placeholders (named parameters are left to PDO).
+     *
+     * @param  list<mixed>  $bindings
+     */
+    private function validateBindingCount(string $sql, array $bindings): void
+    {
+        if (! $this->validateBindings || $bindings === []) {
+            return;
+        }
+
+        $expected = \substr_count($sql, '?');
+
+        if ($expected === 0) {
+            // Likely named parameters or no placeholders; skip.
+            return;
+        }
+
+        $given = \count($bindings);
+
+        if ($expected !== $given) {
+            throw QueryException::bindingCountMismatch($sql, $expected, $given);
+        }
     }
 }

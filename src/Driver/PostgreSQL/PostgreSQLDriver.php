@@ -16,7 +16,7 @@ final class PostgreSQLDriver extends AbstractPdoDriver
 {
     public function createCompiler(): QueryCompilerInterface
     {
-        return new PostgreSQLCompiler;
+        return new PostgreSQLCompiler();
     }
 
     public function getCapabilities(): Capabilities

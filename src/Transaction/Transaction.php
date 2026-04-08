@@ -39,6 +39,11 @@ final class Transaction
     private int $level = 0;
 
     /**
+     * Timestamp when the top-level transaction started (microtime).
+     */
+    private ?float $startedAt = null;
+
+    /**
      * Stats for this connection.
      *
      * @var array{
@@ -64,11 +69,6 @@ final class Transaction
       'savepoints'      => 0,
       'elapsed_time'    => 0.0,
     ];
-
-    /**
-     * Timestamp when the top-level transaction started (microtime).
-     */
-    private ?float $startedAt = null;
 
     public function __construct(Connection $connection)
     {
@@ -152,43 +152,6 @@ final class Transaction
     }
 
     /**
-     * Get current transaction nesting level.
-     */
-    public function level(): int
-    {
-        return $this->level;
-    }
-
-    /**
-     * Check if there is an active transaction.
-     */
-    public function inTransaction(): bool
-    {
-        return $this->level > 0;
-    }
-
-    /**
-     * Rollback the current transaction or rollback to a savepoint.
-     */
-    public function rollBack(): void
-    {
-        if ($this->level === 0) {
-            return;
-        }
-
-        $this->level--;
-        $this->stats['current_level'] = $this->level;
-
-        if ($this->level === 0) {
-            $this->connection->rollBack();
-            $this->stats['rolled_back']++;
-            $this->finishTopLevel();
-        } else {
-            $this->rollbackToSavepoint($this->level);
-        }
-    }
-
-    /**
      * Get underlying connection.
      */
     public function getConnection(): Connection
@@ -217,6 +180,22 @@ final class Transaction
     }
 
     /**
+     * Check if there is an active transaction.
+     */
+    public function inTransaction(): bool
+    {
+        return $this->level > 0;
+    }
+
+    /**
+     * Get current transaction nesting level.
+     */
+    public function level(): int
+    {
+        return $this->level;
+    }
+
+    /**
      * Reset stats for this transaction wrapper.
      */
     public function resetStats(): void
@@ -234,6 +213,27 @@ final class Transaction
         ];
 
         $this->startedAt = $this->level > 0 ? (microtime(true)) : null;
+    }
+
+    /**
+     * Rollback the current transaction or rollback to a savepoint.
+     */
+    public function rollBack(): void
+    {
+        if ($this->level === 0) {
+            return;
+        }
+
+        $this->level--;
+        $this->stats['current_level'] = $this->level;
+
+        if ($this->level === 0) {
+            $this->connection->rollBack();
+            $this->stats['rolled_back']++;
+            $this->finishTopLevel();
+        } else {
+            $this->rollbackToSavepoint($this->level);
+        }
     }
 
     /**
@@ -257,19 +257,6 @@ final class Transaction
     }
 
     /**
-     * Finalize stats for a completed top-level transaction.
-     */
-    private function finishTopLevel(): void
-    {
-        if ($this->startedAt !== null) {
-            $this->stats['elapsed_time'] += microtime(true) - $this->startedAt;
-        }
-
-        $this->startedAt              = null;
-        $this->stats['in_transaction'] = false;
-    }
-
-    /**
      * Create a savepoint for a given nesting level.
      */
     private function createSavepoint(int $level): void
@@ -281,6 +268,19 @@ final class Transaction
         }
 
         $this->connection->statement('SAVEPOINT trans_'.$level);
+    }
+
+    /**
+     * Finalize stats for a completed top-level transaction.
+     */
+    private function finishTopLevel(): void
+    {
+        if ($this->startedAt !== null) {
+            $this->stats['elapsed_time'] += microtime(true) - $this->startedAt;
+        }
+
+        $this->startedAt              = null;
+        $this->stats['in_transaction'] = false;
     }
 
     /**

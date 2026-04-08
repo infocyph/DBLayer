@@ -36,11 +36,11 @@ final class QueryExecuted
      * @param array<int|string, mixed> $bindings
      */
     public function __construct(
-      string $sql,
-      array $bindings,
-      float $time,
-      Connection $connection,
-      ?int $rowsAffected = null
+        string $sql,
+        array $bindings,
+        float $time,
+        Connection $connection,
+        ?int $rowsAffected = null
     ) {
         $this->sql          = $sql;
         $this->bindings     = $bindings;

@@ -67,9 +67,9 @@ final class DriverRegistry
 
         if (! is_subclass_of($class, DriverInterface::class)) {
             throw new InvalidArgumentException(sprintf(
-              'Driver class "%s" must implement %s.',
-              $class,
-              DriverInterface::class
+                'Driver class "%s" must implement %s.',
+                $class,
+                DriverInterface::class
             ));
         }
 

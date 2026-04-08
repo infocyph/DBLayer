@@ -145,19 +145,19 @@ final class Connection
     }
 
     /**
-     * Begin a transaction (raw PDO-level).
-     */
-    public function beginTransaction(): bool
-    {
-        return $this->getPdo()->beginTransaction();
-    }
-
-    /**
      * Begin transaction using the transaction manager (supports nesting/savepoints).
      */
     public function begin(): void
     {
         $this->getTransactionManager()->begin();
+    }
+
+    /**
+     * Begin a transaction (raw PDO-level).
+     */
+    public function beginTransaction(): bool
+    {
+        return $this->getPdo()->beginTransaction();
     }
 
     /**

@@ -11,4 +11,8 @@ git-story_media
 .windsurf
 .vscode
 .phpunit.cache
+var
 *.patch
+patch.php
+.psalm-cache
+AI_CONTEXT.md

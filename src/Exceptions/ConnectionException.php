@@ -95,7 +95,7 @@ final class ConnectionException extends DBException
     public static function missingExtension(string $extension): self
     {
         return new self(
-          "Required database extension or package [{$extension}] is not installed or enabled."
+            "Required database extension or package [{$extension}] is not installed or enabled."
         );
     }
 
@@ -105,7 +105,7 @@ final class ConnectionException extends DBException
     public static function poolExhausted(int $maxConnections): self
     {
         return new self(
-          "Connection pool exhausted (max {$maxConnections} connections in use)."
+            "Connection pool exhausted (max {$maxConnections} connections in use)."
         );
     }
 

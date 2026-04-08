@@ -19,10 +19,10 @@ final class SimplePaginator extends AbstractPaginator
      * @param list<mixed> $items
      */
     public function __construct(
-      array $items,
-      int $perPage,
-      int $currentPage = 1,
-      bool $hasMore = false
+        array $items,
+        int $perPage,
+        int $currentPage = 1,
+        bool $hasMore = false
     ) {
         parent::__construct($items, $perPage, $currentPage);
 

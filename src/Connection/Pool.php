@@ -58,6 +58,11 @@ final class Pool
     private array $connections = [];
 
     /**
+     * Rolling cursor used to probe active connections in batches.
+     */
+    private int $healthCursor = 0;
+
+    /**
      * Pool of idle connections (subset of $connections).
      *
      * @var array<string,array<int,array{connection:Connection,idle_since:float}>>
@@ -68,11 +73,6 @@ final class Pool
      * Last health check time.
      */
     private ?float $lastHealthCheck = null;
-
-    /**
-     * Rolling cursor used to probe active connections in batches.
-     */
-    private int $healthCursor = 0;
 
     /**
      * Pool configuration.
@@ -382,7 +382,7 @@ final class Pool
 
         // Attach HealthCheck monitor tuned with pool config.
         $connection->attachHealthCheck(
-          new HealthCheck($connection, [
+            new HealthCheck($connection, [
             'check_interval' => $this->poolConfig['health_check_interval'],
           ])
         );

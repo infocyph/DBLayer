@@ -38,7 +38,7 @@ final class TransactionException extends DBException
     public static function lockWaitTimeout(string $resource): self
     {
         return new self(
-          "Lock wait timeout exceeded while waiting for resource [{$resource}]."
+            "Lock wait timeout exceeded while waiting for resource [{$resource}]."
         );
     }
 
@@ -73,7 +73,7 @@ final class TransactionException extends DBException
     public static function savepointError(string $savepoint, string $operation): self
     {
         return new self(
-          "Savepoint operation [{$operation}] failed for savepoint [{$savepoint}]."
+            "Savepoint operation [{$operation}] failed for savepoint [{$savepoint}]."
         );
     }
 
@@ -90,7 +90,7 @@ final class TransactionException extends DBException
         $elapsed = sprintf('%.4f', $elapsedSeconds);
 
         return new self(
-          "Transaction timeout after {$elapsed} seconds (max allowed: {$maxSeconds} seconds)."
+            "Transaction timeout after {$elapsed} seconds (max allowed: {$maxSeconds} seconds)."
         );
     }
 }

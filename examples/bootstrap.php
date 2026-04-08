@@ -1,4 +1,5 @@
 <?php
+
 // bootstrap.php
 
 declare(strict_types=1);
@@ -16,7 +17,7 @@ DB::addConnection([
   'username' => 'app_user',
   'password' => 'secret',
   'charset'  => 'utf8mb4',
-  'collation'=> 'utf8mb4_unicode_ci',
+  'collation' => 'utf8mb4_unicode_ci',
 
     // Optional security overrides – otherwise Security::validateQuery() will
     // use global mode defaults.
@@ -24,7 +25,7 @@ DB::addConnection([
     'enabled'        => true,
     'max_sql_length' => 8000,
     'max_params'     => 500,
-    'max_param_bytes'=> 4096,
+    'max_param_bytes' => 4096,
   ],
 ], 'mysql_main');
 

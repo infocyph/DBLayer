@@ -16,7 +16,7 @@ final class MySQLDriver extends AbstractPdoDriver
 {
     public function createCompiler(): QueryCompilerInterface
     {
-        return new MySQLCompiler;
+        return new MySQLCompiler();
     }
 
     public function getCapabilities(): Capabilities

@@ -1,10 +1,11 @@
 <?php
+
 // examples/multi_connections.php
 
 declare(strict_types=1);
 
-use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\DB;
 
 require __DIR__ . '/bootstrap.php';
 

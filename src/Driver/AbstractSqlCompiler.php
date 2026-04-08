@@ -33,11 +33,11 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
         if ($type !== QueryType::SELECT) {
             throw new LogicException(
-              sprintf(
-                'Only SELECT queries are supported by %s currently (got %s).',
-                static::class,
-                $type->value
-              )
+                sprintf(
+                    'Only SELECT queries are supported by %s currently (got %s).',
+                    static::class,
+                    $type->value
+                )
             );
         }
 
@@ -91,9 +91,9 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
             }
 
             $segment = sprintf(
-              '%s %s ?',
-              $this->wrapIdentifier($column),
-              $operator
+                '%s %s ?',
+                $this->wrapIdentifier($column),
+                $operator
             );
 
             if (! $first) {
@@ -131,10 +131,10 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
                 if (isset($join['first'], $join['operator'], $join['second'])) {
                     $sql .= sprintf(
-                      ' ON %s %s %s',
-                      (string) $join['first'],
-                      (string) $join['operator'],
-                      (string) $join['second'],
+                        ' ON %s %s %s',
+                        (string) $join['first'],
+                        (string) $join['operator'],
+                        (string) $join['second'],
                     );
                 }
             } elseif (is_object($join) && method_exists($join, '__toString')) {
@@ -191,9 +191,9 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
             }
 
             $segments[] = sprintf(
-              '%s %s',
-              $this->wrapIdentifier($column),
-              $direction
+                '%s %s',
+                $this->wrapIdentifier($column),
+                $direction
             );
         }
 
@@ -300,9 +300,9 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         }
 
         return sprintf(
-          '%s %s ?',
-          $this->wrapIdentifier($column),
-          $operator
+            '%s %s ?',
+            $this->wrapIdentifier($column),
+            $operator
         );
     }
 
@@ -321,9 +321,9 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         }
 
         return sprintf(
-          '%s %sBETWEEN ? AND ?',
-          $this->wrapIdentifier($column),
-          $not ? 'NOT ' : ''
+            '%s %sBETWEEN ? AND ?',
+            $this->wrapIdentifier($column),
+            $not ? 'NOT ' : ''
         );
     }
 
@@ -344,10 +344,10 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $placeholders = implode(', ', array_fill(0, count($values), '?'));
 
         return sprintf(
-          '%s %sIN (%s)',
-          $this->wrapIdentifier($column),
-          $not ? 'NOT ' : '',
-          $placeholders
+            '%s %sIN (%s)',
+            $this->wrapIdentifier($column),
+            $not ? 'NOT ' : '',
+            $placeholders
         );
     }
 
@@ -364,9 +364,9 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         }
 
         return sprintf(
-          '%s IS %sNULL',
-          $this->wrapIdentifier($column),
-          $not ? 'NOT ' : ''
+            '%s IS %sNULL',
+            $this->wrapIdentifier($column),
+            $not ? 'NOT ' : ''
         );
     }
 

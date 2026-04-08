@@ -139,15 +139,15 @@ final class Logger
         unset($context['level']);
 
         $json = json_encode(
-          $context,
-          JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            $context,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
         ) ?: '{}';
 
         $entry = sprintf(
-          "[%s] %s: %s\n",
-          $timestamp,
-          $level,
-          $json
+            "[%s] %s: %s\n",
+            $timestamp,
+            $level,
+            $json
         );
 
         @file_put_contents($this->logFile, $entry, FILE_APPEND | LOCK_EX);

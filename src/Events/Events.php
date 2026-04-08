@@ -32,13 +32,6 @@ final class Events
     private static array $listeners = [];
 
     /**
-     * Wildcard listeners keyed by pattern.
-     *
-     * @var array<string, array<int, callable>>
-     */
-    private static array $wildcardListeners = [];
-
-    /**
      * Event queue for deferred dispatch.
      *
      * @var array<int, array{event:string,payload:array<int,mixed>,time:float}>
@@ -54,6 +47,13 @@ final class Events
       'dispatched' => 0,
       'queued'     => 0,
     ];
+
+    /**
+     * Wildcard listeners keyed by pattern.
+     *
+     * @var array<string, array<int, callable>>
+     */
+    private static array $wildcardListeners = [];
 
     /**
      * Clear queued events without dispatching.
@@ -134,45 +134,17 @@ final class Events
      */
     public static function forget(string $event, ?callable $listener = null): void
     {
-        $bucket = \str_contains($event, '*') ? 'wildcard' : 'exact';
-
         if ($listener === null) {
-            if ($bucket === 'wildcard') {
-                unset(self::$wildcardListeners[$event]);
-            } else {
-                unset(self::$listeners[$event]);
-            }
-
+            self::forgetAllListenersForEvent($event);
             return;
         }
 
-        if ($bucket === 'wildcard') {
-            if (! isset(self::$wildcardListeners[$event])) {
-                return;
-            }
-
-            foreach (self::$wildcardListeners[$event] as $key => $registered) {
-                if ($registered === $listener) {
-                    unset(self::$wildcardListeners[$event][$key]);
-                }
-            }
-
-            self::$wildcardListeners[$event] = \array_values(self::$wildcardListeners[$event]);
-
+        if (self::isWildcardEvent($event)) {
+            self::forgetListenerFromBucket(self::$wildcardListeners, $event, $listener);
             return;
         }
 
-        if (! isset(self::$listeners[$event])) {
-            return;
-        }
-
-        foreach (self::$listeners[$event] as $key => $registered) {
-            if ($registered === $listener) {
-                unset(self::$listeners[$event][$key]);
-            }
-        }
-
-        self::$listeners[$event] = \array_values(self::$listeners[$event]);
+        self::forgetListenerFromBucket(self::$listeners, $event, $listener);
     }
 
     /**
@@ -192,8 +164,8 @@ final class Events
     public static function getEvents(): array
     {
         return \array_values(\array_merge(
-          \array_keys(self::$listeners),
-          \array_keys(self::$wildcardListeners)
+            \array_keys(self::$listeners),
+            \array_keys(self::$wildcardListeners)
         ));
     }
 
@@ -303,6 +275,47 @@ final class Events
 
             self::listen($event, $listener);
         }
+    }
+
+    /**
+     * Remove all listeners for the given event key.
+     */
+    private static function forgetAllListenersForEvent(string $event): void
+    {
+        if (self::isWildcardEvent($event)) {
+            unset(self::$wildcardListeners[$event]);
+            return;
+        }
+
+        unset(self::$listeners[$event]);
+    }
+
+    /**
+     * Remove one listener from a listener bucket.
+     *
+     * @param  array<string, array<int, callable>>  $bucket
+     */
+    private static function forgetListenerFromBucket(array &$bucket, string $event, callable $listener): void
+    {
+        if (! isset($bucket[$event])) {
+            return;
+        }
+
+        foreach ($bucket[$event] as $key => $registered) {
+            if ($registered === $listener) {
+                unset($bucket[$event][$key]);
+            }
+        }
+
+        $bucket[$event] = \array_values($bucket[$event]);
+    }
+
+    /**
+     * Determine whether an event key is a wildcard pattern.
+     */
+    private static function isWildcardEvent(string $event): bool
+    {
+        return \str_contains($event, '*');
     }
 
     /**

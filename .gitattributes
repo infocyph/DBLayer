@@ -8,11 +8,8 @@ captainhook.json export-ignore
 phpunit.xml export-ignore
 pint.json export-ignore
 rector.php export-ignore
-index.php export-ignore
-routes.php export-ignore
-route_cache_examples.php export-ignore
-.htaccess export-ignore
 .gitattributes export-ignore
-webrick export-ignore
+psalm.xml export-ignore
+pest.xml export-ignore
 
 *  text eol=lf

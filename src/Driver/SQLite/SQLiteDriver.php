@@ -18,7 +18,7 @@ final class SQLiteDriver extends AbstractPdoDriver
 {
     public function createCompiler(): QueryCompilerInterface
     {
-        return new SQLiteCompiler;
+        return new SQLiteCompiler();
     }
 
     public function getCapabilities(): Capabilities

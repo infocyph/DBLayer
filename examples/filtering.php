@@ -1,4 +1,5 @@
 <?php
+
 // examples/filtering.php
 
 declare(strict_types=1);
@@ -21,34 +22,34 @@ $query = DB::table('users')
 
 // Conditionally add "active" filter
 $query = $query->when(
-  $filters['activeOnly'],
-  static function (QueryBuilder $q): QueryBuilder {
-      return $q->where('active', '=', 1);
-  }
+    $filters['activeOnly'],
+    static function (QueryBuilder $q): QueryBuilder {
+        return $q->where('active', '=', 1);
+    }
 );
 
 // Conditionally add "role" filter
 $query = $query->when(
-  $filters['role'] !== null,
-  static function (QueryBuilder $q) use ($filters): QueryBuilder {
-      return $q->where('role', '=', $filters['role']);
-  }
+    $filters['role'] !== null,
+    static function (QueryBuilder $q) use ($filters): QueryBuilder {
+        return $q->where('role', '=', $filters['role']);
+    }
 );
 
 // Conditionally add full-text-ish search on name/email
 $query = $query->when(
-  static function () use ($filters): bool {
-      return isset($filters['search']) && $filters['search'] !== '';
-  },
-  static function (QueryBuilder $q) use ($filters): QueryBuilder {
-      $term = '%' . $filters['search'] . '%';
+    static function () use ($filters): bool {
+        return isset($filters['search']) && $filters['search'] !== '';
+    },
+    static function (QueryBuilder $q) use ($filters): QueryBuilder {
+        $term = '%' . $filters['search'] . '%';
 
-      return $q->where(function (QueryBuilder $inner) use ($term): QueryBuilder {
-          return $inner
-            ->where('name', 'like', $term)
-            ->orWhere('email', 'like', $term);
-      });
-  }
+        return $q->where(function (QueryBuilder $inner) use ($term): QueryBuilder {
+            return $inner
+              ->where('name', 'like', $term)
+              ->orWhere('email', 'like', $term);
+        });
+    }
 );
 
 // Final ordering + pagination

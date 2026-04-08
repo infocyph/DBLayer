@@ -250,72 +250,6 @@ final class ConnectionConfig
     }
 
     /**
-     * Basic validation that does not depend on any particular driver.
-     *
-     * @param  array<string,mixed>  $config
-     */
-    private function validateConfig(array $config): void
-    {
-        $driver = $config['driver'] ?? null;
-
-        if (! is_string($driver) || $driver === '') {
-            throw ConnectionException::invalidConfig('Database driver must be a non-empty string.');
-        }
-
-        // Built-in relational engines: require database name.
-        if (in_array($driver, ['mysql', 'pgsql', 'sqlite'], true)) {
-            if (
-              ! isset($config['database'])
-              || ! is_string($config['database'])
-              || $config['database'] === ''
-            ) {
-                throw ConnectionException::invalidConfig(
-                  sprintf("Config key 'database' is required for driver '%s'.", $driver)
-                );
-            }
-        }
-
-        // Host/username for typical client/server engines (skip sqlite).
-        if (in_array($driver, ['mysql', 'pgsql'], true)) {
-            foreach (['host', 'username'] as $key) {
-                if (
-                  ! isset($config[$key])
-                  || ! is_string($config[$key])
-                  || $config[$key] === ''
-                ) {
-                    throw ConnectionException::invalidConfig(
-                      sprintf("Config key '%s' is required for driver '%s'.", $key, $driver)
-                    );
-                }
-            }
-        }
-    }
-
-    /**
-     * Delegate advanced validation / normalization to driver when registered.
-     *
-     * @param  array<string,mixed>  $config
-     */
-    private function validateWithDriver(array $config): void
-    {
-        $driverName = $config['driver'] ?? null;
-
-        if (! is_string($driverName) || $driverName === '') {
-            return;
-        }
-
-        try {
-            $driver = DriverRegistry::resolve($driverName);
-        } catch (ConnectionException) {
-            // Unknown driver (custom or not registered): skip driver-level validation.
-            return;
-        }
-
-        // Give driver a chance to throw a more specific exception.
-        $driver->validateConfig($config);
-    }
-
-    /**
      * Normalize replica configuration into a list of associative arrays.
      *
      * @param  array<int|string,mixed>  $replicas
@@ -351,5 +285,71 @@ final class ConnectionConfig
         $single = $replicas;
 
         return $single === [] ? [] : [$single];
+    }
+
+    /**
+     * Basic validation that does not depend on any particular driver.
+     *
+     * @param  array<string,mixed>  $config
+     */
+    private function validateConfig(array $config): void
+    {
+        $driver = $config['driver'] ?? null;
+
+        if (! is_string($driver) || $driver === '') {
+            throw ConnectionException::invalidConfig('Database driver must be a non-empty string.');
+        }
+
+        // Built-in relational engines: require database name.
+        if (in_array($driver, ['mysql', 'pgsql', 'sqlite'], true)) {
+            if (
+                ! isset($config['database'])
+                || ! is_string($config['database'])
+                || $config['database'] === ''
+            ) {
+                throw ConnectionException::invalidConfig(
+                    sprintf("Config key 'database' is required for driver '%s'.", $driver)
+                );
+            }
+        }
+
+        // Host/username for typical client/server engines (skip sqlite).
+        if (in_array($driver, ['mysql', 'pgsql'], true)) {
+            foreach (['host', 'username'] as $key) {
+                if (
+                    ! isset($config[$key])
+                    || ! is_string($config[$key])
+                    || $config[$key] === ''
+                ) {
+                    throw ConnectionException::invalidConfig(
+                        sprintf("Config key '%s' is required for driver '%s'.", $key, $driver)
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Delegate advanced validation / normalization to driver when registered.
+     *
+     * @param  array<string,mixed>  $config
+     */
+    private function validateWithDriver(array $config): void
+    {
+        $driverName = $config['driver'] ?? null;
+
+        if (! is_string($driverName) || $driverName === '') {
+            return;
+        }
+
+        try {
+            $driver = DriverRegistry::resolve($driverName);
+        } catch (ConnectionException) {
+            // Unknown driver (custom or not registered): skip driver-level validation.
+            return;
+        }
+
+        // Give driver a chance to throw a more specific exception.
+        $driver->validateConfig($config);
     }
 }

@@ -143,9 +143,9 @@ class QueryBuilder
      * Create a new query builder instance.
      */
     public function __construct(
-      Connection $connection,
-      Grammar $grammar,
-      Executor $executor
+        Connection $connection,
+        Grammar $grammar,
+        Executor $executor
     ) {
         $this->connection = $connection;
         $this->grammar    = $grammar;
@@ -228,10 +228,10 @@ class QueryBuilder
      * @param  callable(list<array<string,mixed>>,int):bool  $callback
      */
     public function chunkById(
-      int $count,
-      callable $callback,
-      string $column = 'id',
-      mixed $fromId = null
+        int $count,
+        callable $callback,
+        string $column = 'id',
+        mixed $fromId = null
     ): bool {
         if ($count <= 0) {
             throw QueryException::invalidLimit($count);
@@ -352,10 +352,10 @@ class QueryBuilder
      * @throws QueryException
      */
     public function cursorPaginate(
-      int $perPage = 15,
-      mixed $cursor = null,
-      string $column = 'id',
-      string $direction = 'asc'
+        int $perPage = 15,
+        mixed $cursor = null,
+        string $column = 'id',
+        string $direction = 'asc'
     ): CursorPaginator {
         if ($perPage <= 0) {
             throw QueryException::invalidLimit($perPage);
@@ -405,11 +405,11 @@ class QueryBuilder
         $currentCursor = $cursor !== null ? (string) $cursor : null;
 
         return new CursorPaginator(
-          $items,
-          $perPage,
-          $currentCursor,
-          $nextCursor,
-          $hasMore
+            $items,
+            $perPage,
+            $currentCursor,
+            $nextCursor,
+            $hasMore
         );
     }
 
@@ -468,9 +468,9 @@ class QueryBuilder
      * @return array<string,mixed>|null
      */
     public function firstWhere(
-      string|callable $column,
-      mixed $operator = null,
-      mixed $value = null
+        string|callable $column,
+        mixed $operator = null,
+        mixed $value = null
     ): ?array {
         return $this->where($column, $operator, $value)->first();
     }
@@ -594,10 +594,10 @@ class QueryBuilder
      * Add a HAVING clause.
      */
     public function having(
-      string $column,
-      mixed $operator = null,
-      mixed $value = null,
-      string $boolean = 'and'
+        string $column,
+        mixed $operator = null,
+        mixed $value = null,
+        string $boolean = 'and'
     ): self {
         if (\func_num_args() === 2) {
             $value    = $operator;
@@ -680,11 +680,11 @@ class QueryBuilder
      * Add a simple JOIN clause.
      */
     public function join(
-      string $table,
-      string $first,
-      string $operator,
-      string $second,
-      string $type = 'inner'
+        string $table,
+        string $first,
+        string $operator,
+        string $second,
+        string $type = 'inner'
     ): self {
         $this->joins[] = [
           'type'     => $type,
@@ -1024,20 +1024,20 @@ class QueryBuilder
         }
 
         return new QueryPayload(
-          type: $type,
-          table: $this->from,
-          columns: $this->columns,
-          wheres: $this->wheres,
-          joins: $this->joins,
-          groups: $this->groups,
-          havings: $this->havings,
-          orders: $this->orders,
-          limit: $this->limit,
-          offset: $this->offset,
-          unions: $unionPayloads,
-          lock: $this->lock,
-          aggregate: $this->aggregate,
-          bindings: $this->bindings,
+            type: $type,
+            table: $this->from,
+            columns: $this->columns,
+            wheres: $this->wheres,
+            joins: $this->joins,
+            groups: $this->groups,
+            havings: $this->havings,
+            orders: $this->orders,
+            limit: $this->limit,
+            offset: $this->offset,
+            unions: $unionPayloads,
+            lock: $this->lock,
+            aggregate: $this->aggregate,
+            bindings: $this->bindings,
         );
     }
 
@@ -1187,10 +1187,10 @@ class QueryBuilder
      * @param  callable(QueryBuilder):void|non-empty-string  $column
      */
     public function where(
-      string|callable $column,
-      mixed $operator = null,
-      mixed $value = null,
-      string $boolean = 'and'
+        string|callable $column,
+        mixed $operator = null,
+        mixed $value = null,
+        string $boolean = 'and'
     ): self {
         // Handle closure for nested where.
         if (\is_callable($column)) {

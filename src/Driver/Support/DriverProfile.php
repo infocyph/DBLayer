@@ -92,7 +92,7 @@ final class DriverProfile
       'mysql'   => 3306,
       'mariadb' => 3306,
       'pgsql'   => 5432,
-      'postgres'=> 5432,
+      'postgres' => 5432,
       'sqlite'  => null,
     ];
 
@@ -170,47 +170,17 @@ final class DriverProfile
      */
     public static function causedByDeadlock(string $driver, Throwable $e): bool
     {
-        $driver  = strtolower($driver);
-        $message = $e->getMessage();
+        $driver = strtolower($driver);
 
-        $hints = self::DEADLOCK_MESSAGE_HINTS[$driver]
-          ?? self::DEADLOCK_MESSAGE_HINTS['default'];
-
-        foreach ($hints as $needle) {
-            if ($needle === '') {
-                continue;
-            }
-
-            if (stripos($message, $needle) !== false) {
-                return true;
-            }
+        if (self::messageSuggestsDeadlock($driver, $e->getMessage())) {
+            return true;
         }
 
         if (! $e instanceof PDOException) {
             return false;
         }
 
-        $errorInfo  = $e->errorInfo;
-        $sqlState   = is_array($errorInfo) && isset($errorInfo[0]) ? (string) $errorInfo[0] : null;
-        $vendorCode = is_array($errorInfo) && isset($errorInfo[1]) ? (string) $errorInfo[1] : null;
-        $code       = (string) $e->getCode();
-
-        $states = self::DEADLOCK_SQLSTATES[$driver] ?? [];
-        $codes  = self::DEADLOCK_ERROR_CODES[$driver] ?? [];
-
-        if ($sqlState !== null && $sqlState !== '' && in_array($sqlState, $states, true)) {
-            return true;
-        }
-
-        if ($vendorCode !== null && $vendorCode !== '' && in_array($vendorCode, $codes, true)) {
-            return true;
-        }
-
-        if ($code !== '' && in_array($code, $codes, true)) {
-            return true;
-        }
-
-        return false;
+        return self::metadataSuggestsDeadlock($driver, $e);
     }
 
     /**
@@ -226,5 +196,43 @@ final class DriverProfile
             'sqlite', 'sqlite3'             => new SQLiteGrammar(),
             default                         => throw ConnectionException::unsupportedDriver($driver),
         };
+    }
+
+    /**
+     * Determine if a non-empty code exists in the known deadlock code list.
+     *
+     * @param  list<string>  $knownCodes
+     */
+    private static function matchesKnownDeadlockCode(?string $code, array $knownCodes): bool
+    {
+        return $code !== null && $code !== '' && in_array($code, $knownCodes, true);
+    }
+
+    /**
+     * Check deadlock by driver message hints.
+     */
+    private static function messageSuggestsDeadlock(string $driver, string $message): bool
+    {
+        $hints = self::DEADLOCK_MESSAGE_HINTS[$driver]
+          ?? self::DEADLOCK_MESSAGE_HINTS['default'];
+        return array_any($hints, fn ($needle) => $needle !== '' && stripos($message, $needle) !== false);
+    }
+
+    /**
+     * Check deadlock by SQLSTATE / vendor code metadata.
+     */
+    private static function metadataSuggestsDeadlock(string $driver, PDOException $e): bool
+    {
+        $errorInfo  = $e->errorInfo;
+        $sqlState   = is_array($errorInfo) && isset($errorInfo[0]) ? (string) $errorInfo[0] : null;
+        $vendorCode = is_array($errorInfo) && isset($errorInfo[1]) ? (string) $errorInfo[1] : null;
+        $code       = (string) $e->getCode();
+
+        $states = self::DEADLOCK_SQLSTATES[$driver] ?? [];
+        $codes  = self::DEADLOCK_ERROR_CODES[$driver] ?? [];
+
+        return self::matchesKnownDeadlockCode($sqlState, $states)
+          || self::matchesKnownDeadlockCode($vendorCode, $codes)
+          || self::matchesKnownDeadlockCode($code, $codes);
     }
 }

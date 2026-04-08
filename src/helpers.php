@@ -218,30 +218,49 @@ if (! function_exists('data_get')) {
         $key = is_array($key) ? $key : explode('.', (string) $key);
 
         foreach ($key as $segment) {
-            if (is_array($target)) {
-                if (! array_key_exists($segment, $target)) {
-                    return value($default);
-                }
+            $resolved = data_get_resolve_segment($target, $segment);
 
-                $target = $target[$segment];
-            } elseif ($target instanceof ArrayAccess) {
-                if (! isset($target[$segment])) {
-                    return value($default);
-                }
-
-                $target = $target[$segment];
-            } elseif (is_object($target)) {
-                if (! isset($target->{$segment})) {
-                    return value($default);
-                }
-
-                $target = $target->{$segment};
-            } else {
+            if (! $resolved['exists']) {
                 return value($default);
             }
+
+            $target = $resolved['value'];
         }
 
         return $target;
+    }
+}
+
+if (! function_exists('data_get_resolve_segment')) {
+    /**
+     * Resolve one segment lookup for data_get().
+     *
+     * @param  string|int  $segment
+     * @return array{exists:bool,value:mixed}
+     */
+    function data_get_resolve_segment(mixed $target, string|int $segment): array
+    {
+        if (is_array($target)) {
+            if (! array_key_exists($segment, $target)) {
+                return ['exists' => false, 'value' => null];
+            }
+
+            return ['exists' => true, 'value' => $target[$segment]];
+        }
+
+        if ($target instanceof ArrayAccess) {
+            if (! isset($target[$segment])) {
+                return ['exists' => false, 'value' => null];
+            }
+
+            return ['exists' => true, 'value' => $target[$segment]];
+        }
+
+        if (is_object($target) && isset($target->{$segment})) {
+            return ['exists' => true, 'value' => $target->{$segment}];
+        }
+
+        return ['exists' => false, 'value' => null];
     }
 }
 
@@ -304,13 +323,7 @@ if (! function_exists('array_all')) {
      */
     function array_all(array $array, callable $callback): bool
     {
-        foreach ($array as $key => $value) {
-            if (! $callback($value, $key)) {
-                return false;
-            }
-        }
-
-        return true;
+        return array_all($array, fn ($value, $key) => $callback($value, $key));
     }
 }
 
@@ -499,8 +512,8 @@ if (! function_exists('now')) {
     function now(DateTimeZone|string|null $tz = null): DateTime
     {
         return new DateTime(
-          'now',
-          $tz instanceof DateTimeZone
+            'now',
+            $tz instanceof DateTimeZone
             ? $tz
             : new DateTimeZone($tz ?? date_default_timezone_get())
         );

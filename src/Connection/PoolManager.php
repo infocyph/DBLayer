@@ -20,16 +20,15 @@ namespace Infocyph\DBLayer\Connection;
 final class PoolManager
 {
     /**
-     * Underlying pool instance.
-     */
-    private Pool $pool;
-
-    /**
      * Map of connection object id → pool name.
      *
      * @var array<int,string>
      */
     private array $connectionNames = [];
+    /**
+     * Underlying pool instance.
+     */
+    private Pool $pool;
 
     public function __construct(Pool $pool)
     {
@@ -50,6 +49,14 @@ final class PoolManager
         $this->connectionNames[spl_object_id($connection)] = $name;
 
         return $connection;
+    }
+
+    /**
+     * Expose the underlying Pool for advanced operations (stats, config).
+     */
+    public function getPool(): Pool
+    {
+        return $this->pool;
     }
 
     /**
@@ -100,13 +107,5 @@ final class PoolManager
         } finally {
             $this->release($connection, $name);
         }
-    }
-
-    /**
-     * Expose the underlying Pool for advanced operations (stats, config).
-     */
-    public function getPool(): Pool
-    {
-        return $this->pool;
     }
 }

@@ -1,84 +1,84 @@
 {
-  "name": "infocyph/dblayer",
-  "description": "High-performance, secure database layer for PHP and multi-driver capabilities",
-  "type": "library",
-  "keywords": [
-    "database",
-    "query-builder",
-    "orm",
-    "pdo",
-    "sql",
-    "mysql",
-    "postgresql",
-    "sqlite"
-  ],
-  "license": "MIT",
-  "authors": [
-    {
-      "name": "abmmhasan",
-      "email": "abmmhasan@gmail.com"
-    }
-  ],
-  "require": {
-    "php": "^8.4",
-    "ext-pdo": "*"
-  },
-  "require-dev": {
-    "captainhook/captainhook": "^5.25",
-    "laravel/pint": "^1.25",
-    "pestphp/pest": "^4.1",
-    "rector/rector": "^2.2.3",
-    "symfony/var-dumper": "^7.3"
-  },
-  "suggest": {
-    "ext-pdo_mysql": "For MySQL database support",
-    "ext-pdo_pgsql": "For PostgreSQL database support",
-    "ext-pdo_sqlite": "For SQLite database support"
-  },
-  "autoload": {
-    "psr-4": {
-      "Infocyph\\DBLayer\\": "src/"
+    "name": "infocyph/dblayer",
+    "description": "High-performance, secure database layer for PHP and multi-driver capabilities",
+    "type": "library",
+    "keywords": [
+        "database",
+        "query-builder",
+        "orm",
+        "pdo",
+        "sql",
+        "mysql",
+        "postgresql",
+        "sqlite"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "abmmhasan",
+            "email": "abmmhasan@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "ext-pdo": "*"
     },
-    "files": [
-      "src/helpers.php"
-    ]
-  },
-  "autoload-dev": {
-    "psr-4": {
-      "Infocyph\\DBLayer\\Tests\\": "tests/"
-    }
-  },
-  "scripts": {
-    "test:code": "pest --parallel --processes=10",
-    "test:refactor": "rector process --dry-run",
-    "test:lint": "pint --test",
-    "test:hook": [
-      "captainhook hook:post-checkout",
-      "captainhook hook:pre-commit",
-      "captainhook hook:post-commit",
-      "captainhook hook:post-merge",
-      "captainhook hook:post-rewrite",
-      "captainhook hook:pre-push"
-    ],
-    "tests": [
-      "@test:code",
-      "@test:lint",
-      "@test:refactor"
-    ],
-    "git:hook": "captainhook install --only-enabled -nf",
-    "test": "pest",
-    "refactor": "rector process",
-    "lint": "pint",
-    "post-autoload-dump": "captainhook install --only-enabled -nf"
-  },
-  "config": {
-    "sort-packages": true,
-    "preferred-install": "dist",
-    "optimize-autoloader": true,
-    "allow-plugins": {
-      "pestphp/pest-plugin": true
-    }
-  },
-  "minimum-stability": "stable",
-  "prefer-stable": true
+    "require-dev": {
+        "captainhook/captainhook": "^5.29.2",
+        "laravel/pint": "^1.29",
+        "pestphp/pest": "^4.4.3",
+        "pestphp/pest-plugin-drift": "^4.1",
+        "rector/rector": "^2.3.9",
+        "symfony/var-dumper": "^7.3 || ^8.0.8",
+        "vimeo/psalm": "^6.16.1",
+        "tomasvotruba/cognitive-complexity": "^1.1"
+    },
+    "suggest": {
+        "ext-pdo_mysql": "For MySQL database support",
+        "ext-pdo_pgsql": "For PostgreSQL database support",
+        "ext-pdo_sqlite": "For SQLite database support"
+    },
+    "autoload": {
+        "psr-4": {
+            "Infocyph\\DBLayer\\": "src/"
+        },
+        "files": [
+            "src/helpers.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Infocyph\\DBLayer\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test:code": "@php -d error_reporting=24575 vendor/bin/pest --parallel --processes=10",
+        "test:security": "@php -d error_reporting=24575 vendor/bin/psalm --config=psalm.xml --security-analysis --show-info=false --no-progress --threads=1",
+        "test:static": "@php -d error_reporting=24575 vendor/bin/phpstan analyse --configuration=phpstan.neon.dist --memory-limit=1G --no-progress",
+        "test:refactor": "@php -d error_reporting=24575 vendor/bin/rector process --dry-run",
+        "test:lint": "@php -d error_reporting=24575 vendor/bin/pint --test",
+        "tests": [
+            "@test:code",
+            "@test:lint",
+            "@test:static",
+            "@test:refactor",
+            "@test:security"
+        ],
+        "git:hook": "captainhook install --only-enabled -nf",
+        "test": "@php vendor/bin/pest",
+        "refactor": "@php vendor/bin/rector process",
+        "lint": "@php vendor/bin/pint",
+        "security:scan": "@test:security",
+        "post-autoload-dump": "captainhook install --only-enabled -nf"
+    },
+    "config": {
+        "sort-packages": true,
+        "preferred-install": "dist",
+        "optimize-autoloader": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
 }

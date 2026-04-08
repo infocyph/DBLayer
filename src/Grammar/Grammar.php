@@ -130,13 +130,13 @@ abstract class Grammar
         $table      = $this->wrapTable($components['from']);
 
         $columns = \implode(', ', \array_map(
-          function (mixed $value, string $key): string {
-              unset($value); // signature alignment only
+            function (mixed $value, string $key): string {
+                unset($value); // signature alignment only
 
-              return $this->wrap($key).' = ?';
-          },
-          \array_values($values),
-          \array_keys($values)
+                return $this->wrap($key).' = ?';
+            },
+            \array_values($values),
+            \array_keys($values)
         ));
 
         $where = $this->compileWheres($query, $components['wheres']);
@@ -218,8 +218,8 @@ abstract class Grammar
           : $this->wrap($aggregate['column']);
 
         $sql = $this->compileColumns(
-          $query,
-          [new Expression("{$aggregate['function']}({$column}) as aggregate")]
+            $query,
+            [new Expression("{$aggregate['function']}({$column}) as aggregate")]
         );
 
         if (isset($components['from']) && $components['from'] !== null) {
@@ -328,15 +328,15 @@ abstract class Grammar
         unset($query);
 
         $sql = \implode(' ', \array_map(
-          function (array $having, int $i): string {
-              $boolean = $i === 0 ? '' : $having['boolean'].' ';
+            function (array $having, int $i): string {
+                $boolean = $i === 0 ? '' : $having['boolean'].' ';
 
-              return $boolean
-                .$this->wrap($having['column'])
-                .' '.$having['operator'].' ?';
-          },
-          $havings,
-          \array_keys($havings)
+                return $boolean
+                  .$this->wrap($having['column'])
+                  .' '.$having['operator'].' ?';
+            },
+            $havings,
+            \array_keys($havings)
         ));
 
         return 'having '.$this->removeLeadingBoolean($sql);
@@ -355,9 +355,9 @@ abstract class Grammar
      * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
      */
     protected function compileInsertWithVerb(
-      string $verb,
-      QueryBuilder $query,
-      array $values
+        string $verb,
+        QueryBuilder $query,
+        array $values
     ): string {
         $rows = $this->normalizeInsertValues($values);
 
@@ -366,10 +366,10 @@ abstract class Grammar
         $columns    = $this->columnize(\array_keys($rows[0]));
 
         $parameters = \implode(', ', \array_map(
-          function (array $record): string {
-              return '('.$this->parameterize($record).')';
-          },
-          $rows
+            function (array $record): string {
+                return '('.$this->parameterize($record).')';
+            },
+            $rows
         ));
 
         return "{$verb} into {$table} ({$columns}) values {$parameters}";
@@ -441,21 +441,21 @@ abstract class Grammar
         unset($query);
 
         return \implode(' ', \array_map(
-          function (JoinClause|array $join): string {
-              if ($join instanceof JoinClause) {
-                  return $this->compileJoinClause($join);
-              }
+            function (JoinClause|array $join): string {
+                if ($join instanceof JoinClause) {
+                    return $this->compileJoinClause($join);
+                }
 
-              $table = $this->wrapTable($join['table']);
-              $type  = \strtoupper($join['type']);
+                $table = $this->wrapTable($join['table']);
+                $type  = \strtoupper($join['type']);
 
-              if (isset($join['first'])) {
-                  return "{$type} join {$table} on {$this->wrap($join['first'])} {$join['operator']} {$this->wrap($join['second'])}";
-              }
+                if (isset($join['first'])) {
+                    return "{$type} join {$table} on {$this->wrap($join['first'])} {$join['operator']} {$this->wrap($join['second'])}";
+                }
 
-              return "{$type} join {$table}";
-          },
-          $joins
+                return "{$type} join {$table}";
+            },
+            $joins
         ));
     }
 
@@ -499,10 +499,10 @@ abstract class Grammar
         unset($query);
 
         $sql = \implode(', ', \array_map(
-          function (array $order): string {
-              return $this->wrap($order['column']).' '.\strtoupper($order['direction']);
-          },
-          $orders
+            function (array $order): string {
+                return $this->wrap($order['column']).' '.\strtoupper($order['direction']);
+            },
+            $orders
         ));
 
         return 'order by '.$sql;
@@ -559,8 +559,8 @@ abstract class Grammar
     protected function concatenate(array $segments): string
     {
         return \implode(' ', \array_filter(
-          $segments,
-          static fn (string $value): bool => $value !== ''
+            $segments,
+            static fn (string $value): bool => $value !== ''
         ));
     }
 
@@ -572,16 +572,16 @@ abstract class Grammar
     protected function concatenateWhereClauses(QueryBuilder $query, array $wheres): string
     {
         return \implode(' ', \array_map(
-          function (array $where, int $i) use ($query): string {
-              $boolean = $i === 0 ? '' : $where['boolean'].' ';
+            function (array $where, int $i) use ($query): string {
+                $boolean = $i === 0 ? '' : $where['boolean'].' ';
 
-              /** @var callable(QueryBuilder,array<string,mixed>):string $handler */
-              $handler = [$this, 'where'.\ucfirst($where['type'])];
+                /** @var callable(QueryBuilder,array<string,mixed>):string $handler */
+                $handler = [$this, 'where'.\ucfirst($where['type'])];
 
-              return $boolean.$handler($query, $where);
-          },
-          $wheres,
-          \array_keys($wheres)
+                return $boolean.$handler($query, $where);
+            },
+            $wheres,
+            \array_keys($wheres)
         ));
     }
 
@@ -680,8 +680,8 @@ abstract class Grammar
         unset($query);
 
         $nested = $this->compileWheres(
-          $where['query'],
-          $where['query']->getComponents()['wheres']
+            $where['query'],
+            $where['query']->getComponents()['wheres']
         );
 
         // strip leading "where "
@@ -722,10 +722,10 @@ abstract class Grammar
     protected function wrapSegments(array $segments): string
     {
         return \implode('.', \array_map(
-          function (string $segment): string {
-              return $segment === '*' ? $segment : $this->wrapValue($segment);
-          },
-          $segments
+            function (string $segment): string {
+                return $segment === '*' ? $segment : $this->wrapValue($segment);
+            },
+            $segments
         ));
     }
 
