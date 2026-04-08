@@ -9,7 +9,7 @@
     "runner.retry_threshold": 8,
     "report.generators": {
         "chart": {
-            "title": "DBLayer Benchmark Chart",
+            "title": "Benchmark Chart",
             "description": "Console bar chart grouped by benchmark subject",
             "generator": "component",
             "components": [

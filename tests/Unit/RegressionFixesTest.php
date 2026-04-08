@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
+use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\SecurityException;
@@ -125,6 +127,32 @@ it('supports list-based read replica configuration', function (): void {
     expect($config->getReadConfig())->toBe(['database' => ':memory:']);
 });
 
+it('expands host-list read and write overrides and sticky flag in config', function (): void {
+    $config = ConnectionConfig::fromArray([
+        'driver' => 'mysql',
+        'host' => '127.0.0.1',
+        'database' => 'app',
+        'username' => 'root',
+        'read' => [
+            'host' => ['10.0.0.1', '10.0.0.2'],
+        ],
+        'write' => [
+            'host' => ['10.0.1.1', '10.0.1.2'],
+        ],
+        'sticky' => true,
+    ]);
+
+    expect($config->isSticky())->toBeTrue();
+    expect($config->getReadConfigs())->toBe([
+        ['host' => '10.0.0.1'],
+        ['host' => '10.0.0.2'],
+    ]);
+    expect($config->getWriteConfigs())->toBe([
+        ['host' => '10.0.1.1'],
+        ['host' => '10.0.1.2'],
+    ]);
+});
+
 it('supports associative read replica configuration', function (): void {
     $config = ConnectionConfig::fromArray([
         'driver' => 'sqlite',
@@ -209,6 +237,144 @@ it('captures latency probes when least_latency read strategy is used', function 
     expect($info['strategy'])->toBe('least_latency');
     expect($info['selected_index'])->toBeInt();
     expect($info['latencies_ms'])->toHaveCount(2);
+});
+
+it('routes subsequent reads to write pdo when sticky mode is enabled', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'sticky' => true,
+        'read' => [
+            ['database' => ':memory:'],
+        ],
+    ], 'regression_sticky_on');
+
+    $connection = DB::connection('regression_sticky_on');
+
+    $readPdoBefore = $connection->getReadPdo();
+    $writePdo = $connection->getPdo();
+
+    expect(spl_object_id($readPdoBefore))->not->toBe(spl_object_id($writePdo));
+
+    $connection->statement('create table sticky_items (id integer)');
+    $connection->statement('insert into sticky_items (id) values (1)');
+
+    $readPdoAfter = $connection->getReadPdo();
+    expect(spl_object_id($readPdoAfter))->toBe(spl_object_id($connection->getPdo()));
+});
+
+it('keeps reads on read pdo when sticky mode is disabled', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'sticky' => false,
+        'read' => [
+            ['database' => ':memory:'],
+        ],
+    ], 'regression_sticky_off');
+
+    $connection = DB::connection('regression_sticky_off');
+
+    $readPdoBefore = $connection->getReadPdo();
+    $writePdo = $connection->getPdo();
+
+    expect(spl_object_id($readPdoBefore))->not->toBe(spl_object_id($writePdo));
+
+    $connection->statement('create table sticky_items (id integer)');
+    $connection->statement('insert into sticky_items (id) values (1)');
+
+    $readPdoAfter = $connection->getReadPdo();
+    expect(spl_object_id($readPdoAfter))->not->toBe(spl_object_id($connection->getPdo()));
+});
+
+it('applies write override configuration for write pdo connection', function (): void {
+    $databaseFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR
+        . 'dblayer-write-override-'
+        . bin2hex(random_bytes(8))
+        . '.sqlite';
+
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'write' => [
+            'database' => $databaseFile,
+        ],
+    ], 'regression_write_override');
+
+    $connection = DB::connection('regression_write_override');
+    $connection->statement('create table write_override_items (id integer)');
+    $connection->statement('insert into write_override_items (id) values (1)');
+
+    $pdo = new \PDO('sqlite:' . $databaseFile);
+    $count = (int) $pdo->query('select count(*) from write_override_items')->fetchColumn();
+
+    expect($count)->toBe(1);
+
+    $connection->disconnect();
+    unset($pdo, $connection);
+
+    if (is_file($databaseFile)) {
+        expect(@unlink($databaseFile))->toBeTrue();
+    }
+});
+
+it('supports scalar and selectResultSets query helpers', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_scalar');
+
+    DB::statement('create table numbers (value integer)', [], 'regression_scalar');
+    DB::statement('insert into numbers (value) values (1), (2), (3)', [], 'regression_scalar');
+
+    $sum = DB::scalar('select sum(value) as total from numbers', [], 'regression_scalar');
+    expect((int) $sum)->toBe(6);
+
+    $resultSets = DB::selectResultSets('select 1 as one', [], 'regression_scalar');
+    expect($resultSets)->toHaveCount(1);
+    expect($resultSets[0][0]['one'] ?? null)->toBe(1);
+});
+
+it('fires cumulative query-time threshold callback once', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_query_time');
+
+    $fired = 0;
+    $lastSql = null;
+    $lastConnection = null;
+
+    DB::whenQueryingForLongerThan(0.0001, static function (Connection $connection, QueryExecuted $event) use (&$fired, &$lastSql, &$lastConnection): void {
+        $fired++;
+        $lastSql = $event->sql;
+        $lastConnection = $connection;
+    });
+
+    DB::select('select 1', [], 'regression_query_time');
+    DB::select('select 1', [], 'regression_query_time');
+
+    expect($fired)->toBe(1);
+    expect(strtolower((string) $lastSql))->toContain('select 1');
+    expect($lastConnection)->toBeInstanceOf(Connection::class);
+});
+
+it('supports one-argument cumulative query-time callback signature', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_query_time_single_arg');
+
+    $capturedEvent = null;
+
+    DB::whenQueryingForLongerThan(0.0001, static function (QueryExecuted $event) use (&$capturedEvent): void {
+        $capturedEvent = $event;
+    });
+
+    DB::select('select 1', [], 'regression_query_time_single_arg');
+
+    expect($capturedEvent)->toBeInstanceOf(QueryExecuted::class);
 });
 
 it('supports query cancellation and deadline wrappers', function (): void {

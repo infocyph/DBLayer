@@ -46,7 +46,11 @@ it('compiles lock clauses according to each SQL dialect', function (): void {
 });
 
 it('surfaces sqlite write-lock contention across concurrent connections', function (): void {
-    $databaseFile = '/tmp/dblayer-lock-' . bin2hex(random_bytes(8)) . '.sqlite';
+    $databaseFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR
+        . 'dblayer-lock-'
+        . bin2hex(random_bytes(8))
+        . '.sqlite';
 
     DB::addConnection([
         'driver' => 'sqlite',
@@ -78,9 +82,11 @@ it('surfaces sqlite write-lock contention across concurrent connections', functi
         })->toThrow(ConnectionException::class);
     } finally {
         DB::rollBack('writer_one');
+        DB::connection('writer_one')->disconnect();
+        DB::connection('writer_two')->disconnect();
 
         if (is_file($databaseFile)) {
-            unlink($databaseFile);
+            @unlink($databaseFile);
         }
     }
 });

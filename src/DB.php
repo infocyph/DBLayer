@@ -132,6 +132,18 @@ class DB
     protected static int $queryLogStart = 0;
 
     /**
+     * Cumulative query-time monitors (Laravel-like threshold callbacks).
+     *
+     * @var list<array{
+     *   threshold_ms:float,
+     *   cumulative_ms:float,
+     *   fired:bool,
+     *   callback:callable
+     * }>
+     */
+    protected static array $queryTimeMonitors = [];
+
+    /**
      * Shared result processor used by repository helpers.
      */
     protected static ?ResultProcessor $resultProcessor = null;
@@ -268,7 +280,13 @@ class DB
      */
     public static function delete(string $query, array $bindings = [], ?string $connection = null): int
     {
-        return static::connection($connection)->delete($query, $bindings);
+        $conn = static::connection($connection);
+        $startedAt = microtime(true);
+        $result = $conn->delete($query, $bindings);
+
+        static::trackRawQueryDuration($conn, $query, $bindings, $result, $startedAt);
+
+        return $result;
     }
 
     /**
@@ -480,7 +498,13 @@ class DB
      */
     public static function insert(string $query, array $bindings = [], ?string $connection = null): bool
     {
-        return static::connection($connection)->insert($query, $bindings);
+        $conn = static::connection($connection);
+        $startedAt = microtime(true);
+        $result = $conn->insert($query, $bindings);
+
+        static::trackRawQueryDuration($conn, $query, $bindings, $result ? 1 : 0, $startedAt);
+
+        return $result;
     }
 
     /**
@@ -614,6 +638,7 @@ class DB
         static::$poolManager        = null;
         static::$profiler           = null;
         static::$resultProcessor    = null;
+        static::$queryTimeMonitors  = [];
         Telemetry::clear();
     }
 
@@ -720,6 +745,24 @@ class DB
     }
 
     /**
+     * Execute a query and return the first scalar value.
+     *
+     * @param  array<int,mixed>  $bindings
+     *
+     * @throws ConnectionException
+     */
+    public static function scalar(string $query, array $bindings = [], ?string $connection = null): mixed
+    {
+        $conn = static::connection($connection);
+        $startedAt = microtime(true);
+        $result = $conn->scalar($query, $bindings);
+
+        static::trackRawQueryDuration($conn, $query, $bindings, null, $startedAt);
+
+        return $result;
+    }
+
+    /**
      * Execute a select statement.
      *
      * @param  array<int,mixed>  $bindings
@@ -729,7 +772,13 @@ class DB
      */
     public static function select(string $query, array $bindings = [], ?string $connection = null): array
     {
-        return static::connection($connection)->select($query, $bindings);
+        $conn = static::connection($connection);
+        $startedAt = microtime(true);
+        $result = $conn->select($query, $bindings);
+
+        static::trackRawQueryDuration($conn, $query, $bindings, null, $startedAt);
+
+        return $result;
     }
 
     /**
@@ -744,6 +793,25 @@ class DB
         $records = static::select($query, $bindings, $connection);
 
         return array_shift($records);
+    }
+
+    /**
+     * Execute a query and return all result sets.
+     *
+     * @param  array<int,mixed>  $bindings
+     * @return list<list<array<string,mixed>>>
+     *
+     * @throws ConnectionException
+     */
+    public static function selectResultSets(string $query, array $bindings = [], ?string $connection = null): array
+    {
+        $conn = static::connection($connection);
+        $startedAt = microtime(true);
+        $result = $conn->selectResultSets($query, $bindings);
+
+        static::trackRawQueryDuration($conn, $query, $bindings, null, $startedAt);
+
+        return $result;
     }
 
     /**
@@ -794,7 +862,11 @@ class DB
      */
     public static function statement(string $query, array $bindings = [], ?string $connection = null): bool
     {
-        static::connection($connection)->execute($query, $bindings);
+        $conn = static::connection($connection);
+        $startedAt = microtime(true);
+        $conn->execute($query, $bindings);
+
+        static::trackRawQueryDuration($conn, $query, $bindings, null, $startedAt);
 
         return true;
     }
@@ -910,7 +982,11 @@ class DB
      */
     public static function unprepared(string $query, ?string $connection = null): bool
     {
-        static::connection($connection)->execute($query);
+        $conn = static::connection($connection);
+        $startedAt = microtime(true);
+        $conn->execute($query);
+
+        static::trackRawQueryDuration($conn, $query, [], null, $startedAt);
 
         return true;
     }
@@ -924,7 +1000,13 @@ class DB
      */
     public static function update(string $query, array $bindings = [], ?string $connection = null): int
     {
-        return static::connection($connection)->update($query, $bindings);
+        $conn = static::connection($connection);
+        $startedAt = microtime(true);
+        $result = $conn->update($query, $bindings);
+
+        static::trackRawQueryDuration($conn, $query, $bindings, $result, $startedAt);
+
+        return $result;
     }
 
     /**
@@ -945,6 +1027,30 @@ class DB
         return (string) static::connection($connection)
           ->getPdo()
           ->getAttribute(PDO::ATTR_SERVER_VERSION);
+    }
+
+    /**
+     * Register a callback that fires once cumulative query time crosses threshold.
+     *
+     * Callback signatures supported:
+     *  - fn(): void
+     *  - fn(QueryExecuted $event): void
+     *  - fn(Connection $connection, QueryExecuted $event): void
+     */
+    public static function whenQueryingForLongerThan(float $milliseconds, callable $callback): void
+    {
+        if ($milliseconds <= 0) {
+            return;
+        }
+
+        static::$queryTimeMonitors[] = [
+            'threshold_ms' => $milliseconds,
+            'cumulative_ms' => 0.0,
+            'fired' => false,
+            'callback' => $callback,
+        ];
+
+        static::ensureEventsHooked();
     }
 
     /**
@@ -1107,6 +1213,31 @@ class DB
     }
 
     /**
+     * Evaluate cumulative query-time thresholds and fire callbacks once.
+     */
+    private static function evaluateQueryTimeMonitors(QueryExecuted $event): void
+    {
+        if (static::$queryTimeMonitors === []) {
+            return;
+        }
+
+        foreach (static::$queryTimeMonitors as $index => $monitor) {
+            if ($monitor['fired']) {
+                continue;
+            }
+
+            $monitor['cumulative_ms'] += $event->time;
+
+            if ($monitor['cumulative_ms'] >= $monitor['threshold_ms']) {
+                $monitor['fired'] = true;
+                static::invokeQueryTimeMonitor($monitor['callback'], $event);
+            }
+
+            static::$queryTimeMonitors[$index] = $monitor;
+        }
+    }
+
+    /**
      * Handle post-execution query event.
      */
     private static function handleQueryExecuted(QueryExecuted $event): void
@@ -1133,6 +1264,8 @@ class DB
         if (static::$loggingQueries) {
             static::appendQueryLogEntry($payload);
         }
+
+        static::evaluateQueryTimeMonitors($event);
     }
 
     /**
@@ -1145,6 +1278,37 @@ class DB
         if (static::$profiler !== null && static::$profiler->isEnabled()) {
             static::$profiler->start();
         }
+    }
+
+    /**
+     * Invoke threshold callback with a supported argument shape.
+     */
+    private static function invokeQueryTimeMonitor(callable $callback, QueryExecuted $event): void
+    {
+        if (\is_array($callback)) {
+            $reflection = new \ReflectionMethod($callback[0], (string) $callback[1]);
+            $params = $reflection->getNumberOfParameters();
+        } elseif (\is_object($callback) && ! $callback instanceof \Closure) {
+            $reflection = new \ReflectionMethod($callback, '__invoke');
+            $params = $reflection->getNumberOfParameters();
+        } else {
+            $reflection = new \ReflectionFunction(\Closure::fromCallable($callback));
+            $params = $reflection->getNumberOfParameters();
+        }
+
+        if ($params <= 0) {
+            $callback();
+
+            return;
+        }
+
+        if ($params === 1) {
+            $callback($event);
+
+            return;
+        }
+
+        $callback($event->connection, $event);
     }
 
     /**
@@ -1238,6 +1402,33 @@ class DB
      */
     private static function shouldHandleQueryEvent(bool $profilerEnabled, bool $loggerEnabled): bool
     {
-        return static::$loggingQueries || static::$listeners !== [] || $profilerEnabled || $loggerEnabled;
+        return static::$loggingQueries
+          || static::$listeners !== []
+          || static::$queryTimeMonitors !== []
+          || $profilerEnabled
+          || $loggerEnabled;
+    }
+
+    /**
+     * Feed raw facade query timings into cumulative query-time monitors.
+     *
+     * @param  array<int,mixed>  $bindings
+     */
+    private static function trackRawQueryDuration(
+        Connection $connection,
+        string $sql,
+        array $bindings,
+        ?int $rowsAffected,
+        float $startedAt,
+    ): void {
+        if (static::$queryTimeMonitors === []) {
+            return;
+        }
+
+        $elapsedMs = (microtime(true) - $startedAt) * 1_000.0;
+
+        static::evaluateQueryTimeMonitors(
+            new QueryExecuted($sql, $bindings, $elapsedMs, $connection, $rowsAffected),
+        );
     }
 }

@@ -5,7 +5,7 @@
     "keywords": [
         "database",
         "query-builder",
-        "orm",
+        "repository",
         "pdo",
         "sql",
         "mysql",
@@ -92,7 +92,8 @@
         "preferred-install": "dist",
         "optimize-autoloader": true,
         "allow-plugins": {
-            "pestphp/pest-plugin": true
+            "pestphp/pest-plugin": true,
+            "pestphp/pest-plugin-drift": true
         }
     },
     "minimum-stability": "stable",

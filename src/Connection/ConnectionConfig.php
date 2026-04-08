@@ -39,6 +39,7 @@ final class ConnectionConfig
         'write'     => [],
         'read'      => [],
         'read_strategy' => 'random',
+        'sticky'    => false,
         'security'  => [],
     ];
 
@@ -186,7 +187,9 @@ final class ConnectionConfig
             return [];
         }
 
-        return $this->normalizeReplicaConfigs($read);
+        return $this->expandReplicaHostVariants(
+            $this->normalizeReplicaConfigs($read),
+        );
     }
 
     /**
@@ -216,11 +219,56 @@ final class ConnectionConfig
     }
 
     /**
+     * Get the write override configuration (if any).
+     *
+     * Returns the first normalized write config for backward compatibility.
+     *
+     * @return array<string,mixed>
+     */
+    public function getWriteConfig(): array
+    {
+        $write = $this->getWriteConfigs();
+
+        return $write[0] ?? [];
+    }
+
+    /**
+     * Get all write override configurations.
+     *
+     * Supports:
+     *  - write => ['host' => 'writer']
+     *  - write => [['host' => 'writer-1'], ['host' => 'writer-2']]
+     *  - write => ['host' => ['writer-1', 'writer-2']]
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function getWriteConfigs(): array
+    {
+        $write = $this->config['write'] ?? [];
+
+        if (! is_array($write) || $write === []) {
+            return [];
+        }
+
+        return $this->expandReplicaHostVariants(
+            $this->normalizeReplicaConfigs($write),
+        );
+    }
+
+    /**
      * Whether read replica configuration is present.
      */
     public function hasReadConfig(): bool
     {
         return $this->getReadConfigs() !== [];
+    }
+
+    /**
+     * Whether write override configuration is present.
+     */
+    public function hasWriteConfig(): bool
+    {
+        return $this->getWriteConfigs() !== [];
     }
 
     /**
@@ -231,6 +279,14 @@ final class ConnectionConfig
         $security = $this->config['security'] ?? [];
 
         return is_array($security) && ! empty($security['enabled']);
+    }
+
+    /**
+     * Whether sticky read-after-write is enabled.
+     */
+    public function isSticky(): bool
+    {
+        return (bool) ($this->config['sticky'] ?? false);
     }
 
     /**
@@ -264,6 +320,46 @@ final class ConnectionConfig
         $config[$key] = $value;
 
         return new self($config);
+    }
+
+    /**
+     * Expand config fragments that define host as a list into one fragment per host.
+     *
+     * @param  list<array<string,mixed>>  $replicas
+     * @return list<array<string,mixed>>
+     */
+    private function expandReplicaHostVariants(array $replicas): array
+    {
+        $expanded = [];
+
+        foreach ($replicas as $replica) {
+            $hosts = $replica['host'] ?? null;
+
+            if (! is_array($hosts)) {
+                $expanded[] = $replica;
+
+                continue;
+            }
+
+            $hasExpandedHost = false;
+
+            foreach ($hosts as $host) {
+                if (! is_string($host) || trim($host) === '') {
+                    continue;
+                }
+
+                $copy = $replica;
+                $copy['host'] = trim($host);
+                $expanded[] = $copy;
+                $hasExpandedHost = true;
+            }
+
+            if (! $hasExpandedHost) {
+                $expanded[] = $replica;
+            }
+        }
+
+        return $expanded;
     }
 
     /**

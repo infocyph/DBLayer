@@ -137,6 +137,13 @@ final class Connection
     private array $readReplicaLatenciesMs = [];
 
     /**
+     * Indicates whether a write has occurred on this connection instance.
+     *
+     * Used by sticky read-after-write behavior.
+     */
+    private bool $recordsModified = false;
+
+    /**
      * Whether to run SQL security checks (heuristics, length, bindings).
      */
     private bool $securityChecks;
@@ -251,6 +258,7 @@ final class Connection
         $this->pdo = null;
         $this->readPdo = null;
         $this->readReplicaIndex = null;
+        $this->recordsModified = false;
     }
 
     /**
@@ -424,6 +432,10 @@ final class Connection
      */
     public function getReadPdo(): PDO
     {
+        if ($this->shouldUseWritePdoForRead()) {
+            return $this->getPdo();
+        }
+
         if (! $this->config->hasReadConfig()) {
             return $this->getPdo();
         }
@@ -683,6 +695,22 @@ final class Connection
     }
 
     /**
+     * Run a query and return the first column from the first row.
+     *
+     * @param  array<int|string,mixed>  $bindings
+     */
+    public function scalar(string $sql, array $bindings = []): mixed
+    {
+        $row = $this->select($sql, $bindings)[0] ?? null;
+
+        if (! is_array($row) || $row === []) {
+            return null;
+        }
+
+        return $row[array_key_first($row)];
+    }
+
+    /**
      * Run a select statement.
      *
      * @param  array<int|string,mixed>  $bindings
@@ -696,6 +724,36 @@ final class Connection
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
 
         return $rows;
+    }
+
+    /**
+     * Run a query that may return multiple result sets.
+     *
+     * @param  array<int|string,mixed>  $bindings
+     * @return list<list<array<string,mixed>>>
+     */
+    public function selectResultSets(string $sql, array $bindings = []): array
+    {
+        $statement = $this->execute($sql, $bindings);
+        $results = [];
+
+        while (true) {
+            /** @var list<array<string,mixed>> $rows */
+            $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+            $results[] = $rows;
+
+            try {
+                $hasMore = $statement->nextRowset();
+            } catch (PDOException) {
+                $hasMore = false;
+            }
+
+            if ($hasMore !== true) {
+                break;
+            }
+        }
+
+        return $results;
     }
 
     /**
@@ -1013,7 +1071,8 @@ final class Connection
     private function connect(): void
     {
         try {
-            $this->pdo = $this->driver->createPdo($this->config, false);
+            $config = $this->resolveWriteConnectionConfig();
+            $this->pdo = $this->driver->createPdo($config, false);
         } catch (PDOException $e) {
             throw ConnectionException::connectionFailed(
                 $this->config->getDriver(),
@@ -1206,6 +1265,7 @@ final class Connection
 
         if ($isWrite) {
             $this->stats['writes']++;
+            $this->recordsModified = true;
         } else {
             $this->stats['reads']++;
         }
@@ -1296,6 +1356,24 @@ final class Connection
     }
 
     /**
+     * Resolve effective write connection config with optional write overrides.
+     */
+    private function resolveWriteConnectionConfig(): ConnectionConfig
+    {
+        $writeConfigs = $this->config->getWriteConfigs();
+
+        if ($writeConfigs === []) {
+            return $this->config;
+        }
+
+        $selected = $writeConfigs[random_int(0, \count($writeConfigs) - 1)];
+        $merged = array_merge($this->config->toArray(), $selected);
+        unset($merged['read'], $merged['write']);
+
+        return ConnectionConfig::fromArray($merged);
+    }
+
+    /**
      * Execute a prepared statement on a given PDO instance.
      *
      * @param  array<int|string,mixed>  $bindings
@@ -1350,5 +1428,21 @@ final class Connection
 
         // Backward-compatible default: a single reconnect retry.
         return $attempt < 2;
+    }
+
+    /**
+     * Determine whether reads should use the write PDO.
+     */
+    private function shouldUseWritePdoForRead(): bool
+    {
+        if ($this->getTransactionManager()->level($this) > 0) {
+            return true;
+        }
+
+        if (! $this->config->isSticky()) {
+            return false;
+        }
+
+        return $this->recordsModified;
     }
 }

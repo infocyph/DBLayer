@@ -6,6 +6,7 @@ A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with 
 
 ### Core Features
 - ✅ **Query Builder** - Fluent, Laravel-like API
+- ✅ **Repository Layer** - Thin model-style repositories on top of Query Builder
 - ✅ **Connection Manager** - Connection pooling + read replicas
 - ✅ **Replica Strategies** - `random`, `round_robin`, `least_latency`
 - ✅ **Multi-Driver** - MySQL, PostgreSQL, SQLite
@@ -18,7 +19,7 @@ A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with 
 - ✅ **Pagination** - Length-aware, simple, and cursor pagination
 
 ### Performance
-- Near-PDO performance (<5% overhead for simple queries)
+- Microsecond-level benchmark results for core query-builder and transaction paths
 - Connection pooling for reuse
 - Memory-efficient cursor mode for large datasets
 
@@ -145,6 +146,18 @@ $total = DB::table('orders')->sum('amount');
 $average = DB::table('products')->avg('price');
 ```
 
+### Repository Layer
+
+```php
+use Infocyph\DBLayer\DB;
+
+$users = DB::repository('users');
+
+$all = $users->all();
+$one = $users->find(1);
+$active = $users->get(fn ($q) => $q->where('active', 1));
+```
+
 ### Transactions
 
 ```php
@@ -169,26 +182,32 @@ try {
 ## Testing
 
 ```bash
-composer test
 composer tests
-composer test:static:single
+composer test:code
+composer test:static
+composer test:security
 ```
 
 ## Benchmarking
 
 ```bash
-composer benchmark
+composer bench:run
 composer bench:quick
+composer bench:chart
 ```
 
 ## Benchmarks
 
-| Operation | DBLayer | Raw PDO | Laravel | Overhead |
-|-----------|---------|---------|---------|----------|
-| Simple SELECT | 0.52ms | 0.50ms | 0.68ms | +4% |
-| Complex JOIN | 2.15ms | 2.10ms | 2.45ms | +2.4% |
-| 1000 Inserts (batch) | 125ms | 110ms | 165ms | +13.6% |
-| Transaction (10 ops) | 3.2ms | 3.0ms | 4.1ms | +6.7% |
+Latest `composer bench:quick` sample output:
+
+| Subject | Mode | RSD |
+|---------|------|-----|
+| `benchBuildSelectSql` | `11.79μs` | `±0.80%` |
+| `benchSelectByPrimaryKey` | `28.20μs` | `±1.27%` |
+| `benchTransactionTwoPointReads` | `20.66μs` | `±1.61%` |
+| `benchUpdateSingleColumn` | `23.45μs` | `±4.21%` |
+
+Environment for this sample: PHP 8.5.4, xdebug disabled, opcache disabled, 10 revs x 3 iterations.
 
 ## Security
 
@@ -219,4 +238,4 @@ Hasan - [Infocyph](https://infocyph.com)
 
 ## Contributing
 
-Contributions are welcome! Please see CONTRIBUTING.md for details.
+Contributions are welcome via pull requests and issues.
