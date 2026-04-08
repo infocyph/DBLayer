@@ -19,7 +19,8 @@ final readonly class Capabilities
         public bool $supportsSchemas = false,
         public bool $supportsJson = false,
         public bool $supportsWindowFunctions = false,
-    ) {}
+    ) {
+    }
 
     public function withInsertIgnore(bool $enabled = true): self
     {

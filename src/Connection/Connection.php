@@ -1046,7 +1046,7 @@ final class Connection
             [$index, $pdo] = $this->resolveReadReplicaPdo($readConfigs);
             $this->readReplicaIndex = $index;
             $this->readPdo = $pdo;
-        } catch (PDOException|ConnectionException) {
+        } catch (PDOException | ConnectionException) {
             // Silent fallback to write connection; readPdo stays null.
             $this->readPdo = null;
             $this->readReplicaIndex = null;
@@ -1263,7 +1263,7 @@ final class Connection
                     $bestIndex   = $index;
                     $bestPdo     = $pdo;
                 }
-            } catch (PDOException|ConnectionException) {
+            } catch (PDOException | ConnectionException) {
                 continue;
             }
         }

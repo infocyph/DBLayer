@@ -20,7 +20,8 @@ final readonly class DriverResult
         public ?array $rows,
         public int $rowCount,
         public ?string $lastInsertId = null,
-    ) {}
+    ) {
+    }
 
     public function hasRows(): bool
     {

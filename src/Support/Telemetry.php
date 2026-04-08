@@ -49,7 +49,9 @@ final class Telemetry
     /**
      * Prevent static-only class instantiation.
      */
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 
     /**
      * Clear all collected telemetry buffers.

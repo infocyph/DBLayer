@@ -19,20 +19,6 @@
             "email": "abmmhasan@gmail.com"
         }
     ],
-    "require": {
-        "php": "^8.4",
-        "ext-pdo": "*"
-    },
-    "require-dev": {
-        "captainhook/captainhook": "^5.29.2",
-        "laravel/pint": "^1.29",
-        "pestphp/pest": "^4.4.5",
-        "pestphp/pest-plugin-drift": "^4.1",
-        "rector/rector": "^2.4.1",
-        "symfony/var-dumper": "^7.3 || ^8.0.8",
-        "vimeo/psalm": "^6.16.1",
-        "tomasvotruba/cognitive-complexity": "^1.1"
-    },
     "suggest": {
         "ext-pdo_mysql": "For MySQL database support",
         "ext-pdo_pgsql": "For PostgreSQL database support",
@@ -51,25 +37,51 @@
             "Infocyph\\DBLayer\\Tests\\": "tests/"
         }
     },
+    "require": {
+        "php": "^8.4",
+        "ext-pdo": "*"
+    },
+    "require-dev": {
+        "captainhook/captainhook": "^5.29.2",
+        "laravel/pint": "^1.29",
+        "pestphp/pest": "^4.4.5",
+        "pestphp/pest-plugin-drift": "^4.1",
+        "phpbench/phpbench": "^1.6",
+        "rector/rector": "^2.4.1",
+        "squizlabs/php_codesniffer": "^4.0",
+        "symfony/var-dumper": "^7.3 || ^8.0.8",
+        "tomasvotruba/cognitive-complexity": "^1.1",
+        "vimeo/psalm": "^6.16.1"
+    },
     "scripts": {
         "test:code": "@php -d error_reporting=24575 vendor/bin/pest --parallel --processes=10",
-        "test:security": "@php -d error_reporting=24575 vendor/bin/psalm --config=psalm.xml --security-analysis --show-info=false --no-progress --threads=1 --no-cache",
-        "test:static": "@php -d error_reporting=24575 vendor/bin/phpstan analyse --configuration=phpstan.neon.dist --memory-limit=1G --no-progress",
-        "test:static:single": "@php -d error_reporting=24575 vendor/bin/phpstan analyse --configuration=phpstan.neon.dist --memory-limit=1G --no-progress --debug",
-        "test:refactor": "@php -d error_reporting=24575 vendor/bin/rector process --dry-run --debug",
         "test:lint": "@php -d error_reporting=24575 vendor/bin/pint --test",
-        "tests": [
+        "test:sniff": "@php -d error_reporting=24575 vendor/bin/phpcs --standard=phpcs.xml.dist --report=full",
+        "test:static": "@php -d error_reporting=24575 vendor/bin/phpstan analyse --configuration=phpstan.neon.dist --memory-limit=1G --no-progress",
+        "test:security": "@php -d error_reporting=24575 vendor/bin/psalm --config=psalm.xml --security-analysis --show-info=false --no-progress --threads=1 --no-cache",
+        "test:refactor": "@php -d error_reporting=24575 vendor/bin/rector process --dry-run --debug",
+        "test:bench": "@php -d error_reporting=24575 vendor/bin/phpbench run --config=phpbench.json --report=aggregate",
+        "test:all": [
             "@test:code",
             "@test:lint",
-            "@test:static:single",
+            "@test:sniff",
+            "@test:static",
             "@test:refactor",
             "@test:security"
         ],
-        "git:hook": "captainhook install --only-enabled -nf",
-        "test": "@php vendor/bin/pest",
-        "refactor": "@php vendor/bin/rector process",
-        "lint": "@php vendor/bin/pint",
-        "security:scan": "@test:security",
+        "process:lint": "@php vendor/bin/pint",
+        "process:sniff:fix": "@php vendor/bin/phpcbf --standard=phpcs.xml.dist --runtime-set ignore_errors_on_exit 1",
+        "process:refactor": "@php vendor/bin/rector process",
+        "process:all": [
+            "@process:refactor",
+            "@process:lint",
+            "@process:sniff:fix"
+        ],
+        "bench:run": "@php vendor/bin/phpbench run --config=phpbench.json --report=aggregate",
+        "bench:quick": "@php vendor/bin/phpbench run --config=phpbench.json --report=aggregate --revs=10 --iterations=3 --warmup=1",
+        "tests": "@test:all",
+        "process": "@process:all",
+        "benchmark": "@bench:run",
         "post-autoload-dump": "captainhook install --only-enabled -nf"
     },
     "config": {

@@ -174,6 +174,13 @@ composer tests
 composer test:static:single
 ```
 
+## Benchmarking
+
+```bash
+composer benchmark
+composer bench:quick
+```
+
 ## Benchmarks
 
 | Operation | DBLayer | Raw PDO | Laravel | Overhead |

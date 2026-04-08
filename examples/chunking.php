@@ -14,9 +14,9 @@ DB::table('audit_logs')
   ->chunk(1000, static function (array $rows, int $page): bool {
       echo "Processing chunk page {$page}, rows: " . count($rows) . PHP_EOL;
 
-      foreach ($rows as $row) {
-          // process $row ...
-      }
+    foreach ($rows as $row) {
+        // process $row ...
+    }
 
       // Return false to break early, true/null to continue
       return true;
@@ -28,9 +28,9 @@ DB::table('audit_logs')
   ->chunkById(1000, static function (array $rows): bool {
       echo "Processing chunkById rows: " . count($rows) . PHP_EOL;
 
-      foreach ($rows as $row) {
-          // process $row ...
-      }
+    foreach ($rows as $row) {
+        // process $row ...
+    }
 
       return true;
   }, 'id');

@@ -28,10 +28,10 @@ final class SecurityException extends DBException
     {
         return new self(
             'Potential SQL injection detected using pattern ['
-          . $pattern
-          . '] in fragment ['
-          . $fragment
-          . '].',
+            . $pattern
+            . '] in fragment ['
+            . $fragment
+            . '].',
         );
     }
 

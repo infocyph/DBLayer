@@ -1,12 +1,12 @@
 <?php
 
-declare(strict_types=1);
-
 /**
  * DBLayer Helper Functions
  *
  * Global helper functions for database operations.
  */
+
+declare(strict_types=1);
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
@@ -498,7 +498,7 @@ if (! function_exists('rescue')) {
             return $callback();
         } catch (Throwable $e) {
             if ($report) {
-                // Hook for logging if needed.
+                error_log((string) $e);
             }
 
             return value($rescue);

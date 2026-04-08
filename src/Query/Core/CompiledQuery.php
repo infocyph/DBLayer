@@ -18,5 +18,6 @@ final readonly class CompiledQuery
         public string $sql,
         public array $bindings,
         public QueryType $type,
-    ) {}
+    ) {
+    }
 }
