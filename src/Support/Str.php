@@ -34,7 +34,7 @@ final class Str
      */
     public static function contains(string $haystack, string|array $needles): bool
     {
-        return array_any((array) $needles, fn ($needle) => $needle !== '' && str_contains($haystack, $needle));
+        return array_any((array) $needles, fn($needle) => $needle !== '' && str_contains($haystack, $needle));
     }
 
     /**
@@ -44,7 +44,7 @@ final class Str
      */
     public static function endsWith(string $haystack, string|array $needles): bool
     {
-        return array_any((array) $needles, fn ($needle) => $needle !== '' && str_ends_with($haystack, $needle));
+        return array_any((array) $needles, fn($needle) => $needle !== '' && str_ends_with($haystack, $needle));
     }
 
     /**
@@ -154,7 +154,7 @@ final class Str
         $title = preg_replace(
             '/[^' . preg_quote($separator, '/') . '\w]+/u',
             '',
-            $title
+            $title,
         ) ?? '';
 
         return $title;
@@ -188,7 +188,7 @@ final class Str
      */
     public static function startsWith(string $haystack, string|array $needles): bool
     {
-        return array_any((array) $needles, fn ($needle) => $needle !== '' && str_starts_with($haystack, $needle));
+        return array_any((array) $needles, fn($needle) => $needle !== '' && str_starts_with($haystack, $needle));
     }
 
     /**

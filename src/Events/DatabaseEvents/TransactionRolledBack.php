@@ -32,8 +32,8 @@ final class TransactionRolledBack
     public function toArray(): array
     {
         return [
-          'connection' => $this->connection->getDriverName(),
-          'duration'   => $this->duration,
+            'connection' => $this->connection->getDriverName(),
+            'duration'   => $this->duration,
         ];
     }
 }

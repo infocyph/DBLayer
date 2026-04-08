@@ -88,11 +88,11 @@ final class Security
         $limiter = self::limiter();
 
         if ($perSecond > 0) {
-            $limiter->check($identifier.':sec', $perSecond, 1);
+            $limiter->check($identifier . ':sec', $perSecond, 1);
         }
 
         if ($perMinute > 0) {
-            $limiter->check($identifier.':min', $perMinute, 60);
+            $limiter->check($identifier . ':min', $perMinute, 60);
         }
     }
 
@@ -109,7 +109,7 @@ final class Security
 
         if ($elapsed > $maxTime) {
             throw SecurityException::unsafeOperation(
-                "Transaction exceeded max time of {$maxTime}s (elapsed: ".round($elapsed, 3).'s).'
+                "Transaction exceeded max time of {$maxTime}s (elapsed: " . round($elapsed, 3) . 's).',
             );
         }
     }
@@ -144,7 +144,7 @@ final class Security
                 [
                     'sql' => mb_substr($sql, 0, 512, 'UTF-8'),
                     'error' => $e->getMessage(),
-                ]
+                ],
             );
 
             throw $e;
@@ -188,8 +188,8 @@ final class Security
         $limiter = self::limiter();
 
         return [
-            'queries_this_minute' => $limiter->getCount($identifier.':min', 60),
-            'queries_this_second' => $limiter->getCount($identifier.':sec', 1),
+            'queries_this_minute' => $limiter->getCount($identifier . ':min', 60),
+            'queries_this_second' => $limiter->getCount($identifier . ':sec', 1),
             'limit_per_minute' => self::DEFAULT_QUERIES_PER_MINUTE,
             'limit_per_second' => self::DEFAULT_QUERIES_PER_SECOND,
         ];
@@ -220,7 +220,7 @@ final class Security
             'alter table',
             'create table',
         ];
-        return array_any($dangerous, fn ($operation) => str_starts_with($sql, $operation));
+        return array_any($dangerous, fn($operation) => str_starts_with($sql, $operation));
     }
 
     /**
@@ -262,7 +262,7 @@ final class Security
 
         if (self::isDangerousOperation($sql) && ! $confirmed) {
             throw SecurityException::unsafeOperation(
-                'Dangerous SQL operation requires explicit confirmation.'
+                'Dangerous SQL operation requires explicit confirmation.',
             );
         }
     }
@@ -273,8 +273,8 @@ final class Security
     public static function resetRateLimit(string $identifier): void
     {
         $limiter = self::limiter();
-        $limiter->reset($identifier.':sec');
-        $limiter->reset($identifier.':min');
+        $limiter->reset($identifier . ':sec');
+        $limiter->reset($identifier . ':min');
     }
 
     /**
@@ -347,7 +347,7 @@ final class Security
     public static function validateQuery(
         string $sql,
         array $bindings = [],
-        ?array $config = null
+        ?array $config = null,
     ): void {
         $mode = self::$mode;
 
@@ -394,7 +394,7 @@ final class Security
 
         if (in_array(strtoupper($table), $keywords, true)) {
             throw SecurityException::invalidConfiguration(
-                "Invalid table name [{$table}]."
+                "Invalid table name [{$table}].",
             );
         }
     }
@@ -417,14 +417,14 @@ final class Security
     private static function enforceBindingLimits(
         array $bindings,
         ?int $maxParams,
-        ?int $maxParamBytes
+        ?int $maxParamBytes,
     ): void {
         if ($maxParams !== null) {
             $paramCount = count($bindings);
 
             if ($paramCount > $maxParams) {
                 throw SecurityException::unsafeQuery(
-                    "Number of query parameters {$paramCount} exceeds maximum {$maxParams}."
+                    "Number of query parameters {$paramCount} exceeds maximum {$maxParams}.",
                 );
             }
         }
@@ -444,7 +444,7 @@ final class Security
                 $paramKey = is_int($key) ? (string) $key : (string) $key;
 
                 throw SecurityException::unsafeQuery(
-                    "Parameter [{$paramKey}] length {$length} exceeds maximum {$maxParamBytes} bytes."
+                    "Parameter [{$paramKey}] length {$length} exceeds maximum {$maxParamBytes} bytes.",
                 );
             }
         }
@@ -528,7 +528,7 @@ final class Security
                 [
                     'sql' => mb_substr($sql, 0, 512, 'UTF-8'),
                     'pattern' => $pattern,
-                ]
+                ],
             );
 
             throw SecurityException::unsafeQuery('Query contains dangerous SQL pattern.');

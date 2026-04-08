@@ -40,7 +40,7 @@ final class QueryExecuted
         array $bindings,
         float $time,
         Connection $connection,
-        ?int $rowsAffected = null
+        ?int $rowsAffected = null,
     ) {
         $this->sql          = $sql;
         $this->bindings     = $bindings;
@@ -63,11 +63,11 @@ final class QueryExecuted
     public function toArray(): array
     {
         return [
-          'sql'           => $this->sql,
-          'bindings'      => $this->bindings,
-          'time'          => $this->time,
-          'connection'    => $this->connection->getDriverName(),
-          'rows_affected' => $this->rowsAffected,
+            'sql'           => $this->sql,
+            'bindings'      => $this->bindings,
+            'time'          => $this->time,
+            'connection'    => $this->connection->getDriverName(),
+            'rows_affected' => $this->rowsAffected,
         ];
     }
 }

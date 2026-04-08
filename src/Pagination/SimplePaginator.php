@@ -22,7 +22,7 @@ final class SimplePaginator extends AbstractPaginator
         array $items,
         int $perPage,
         int $currentPage = 1,
-        bool $hasMore = false
+        bool $hasMore = false,
     ) {
         parent::__construct($items, $perPage, $currentPage);
 
@@ -45,14 +45,14 @@ final class SimplePaginator extends AbstractPaginator
     public function meta(): array
     {
         return [
-          'current_page' => $this->currentPage(),
-          'per_page'     => $this->perPage(),
-          'total'        => null,
-          'last_page'    => null,
-          'from'         => $this->firstItem(),
-          'to'           => $this->lastItem(),
-          'count'        => $this->count(),
-          'has_more'     => $this->hasMorePages(),
+            'current_page' => $this->currentPage(),
+            'per_page'     => $this->perPage(),
+            'total'        => null,
+            'last_page'    => null,
+            'from'         => $this->firstItem(),
+            'to'           => $this->lastItem(),
+            'count'        => $this->count(),
+            'has_more'     => $this->hasMorePages(),
         ];
     }
 
@@ -62,8 +62,8 @@ final class SimplePaginator extends AbstractPaginator
     public function toArray(): array
     {
         return [
-          'data' => $this->items(),
-          'meta' => $this->meta(),
+            'data' => $this->items(),
+            'meta' => $this->meta(),
         ];
     }
 

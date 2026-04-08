@@ -28,8 +28,8 @@ final class PostgreSQLCompiler extends AbstractSqlCompiler
         $parts = explode('.', $identifier);
 
         $wrapped = array_map(
-            static fn (string $part): string => $part === '*' ? '*' : sprintf('"%s"', $part),
-            $parts
+            static fn(string $part): string => $part === '*' ? '*' : sprintf('"%s"', $part),
+            $parts,
         );
 
         return implode('.', $wrapped);

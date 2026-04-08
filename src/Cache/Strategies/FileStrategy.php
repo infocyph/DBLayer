@@ -193,9 +193,9 @@ final class FileStrategy implements CacheStrategy
         $expires = $ttl > 0 ? time() + $ttl : 0;
 
         $data = [
-          'value'   => $value,
-          'expires' => $expires,
-          'created' => time(),
+            'value'   => $value,
+            'expires' => $expires,
+            'created' => time(),
         ];
 
         $content = serialize($data);

@@ -36,7 +36,7 @@ final class MySQLGrammar extends Grammar
     public function compileInsertOnDuplicateKeyUpdate(
         QueryBuilder $query,
         array $values,
-        array $update
+        array $update,
     ): string {
         $insert = $this->compileInsert($query, $values);
 
@@ -46,7 +46,7 @@ final class MySQLGrammar extends Grammar
 
                 return "{$wrapped} = VALUES({$wrapped})";
             },
-            array_keys($update)
+            array_keys($update),
         ));
 
         return "{$insert} on duplicate key update {$updateColumns}";
@@ -69,7 +69,7 @@ final class MySQLGrammar extends Grammar
     {
         $components = $query->getComponents();
 
-        return 'truncate table '.$this->wrapTable($components['from']);
+        return 'truncate table ' . $this->wrapTable($components['from']);
     }
 
     /**
@@ -89,10 +89,10 @@ final class MySQLGrammar extends Grammar
         $offset     = $components['offset'];
 
         if ($offset !== null) {
-            return 'limit '.(int) $offset.', '.(int) $limit;
+            return 'limit ' . (int) $offset . ', ' . (int) $limit;
         }
 
-        return 'limit '.(int) $limit;
+        return 'limit ' . (int) $limit;
     }
 
     /**
@@ -129,6 +129,6 @@ final class MySQLGrammar extends Grammar
             return $value;
         }
 
-        return '`'.str_replace('`', '``', $value).'`';
+        return '`' . str_replace('`', '``', $value) . '`';
     }
 }

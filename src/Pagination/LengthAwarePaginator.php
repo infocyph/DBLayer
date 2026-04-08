@@ -48,14 +48,14 @@ final class LengthAwarePaginator extends AbstractPaginator
     public function meta(): array
     {
         return [
-          'current_page' => $this->currentPage(),
-          'per_page'     => $this->perPage(),
-          'total'        => $this->total(),
-          'last_page'    => $this->lastPage(),
-          'from'         => $this->firstItem(),
-          'to'           => $this->lastItem(),
-          'count'        => $this->count(),
-          'has_more'     => $this->hasMorePages(),
+            'current_page' => $this->currentPage(),
+            'per_page'     => $this->perPage(),
+            'total'        => $this->total(),
+            'last_page'    => $this->lastPage(),
+            'from'         => $this->firstItem(),
+            'to'           => $this->lastItem(),
+            'count'        => $this->count(),
+            'has_more'     => $this->hasMorePages(),
         ];
     }
 
@@ -65,8 +65,8 @@ final class LengthAwarePaginator extends AbstractPaginator
     public function toArray(): array
     {
         return [
-          'data' => $this->items(),
-          'meta' => $this->meta(),
+            'data' => $this->items(),
+            'meta' => $this->meta(),
         ];
     }
 

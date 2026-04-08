@@ -145,7 +145,7 @@ class QueryBuilder
     public function __construct(
         Connection $connection,
         Grammar $grammar,
-        Executor $executor
+        Executor $executor,
     ) {
         $this->connection = $connection;
         $this->grammar    = $grammar;
@@ -231,7 +231,7 @@ class QueryBuilder
         int $count,
         callable $callback,
         string $column = 'id',
-        mixed $fromId = null
+        mixed $fromId = null,
     ): bool {
         if ($count <= 0) {
             throw QueryException::invalidLimit($count);
@@ -292,8 +292,8 @@ class QueryBuilder
     public function crossJoin(string $table): self
     {
         $this->joins[] = [
-          'type'  => 'cross',
-          'table' => $table,
+            'type'  => 'cross',
+            'table' => $table,
         ];
 
         return $this;
@@ -355,7 +355,7 @@ class QueryBuilder
         int $perPage = 15,
         mixed $cursor = null,
         string $column = 'id',
-        string $direction = 'asc'
+        string $direction = 'asc',
     ): CursorPaginator {
         if ($perPage <= 0) {
             throw QueryException::invalidLimit($perPage);
@@ -409,7 +409,7 @@ class QueryBuilder
             $perPage,
             $currentCursor,
             $nextCursor,
-            $hasMore
+            $hasMore,
         );
     }
 
@@ -470,7 +470,7 @@ class QueryBuilder
     public function firstWhere(
         string|callable $column,
         mixed $operator = null,
-        mixed $value = null
+        mixed $value = null,
     ): ?array {
         return $this->where($column, $operator, $value)->first();
     }
@@ -547,20 +547,20 @@ class QueryBuilder
     public function getComponents(): array
     {
         return [
-          'type'      => $this->type,
-          'columns'   => $this->columns,
-          'distinct'  => $this->distinct,
-          'from'      => $this->from,
-          'joins'     => $this->joins,
-          'wheres'    => $this->wheres,
-          'groups'    => $this->groups,
-          'havings'   => $this->havings,
-          'orders'    => $this->orders,
-          'limit'     => $this->limit,
-          'offset'    => $this->offset,
-          'unions'    => $this->unions,
-          'lock'      => $this->lock,
-          'aggregate' => $this->aggregate,
+            'type'      => $this->type,
+            'columns'   => $this->columns,
+            'distinct'  => $this->distinct,
+            'from'      => $this->from,
+            'joins'     => $this->joins,
+            'wheres'    => $this->wheres,
+            'groups'    => $this->groups,
+            'havings'   => $this->havings,
+            'orders'    => $this->orders,
+            'limit'     => $this->limit,
+            'offset'    => $this->offset,
+            'unions'    => $this->unions,
+            'lock'      => $this->lock,
+            'aggregate' => $this->aggregate,
         ];
     }
 
@@ -597,7 +597,7 @@ class QueryBuilder
         string $column,
         mixed $operator = null,
         mixed $value = null,
-        string $boolean = 'and'
+        string $boolean = 'and',
     ): self {
         if (\func_num_args() === 2) {
             $value    = $operator;
@@ -605,11 +605,11 @@ class QueryBuilder
         }
 
         $this->havings[] = [
-          'type'     => 'basic',
-          'column'   => $column,
-          'operator' => $operator,
-          'value'    => $value,
-          'boolean'  => $boolean,
+            'type'     => 'basic',
+            'column'   => $column,
+            'operator' => $operator,
+            'value'    => $value,
+            'boolean'  => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -684,14 +684,14 @@ class QueryBuilder
         string $first,
         string $operator,
         string $second,
-        string $type = 'inner'
+        string $type = 'inner',
     ): self {
         $this->joins[] = [
-          'type'     => $type,
-          'table'    => $table,
-          'first'    => $first,
-          'operator' => $operator,
-          'second'   => $second,
+            'type'     => $type,
+            'table'    => $table,
+            'first'    => $first,
+            'operator' => $operator,
+            'second'   => $second,
         ];
 
         return $this;
@@ -816,8 +816,8 @@ class QueryBuilder
         }
 
         $this->orders[] = [
-          'column'    => $column,
-          'direction' => $direction,
+            'column'    => $column,
+            'direction' => $direction,
         ];
 
         return $this;
@@ -1018,8 +1018,8 @@ class QueryBuilder
             $unionQuery = $union['query'];
 
             $unionPayloads[] = [
-              'query' => $unionQuery->toPayload(),
-              'all'   => (bool) $union['all'],
+                'query' => $unionQuery->toPayload(),
+                'all'   => (bool) $union['all'],
             ];
         }
 
@@ -1087,8 +1087,8 @@ class QueryBuilder
         }
 
         $this->unions[] = [
-          'query' => $query,
-          'all'   => $all,
+            'query' => $query,
+            'all'   => $all,
         ];
 
         $this->bindings = \array_merge($this->bindings, $query->getBindings());
@@ -1190,7 +1190,7 @@ class QueryBuilder
         string|callable $column,
         mixed $operator = null,
         mixed $value = null,
-        string $boolean = 'and'
+        string $boolean = 'and',
     ): self {
         // Handle closure for nested where.
         if (\is_callable($column)) {
@@ -1204,11 +1204,11 @@ class QueryBuilder
         }
 
         $this->wheres[] = [
-          'type'     => 'basic',
-          'column'   => $column,
-          'operator' => $operator,
-          'value'    => $value,
-          'boolean'  => $boolean,
+            'type'     => 'basic',
+            'column'   => $column,
+            'operator' => $operator,
+            'value'    => $value,
+            'boolean'  => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -1224,11 +1224,11 @@ class QueryBuilder
     public function whereBetween(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type'    => 'between',
-          'column'  => $column,
-          'values'  => $values,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type'    => 'between',
+            'column'  => $column,
+            'values'  => $values,
+            'boolean' => $boolean,
+            'not'     => $not,
         ];
 
         $this->bindings = \array_merge($this->bindings, $values);
@@ -1247,10 +1247,10 @@ class QueryBuilder
         $callback($query);
 
         $this->wheres[] = [
-          'type'    => 'exists',
-          'query'   => $query,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type'    => 'exists',
+            'query'   => $query,
+            'boolean' => $boolean,
+            'not'     => $not,
         ];
 
         $this->bindings = \array_merge($this->bindings, $query->getBindings());
@@ -1266,11 +1266,11 @@ class QueryBuilder
     public function whereIn(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type'    => 'in',
-          'column'  => $column,
-          'values'  => $values,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type'    => 'in',
+            'column'  => $column,
+            'values'  => $values,
+            'boolean' => $boolean,
+            'not'     => $not,
         ];
 
         $this->bindings = \array_merge($this->bindings, $values);
@@ -1290,9 +1290,9 @@ class QueryBuilder
 
         if ($query->wheres !== []) {
             $this->wheres[] = [
-              'type'    => 'nested',
-              'query'   => $query,
-              'boolean' => $boolean,
+                'type'    => 'nested',
+                'query'   => $query,
+                'boolean' => $boolean,
             ];
 
             $this->bindings = \array_merge($this->bindings, $query->getBindings());
@@ -1335,10 +1335,10 @@ class QueryBuilder
     public function whereNull(string $column, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type'    => 'null',
-          'column'  => $column,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type'    => 'null',
+            'column'  => $column,
+            'boolean' => $boolean,
+            'not'     => $not,
         ];
 
         return $this;
@@ -1352,9 +1352,9 @@ class QueryBuilder
     public function whereRaw(string $sql, array $bindings = [], string $boolean = 'and'): self
     {
         $this->wheres[] = [
-          'type'    => 'raw',
-          'sql'     => $sql,
-          'boolean' => $boolean,
+            'type'    => 'raw',
+            'sql'     => $sql,
+            'boolean' => $boolean,
         ];
 
         $this->bindings = \array_merge($this->bindings, $bindings);
@@ -1397,8 +1397,8 @@ class QueryBuilder
         }
 
         $clone->aggregate = [
-          'function' => \strtoupper($function),
-          'column'   => $column,
+            'function' => \strtoupper($function),
+            'column'   => $column,
         ];
 
         $results = $this->executor->select($clone);

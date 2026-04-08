@@ -30,17 +30,17 @@ abstract class Grammar
      * @var list<string>
      */
     protected array $selectComponents = [
-      'aggregate',
-      'columns',
-      'from',
-      'joins',
-      'wheres',
-      'groups',
-      'havings',
-      'orders',
-      'limit',
-      'offset',
-      'lock',
+        'aggregate',
+        'columns',
+        'from',
+        'joins',
+        'wheres',
+        'groups',
+        'havings',
+        'orders',
+        'limit',
+        'offset',
+        'lock',
     ];
 
     /**
@@ -103,7 +103,7 @@ abstract class Grammar
         $sql = $this->concatenate($this->compileComponents($query));
 
         if ($components['unions']) {
-            $sql .= ' '.$this->compileUnions($query);
+            $sql .= ' ' . $this->compileUnions($query);
         }
 
         return $sql;
@@ -116,7 +116,7 @@ abstract class Grammar
     {
         $components = $query->getComponents();
 
-        return 'truncate table '.$this->wrapTable($components['from']);
+        return 'truncate table ' . $this->wrapTable($components['from']);
     }
 
     /**
@@ -133,10 +133,10 @@ abstract class Grammar
             function (mixed $value, string $key): string {
                 unset($value); // signature alignment only
 
-                return $this->wrap($key).' = ?';
+                return $this->wrap($key) . ' = ?';
             },
             \array_values($values),
-            \array_keys($values)
+            \array_keys($values),
         ));
 
         $where = $this->compileWheres($query, $components['wheres']);
@@ -219,27 +219,27 @@ abstract class Grammar
 
         $sql = $this->compileColumns(
             $query,
-            [new Expression("{$aggregate['function']}({$column}) as aggregate")]
+            [new Expression("{$aggregate['function']}({$column}) as aggregate")],
         );
 
         if (isset($components['from']) && $components['from'] !== null) {
-            $sql .= ' '.$this->compileFrom($query, $components['from']);
+            $sql .= ' ' . $this->compileFrom($query, $components['from']);
         }
 
         if ($components['joins']) {
-            $sql .= ' '.$this->compileJoins($query, $components['joins']);
+            $sql .= ' ' . $this->compileJoins($query, $components['joins']);
         }
 
         if ($components['wheres']) {
-            $sql .= ' '.$this->compileWheres($query, $components['wheres']);
+            $sql .= ' ' . $this->compileWheres($query, $components['wheres']);
         }
 
         if ($components['groups']) {
-            $sql .= ' '.$this->compileGroups($query, $components['groups']);
+            $sql .= ' ' . $this->compileGroups($query, $components['groups']);
         }
 
         if ($components['havings']) {
-            $sql .= ' '.$this->compileHavings($query, $components['havings']);
+            $sql .= ' ' . $this->compileHavings($query, $components['havings']);
         }
 
         return $sql;
@@ -255,7 +255,7 @@ abstract class Grammar
         $components = $query->getComponents();
         $select     = $components['distinct'] ? 'select distinct ' : 'select ';
 
-        return $select.$this->columnize($columns);
+        return $select . $this->columnize($columns);
     }
 
     /**
@@ -279,7 +279,7 @@ abstract class Grammar
                 continue;
             }
 
-            $method = 'compile'.\ucfirst($component);
+            $method = 'compile' . \ucfirst($component);
 
             if (! \method_exists($this, $method)) {
                 continue;
@@ -303,7 +303,7 @@ abstract class Grammar
     {
         unset($query);
 
-        return 'from '.$this->wrapTable($table);
+        return 'from ' . $this->wrapTable($table);
     }
 
     /**
@@ -315,7 +315,7 @@ abstract class Grammar
     {
         unset($query);
 
-        return 'group by '.$this->columnize($groups);
+        return 'group by ' . $this->columnize($groups);
     }
 
     /**
@@ -329,17 +329,17 @@ abstract class Grammar
 
         $sql = \implode(' ', \array_map(
             function (array $having, int $i): string {
-                $boolean = $i === 0 ? '' : $having['boolean'].' ';
+                $boolean = $i === 0 ? '' : $having['boolean'] . ' ';
 
                 return $boolean
-                  .$this->wrap($having['column'])
-                  .' '.$having['operator'].' ?';
+                  . $this->wrap($having['column'])
+                  . ' ' . $having['operator'] . ' ?';
             },
             $havings,
-            \array_keys($havings)
+            \array_keys($havings),
         ));
 
-        return 'having '.$this->removeLeadingBoolean($sql);
+        return 'having ' . $this->removeLeadingBoolean($sql);
     }
 
     /**
@@ -357,7 +357,7 @@ abstract class Grammar
     protected function compileInsertWithVerb(
         string $verb,
         QueryBuilder $query,
-        array $values
+        array $values,
     ): string {
         $rows = $this->normalizeInsertValues($values);
 
@@ -367,9 +367,9 @@ abstract class Grammar
 
         $parameters = \implode(', ', \array_map(
             function (array $record): string {
-                return '('.$this->parameterize($record).')';
+                return '(' . $this->parameterize($record) . ')';
             },
-            $rows
+            $rows,
         ));
 
         return "{$verb} into {$table} ({$columns}) values {$parameters}";
@@ -391,44 +391,44 @@ abstract class Grammar
         $clauses = [];
 
         foreach ($conditions as $i => $condition) {
-            $boolean = $i === 0 ? '' : ' '.$condition['boolean'].' ';
+            $boolean = $i === 0 ? '' : ' ' . $condition['boolean'] . ' ';
 
             switch ($condition['type']) {
                 case 'basic':
                     $clauses[] = $boolean
-                      .$this->wrap($condition['first'])
-                      .' '.$condition['operator'].' '
-                      .$this->wrap($condition['second']);
+                      . $this->wrap($condition['first'])
+                      . ' ' . $condition['operator'] . ' '
+                      . $this->wrap($condition['second']);
                     break;
 
                 case 'where':
                     $clauses[] = $boolean
-                      .$this->wrap($condition['column'])
-                      .' '.$condition['operator'].' ?';
+                      . $this->wrap($condition['column'])
+                      . ' ' . $condition['operator'] . ' ?';
                     break;
 
                 case 'whereIn':
                     $placeholders = $this->parameterize($condition['values']);
                     $clauses[]    = $boolean
-                      .$this->wrap($condition['column'])
-                      .' in ('.$placeholders.')';
+                      . $this->wrap($condition['column'])
+                      . ' in (' . $placeholders . ')';
                     break;
 
                 case 'whereNull':
                     $clauses[] = $boolean
-                      .$this->wrap($condition['column'])
-                      .' is null';
+                      . $this->wrap($condition['column'])
+                      . ' is null';
                     break;
 
                 case 'whereNotNull':
                     $clauses[] = $boolean
-                      .$this->wrap($condition['column'])
-                      .' is not null';
+                      . $this->wrap($condition['column'])
+                      . ' is not null';
                     break;
             }
         }
 
-        return "{$type} join {$table} on ".\implode('', $clauses);
+        return "{$type} join {$table} on " . \implode('', $clauses);
     }
 
     /**
@@ -455,7 +455,7 @@ abstract class Grammar
 
                 return "{$type} join {$table}";
             },
-            $joins
+            $joins,
         ));
     }
 
@@ -466,7 +466,7 @@ abstract class Grammar
     {
         unset($query);
 
-        return 'limit '.(int) $limit;
+        return 'limit ' . (int) $limit;
     }
 
     /**
@@ -486,7 +486,7 @@ abstract class Grammar
     {
         unset($query);
 
-        return 'offset '.(int) $offset;
+        return 'offset ' . (int) $offset;
     }
 
     /**
@@ -500,12 +500,12 @@ abstract class Grammar
 
         $sql = \implode(', ', \array_map(
             function (array $order): string {
-                return $this->wrap($order['column']).' '.\strtoupper($order['direction']);
+                return $this->wrap($order['column']) . ' ' . \strtoupper($order['direction']);
             },
-            $orders
+            $orders,
         ));
 
-        return 'order by '.$sql;
+        return 'order by ' . $sql;
     }
 
     /**
@@ -517,7 +517,7 @@ abstract class Grammar
     {
         $keyword = $union['all'] ? 'union all' : 'union';
 
-        return $keyword.' '.$this->compileSelect($union['query']);
+        return $keyword . ' ' . $this->compileSelect($union['query']);
     }
 
     /**
@@ -548,7 +548,7 @@ abstract class Grammar
 
         $sql = $this->concatenateWhereClauses($query, $wheres);
 
-        return 'where '.$this->removeLeadingBoolean($sql);
+        return 'where ' . $this->removeLeadingBoolean($sql);
     }
 
     /**
@@ -560,7 +560,7 @@ abstract class Grammar
     {
         return \implode(' ', \array_filter(
             $segments,
-            static fn (string $value): bool => $value !== ''
+            static fn(string $value): bool => $value !== '',
         ));
     }
 
@@ -573,15 +573,15 @@ abstract class Grammar
     {
         return \implode(' ', \array_map(
             function (array $where, int $i) use ($query): string {
-                $boolean = $i === 0 ? '' : $where['boolean'].' ';
+                $boolean = $i === 0 ? '' : $where['boolean'] . ' ';
 
                 /** @var callable(QueryBuilder,array<string,mixed>):string $handler */
-                $handler = [$this, 'where'.\ucfirst($where['type'])];
+                $handler = [$this, 'where' . \ucfirst($where['type'])];
 
-                return $boolean.$handler($query, $where);
+                return $boolean . $handler($query, $where);
             },
             $wheres,
-            \array_keys($wheres)
+            \array_keys($wheres),
         ));
     }
 
@@ -624,7 +624,7 @@ abstract class Grammar
     {
         unset($query);
 
-        return $this->wrap($where['column']).' '.$where['operator'].' ?';
+        return $this->wrap($where['column']) . ' ' . $where['operator'] . ' ?';
     }
 
     /**
@@ -638,7 +638,7 @@ abstract class Grammar
 
         $not = $where['not'] ? 'not ' : '';
 
-        return $this->wrap($where['column']).' '.$not.'between ? and ?';
+        return $this->wrap($where['column']) . ' ' . $not . 'between ? and ?';
     }
 
     /**
@@ -652,7 +652,7 @@ abstract class Grammar
 
         $not = $where['not'] ? 'not ' : '';
 
-        return $not.'exists ('.$this->compileSelect($where['query']).')';
+        return $not . 'exists (' . $this->compileSelect($where['query']) . ')';
     }
 
     /**
@@ -667,7 +667,7 @@ abstract class Grammar
         $values = $this->parameterize($where['values']);
         $not    = $where['not'] ? 'not ' : '';
 
-        return $this->wrap($where['column']).' '.$not.'in ('.$values.')';
+        return $this->wrap($where['column']) . ' ' . $not . 'in (' . $values . ')';
     }
 
     /**
@@ -681,11 +681,11 @@ abstract class Grammar
 
         $nested = $this->compileWheres(
             $where['query'],
-            $where['query']->getComponents()['wheres']
+            $where['query']->getComponents()['wheres'],
         );
 
         // strip leading "where "
-        return '('.\substr($nested, 6).')';
+        return '(' . \substr($nested, 6) . ')';
     }
 
     /**
@@ -699,7 +699,7 @@ abstract class Grammar
 
         $not = $where['not'] ? 'not ' : '';
 
-        return $this->wrap($where['column']).' is '.$not.'null';
+        return $this->wrap($where['column']) . ' is ' . $not . 'null';
     }
 
     /**
@@ -725,7 +725,7 @@ abstract class Grammar
             function (string $segment): string {
                 return $segment === '*' ? $segment : $this->wrapValue($segment);
             },
-            $segments
+            $segments,
         ));
     }
 
@@ -738,7 +738,7 @@ abstract class Grammar
             return $table->getValue();
         }
 
-        return $this->wrap($this->tablePrefix.$table);
+        return $this->wrap($this->tablePrefix . $table);
     }
 
     /**
@@ -746,6 +746,6 @@ abstract class Grammar
      */
     protected function wrapUnion(string $sql): string
     {
-        return '('.$sql.')';
+        return '(' . $sql . ')';
     }
 }

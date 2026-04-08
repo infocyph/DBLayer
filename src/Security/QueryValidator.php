@@ -26,17 +26,17 @@ final class QueryValidator
      */
     private const INJECTION_PATTERNS = [
         // UNION-based injections usually chained after boolean bypass payloads.
-      '/\b(or|and)\b[\s\S]{0,128}\bunion\b(?:\s+all)?\s+\bselect\b/i',
+        '/\b(or|and)\b[\s\S]{0,128}\bunion\b(?:\s+all)?\s+\bselect\b/i',
 
         // Tautologies / OR/AND 1=1 style.
-      '/\b(or|and)\s+1\s*=\s*1\b/i',
+        '/\b(or|and)\s+1\s*=\s*1\b/i',
 
         // String tautologies: 'x'='x' pattern.
-      '/\b(or|and)\s+\'[^\']*\'\s*=\s*\'[^\']*\'/i',
+        '/\b(or|and)\s+\'[^\']*\'\s*=\s*\'[^\']*\'/i',
 
         // Comment-based truncation after a statement terminator.
-      '/;\s*--/m',
-      '/;\s*#/m',
+        '/;\s*--/m',
+        '/;\s*#/m',
     ];
 
     /**

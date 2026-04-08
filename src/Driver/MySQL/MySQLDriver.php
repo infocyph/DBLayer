@@ -69,7 +69,7 @@ final class MySQLDriver extends AbstractPdoDriver
         if (! is_string($database) || $database === '') {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                'Missing or empty "database" for MySQL connection.'
+                'Missing or empty "database" for MySQL connection.',
             );
         }
 
@@ -80,23 +80,23 @@ final class MySQLDriver extends AbstractPdoDriver
         ) {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                'MySQL connection requires either a non-empty "host" or "unix_socket".'
+                'MySQL connection requires either a non-empty "host" or "unix_socket".',
             );
         }
 
-        if (isset($config['port']) &&
-          ! is_int($config['port']) &&
-          ! ctype_digit((string) $config['port'])) {
+        if (isset($config['port'])
+          && ! is_int($config['port'])
+          && ! ctype_digit((string) $config['port'])) {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                '"port" must be an integer for MySQL connection.'
+                '"port" must be an integer for MySQL connection.',
             );
         }
 
         if (isset($config['charset']) && ! is_string($config['charset'])) {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                '"charset" must be a string for MySQL connection.'
+                '"charset" must be a string for MySQL connection.',
             );
         }
     }
@@ -128,7 +128,7 @@ final class MySQLDriver extends AbstractPdoDriver
             $host,
             $port,
             $database,
-            $charset
+            $charset,
         );
     }
 }

@@ -25,20 +25,21 @@ final class ConnectionConfig
      * @var array<string,mixed>
      */
     private const DEFAULTS = [
-      'driver'    => 'mysql',
-      'host'      => '127.0.0.1',
-      'port'      => null,
-      'database'  => '',
-      'username'  => '',
-      'password'  => '',
-      'charset'   => null,
-      'collation' => null,
-      'schema'    => null,
-      'prefix'    => '',
-      'options'   => [],
-      'write'     => [],
-      'read'      => [],
-      'security'  => [],
+        'driver'    => 'mysql',
+        'host'      => '127.0.0.1',
+        'port'      => null,
+        'database'  => '',
+        'username'  => '',
+        'password'  => '',
+        'charset'   => null,
+        'collation' => null,
+        'schema'    => null,
+        'prefix'    => '',
+        'options'   => [],
+        'write'     => [],
+        'read'      => [],
+        'read_strategy' => 'random',
+        'security'  => [],
     ];
 
     /**
@@ -47,15 +48,15 @@ final class ConnectionConfig
      * @var array<string,string>
      */
     private const DRIVER_ALIASES = [
-      'pdo_mysql'  => 'mysql',
-      'mysqli'     => 'mysql',
-      'mariadb'    => 'mysql',
+        'pdo_mysql'  => 'mysql',
+        'mysqli'     => 'mysql',
+        'mariadb'    => 'mysql',
 
-      'pgsql'      => 'pgsql',
-      'postgres'   => 'pgsql',
-      'postgresql' => 'pgsql',
+        'pgsql'      => 'pgsql',
+        'postgres'   => 'pgsql',
+        'postgresql' => 'pgsql',
 
-      'sqlite3'    => 'sqlite',
+        'sqlite3'    => 'sqlite',
     ];
 
     /**
@@ -64,10 +65,10 @@ final class ConnectionConfig
      * @var array<string,mixed>
      */
     private const SECURITY_DEFAULT = [
-      'enabled'         => true,
-      'max_sql_length'  => 16_384,
-      'max_params'      => 512,
-      'max_param_bytes' => 1_024,
+        'enabled'         => true,
+        'max_sql_length'  => 16_384,
+        'max_params'      => 512,
+        'max_param_bytes' => 1_024,
     ];
 
     /**
@@ -189,6 +190,32 @@ final class ConnectionConfig
     }
 
     /**
+     * Get read-replica selection strategy.
+     *
+     * Supported values:
+     *  - random
+     *  - round_robin
+     *  - least_latency
+     */
+    public function getReadStrategy(): string
+    {
+        $strategy = $this->config['read_strategy'] ?? 'random';
+
+        if (! is_string($strategy)) {
+            return 'random';
+        }
+
+        $strategy = strtolower(trim($strategy));
+
+        return match ($strategy) {
+            'round-robin' => 'round_robin',
+            'least-latency' => 'least_latency',
+            'random', 'round_robin', 'least_latency' => $strategy,
+            default => 'random',
+        };
+    }
+
+    /**
      * Whether read replica configuration is present.
      */
     public function hasReadConfig(): bool
@@ -261,13 +288,6 @@ final class ConnectionConfig
             return [];
         }
 
-        $first = reset($replicas);
-
-        // Single associative config: ['host' => 'replica']
-        if (! is_array($first)) {
-            return [];
-        }
-
         if (\array_is_list($replicas)) {
             $normalized = [];
 
@@ -308,7 +328,7 @@ final class ConnectionConfig
                 || $config['database'] === ''
             ) {
                 throw ConnectionException::invalidConfig(
-                    sprintf("Config key 'database' is required for driver '%s'.", $driver)
+                    sprintf("Config key 'database' is required for driver '%s'.", $driver),
                 );
             }
         }
@@ -322,7 +342,7 @@ final class ConnectionConfig
                     || $config[$key] === ''
                 ) {
                     throw ConnectionException::invalidConfig(
-                        sprintf("Config key '%s' is required for driver '%s'.", $key, $driver)
+                        sprintf("Config key '%s' is required for driver '%s'.", $key, $driver),
                     );
                 }
             }

@@ -65,14 +65,14 @@ final class PostgreSQLDriver extends AbstractPdoDriver
         if (! is_string($database) || $database === '') {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                'Missing or empty "database" for PostgreSQL connection.'
+                'Missing or empty "database" for PostgreSQL connection.',
             );
         }
 
         if (! is_string($host) || $host === '') {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                'Missing or empty "host" for PostgreSQL connection.'
+                'Missing or empty "host" for PostgreSQL connection.',
             );
         }
 
@@ -80,7 +80,7 @@ final class PostgreSQLDriver extends AbstractPdoDriver
             if (! is_int($config['port']) && ! ctype_digit((string) $config['port'])) {
                 throw ConnectionException::invalidConfiguration(
                     $driver,
-                    '"port" must be an integer for PostgreSQL connection.'
+                    '"port" must be an integer for PostgreSQL connection.',
                 );
             }
         }
@@ -88,7 +88,7 @@ final class PostgreSQLDriver extends AbstractPdoDriver
         if (isset($config['schema']) && ! is_string($config['schema'])) {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                '"schema" must be a string for PostgreSQL connection.'
+                '"schema" must be a string for PostgreSQL connection.',
             );
         }
     }
@@ -110,13 +110,13 @@ final class PostgreSQLDriver extends AbstractPdoDriver
             'pgsql:host=%s;port=%d;dbname=%s',
             $host,
             $port,
-            $database
+            $database,
         );
 
         // Allow sslmode to be passed (if provided).
         if (! empty($config['sslmode'])) {
             $sslmode = (string) $config['sslmode'];
-            $dsn .= ';sslmode='.$sslmode;
+            $dsn .= ';sslmode=' . $sslmode;
         }
 
         return $dsn;

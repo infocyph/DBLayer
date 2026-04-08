@@ -76,8 +76,8 @@ final class SQLiteGrammar extends Grammar
     {
         unset($query);
 
-        return 'date('.$this->wrap($where['column']).') '
-          .$where['operator'].' date(?)';
+        return 'date(' . $this->wrap($where['column']) . ') '
+          . $where['operator'] . ' date(?)';
     }
 
     /**
@@ -90,7 +90,7 @@ final class SQLiteGrammar extends Grammar
         unset($query);
 
         return "cast(strftime('%d', {$this->wrap($where['column'])}) as integer) "
-          .$where['operator'].' cast(? as integer)';
+          . $where['operator'] . ' cast(? as integer)';
     }
 
     /**
@@ -103,7 +103,7 @@ final class SQLiteGrammar extends Grammar
         unset($query);
 
         return "cast(strftime('%m', {$this->wrap($where['column'])}) as integer) "
-          .$where['operator'].' cast(? as integer)';
+          . $where['operator'] . ' cast(? as integer)';
     }
 
     /**
@@ -116,7 +116,7 @@ final class SQLiteGrammar extends Grammar
         unset($query);
 
         return "cast(strftime('%Y', {$this->wrap($where['column'])}) as integer) "
-          .$where['operator'].' cast(? as integer)';
+          . $where['operator'] . ' cast(? as integer)';
     }
 
     /**
@@ -126,7 +126,7 @@ final class SQLiteGrammar extends Grammar
     {
         unset($query);
 
-        return 'limit '.(int) $limit;
+        return 'limit ' . (int) $limit;
     }
 
     /**
@@ -147,7 +147,7 @@ final class SQLiteGrammar extends Grammar
     {
         unset($query);
 
-        return 'offset '.(int) $offset;
+        return 'offset ' . (int) $offset;
     }
 
     /**
@@ -159,6 +159,6 @@ final class SQLiteGrammar extends Grammar
             return $value;
         }
 
-        return '"'.str_replace('"', '""', $value).'"';
+        return '"' . str_replace('"', '""', $value) . '"';
     }
 }

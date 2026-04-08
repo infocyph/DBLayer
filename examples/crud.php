@@ -10,10 +10,10 @@ require __DIR__ . '/bootstrap.php';
 
 // CREATE: insert a new user and get its ID
 $userId = DB::table('users')->insertGetId([
-  'name'       => 'Hasan',
-  'email'      => 'hasan@example.com',
-  'active'     => 1,
-  'created_at' => date('Y-m-d H:i:s'),
+    'name'       => 'Hasan',
+    'email'      => 'hasan@example.com',
+    'active'     => 1,
+    'created_at' => date('Y-m-d H:i:s'),
 ]);
 
 echo "Inserted user ID: {$userId}\n";
@@ -39,12 +39,30 @@ var_dump($activeUsers);
 $updatedCount = DB::table('users')
   ->where('id', '=', $userId)
   ->update([
-    'email'      => 'hasan+archived@example.com',
-    'active'     => 0,
-    'updated_at' => date('Y-m-d H:i:s'),
+      'email'      => 'hasan+archived@example.com',
+      'active'     => 0,
+      'updated_at' => date('Y-m-d H:i:s'),
   ]);
 
 echo "Updated rows: {$updatedCount}\n";
+
+// UPSERT: insert-or-update by unique key
+DB::table('users')->upsert([
+    'email'      => 'hasan@example.com',
+    'name'       => 'Hasan Updated',
+    'active'     => 1,
+    'updated_at' => date('Y-m-d H:i:s'),
+], ['email'], ['name', 'active', 'updated_at']);
+
+// INSERT IGNORE: duplicate unique key is ignored (if driver supports it)
+$ignored = DB::table('users')->insertIgnore([
+    'name'       => 'Duplicate Hasan',
+    'email'      => 'hasan@example.com',
+    'active'     => 1,
+    'created_at' => date('Y-m-d H:i:s'),
+]);
+
+echo "Insert ignore result: " . ($ignored ? 'inserted' : 'ignored') . "\n";
 
 // DELETE: delete that user
 $deletedCount = DB::table('users')
@@ -52,3 +70,7 @@ $deletedCount = DB::table('users')
   ->delete();
 
 echo "Deleted rows: {$deletedCount}\n";
+
+// TRUNCATE: clear table
+DB::table('users')->truncate();
+echo "Users table truncated.\n";

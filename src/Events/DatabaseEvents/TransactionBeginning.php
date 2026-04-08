@@ -32,8 +32,8 @@ final class TransactionBeginning
     public function toArray(): array
     {
         return [
-          'connection' => $this->connection->getDriverName(),
-          'time'       => $this->time,
+            'connection' => $this->connection->getDriverName(),
+            'time'       => $this->time,
         ];
     }
 }

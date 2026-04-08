@@ -47,7 +47,7 @@ abstract class Repository
         Connection $connection,
         Grammar $grammar,
         Executor $executor,
-        ResultProcessor $results
+        ResultProcessor $results,
     ) {
         $this->connection = $connection;
         $this->grammar    = $grammar;
@@ -91,7 +91,7 @@ abstract class Repository
     {
         $query = $this->applyScope(
             $this->query(),
-            $scope
+            $scope,
         );
 
         return $query->count();
@@ -106,7 +106,7 @@ abstract class Repository
     {
         $query = $this->applyScope(
             $this->query(),
-            $scope
+            $scope,
         );
 
         return $query->exists();
@@ -156,7 +156,7 @@ abstract class Repository
     {
         $query = $this->applyScope(
             $this->query()->select($columns),
-            $scope
+            $scope,
         );
 
         return $query->first();
@@ -171,7 +171,7 @@ abstract class Repository
     {
         $query = $this->applyScope(
             $this->query()->select($columns),
-            $scope
+            $scope,
         );
 
         $rows = $query->get();
@@ -189,7 +189,7 @@ abstract class Repository
     {
         $query = $this->applyScope(
             $this->query(),
-            $scope
+            $scope,
         );
 
         $rows = $query->get();
@@ -207,7 +207,7 @@ abstract class Repository
     {
         $query = $this->applyScope(
             $this->query(),
-            $scope
+            $scope,
         );
 
         $rows = $query->get();
@@ -229,7 +229,7 @@ abstract class Repository
     {
         $query = $this->applyScope(
             $this->query()->select([$column]),
-            $scope
+            $scope,
         );
 
         $rows = $query->get();

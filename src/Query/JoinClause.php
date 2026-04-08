@@ -97,11 +97,11 @@ final class JoinClause
     public function on(string $first, string $operator, string $second, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-          'type'     => 'basic',
-          'first'    => $first,
-          'operator' => $operator,
-          'second'   => $second,
-          'boolean'  => $boolean,
+            'type'     => 'basic',
+            'first'    => $first,
+            'operator' => $operator,
+            'second'   => $second,
+            'boolean'  => $boolean,
         ];
 
         return $this;
@@ -129,11 +129,11 @@ final class JoinClause
     public function where(string $column, string $operator, mixed $value, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-          'type'     => 'where',
-          'column'   => $column,
-          'operator' => $operator,
-          'value'    => $value,
-          'boolean'  => $boolean,
+            'type'     => 'where',
+            'column'   => $column,
+            'operator' => $operator,
+            'value'    => $value,
+            'boolean'  => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -149,10 +149,10 @@ final class JoinClause
     public function whereIn(string $column, array $values, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-          'type'    => 'whereIn',
-          'column'  => $column,
-          'values'  => $values,
-          'boolean' => $boolean,
+            'type'    => 'whereIn',
+            'column'  => $column,
+            'values'  => $values,
+            'boolean' => $boolean,
         ];
 
         foreach ($values as $value) {
@@ -168,9 +168,9 @@ final class JoinClause
     public function whereNotNull(string $column, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-          'type'    => 'whereNotNull',
-          'column'  => $column,
-          'boolean' => $boolean,
+            'type'    => 'whereNotNull',
+            'column'  => $column,
+            'boolean' => $boolean,
         ];
 
         return $this;
@@ -182,9 +182,9 @@ final class JoinClause
     public function whereNull(string $column, string $boolean = 'and'): self
     {
         $this->conditions[] = [
-          'type'    => 'whereNull',
-          'column'  => $column,
-          'boolean' => $boolean,
+            'type'    => 'whereNull',
+            'column'  => $column,
+            'boolean' => $boolean,
         ];
 
         return $this;

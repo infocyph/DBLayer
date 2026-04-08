@@ -6,7 +6,7 @@ declare(strict_types=1);
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
-use Infocyph\DBLayer\Exceptions\QueryException;
+use Infocyph\DBLayer\Exceptions\TransactionException;
 
 require __DIR__ . '/bootstrap.php';
 
@@ -17,18 +17,18 @@ try {
         static function (Connection $conn): string {
             // Create order
             $orderId = $conn->table('orders')->insertGetId([
-              'user_id' => 42,
-              'status' => 'pending',
-              'total' => 1999,
-              'created_at' => date('Y-m-d H:i:s'),
+                'user_id' => 42,
+                'status' => 'pending',
+                'total' => 1999,
+                'created_at' => date('Y-m-d H:i:s'),
             ]);
 
             // Create order items
             $conn->table('order_items')->insert([
-              'order_id' => $orderId,
-              'sku' => 'SKU-123',
-              'qty' => 1,
-              'unit_price' => 1999,
+                'order_id' => $orderId,
+                'sku' => 'SKU-123',
+                'qty' => 1,
+                'unit_price' => 1999,
             ]);
 
             // Update user’s last_order_at
@@ -36,7 +36,7 @@ try {
               ->table('users')
               ->where('id', '=', 42)
               ->update([
-                'last_order_at' => date('Y-m-d H:i:s'),
+                  'last_order_at' => date('Y-m-d H:i:s'),
               ]);
 
             // Whatever you return from the closure is returned by transaction()
@@ -45,7 +45,7 @@ try {
     );
 
     echo "Order created with ID: {$orderId}\n";
-} catch (QueryException $e) {
+} catch (TransactionException $e) {
     // All queries inside the closure are rolled back on exception
     echo "Failed to create order: {$e->getMessage()}\n";
 }
@@ -56,20 +56,25 @@ $mysql = DB::connection('mysql_main');
 try {
     $result = $mysql->transaction(
         static function (Connection $conn): bool {
+            $currentBalance = (int) $conn
+              ->table('wallets')
+              ->where('user_id', '=', 42)
+              ->value('balance');
+
             // debit wallet
             $conn
               ->table('wallets')
               ->where('user_id', '=', 42)
               ->update([
-                'balance' => DB::raw('balance - 1999'),
+                  'balance' => $currentBalance - 1999,
               ]);
 
             // log movement
             $conn->table('wallet_movements')->insert([
-              'user_id' => 42,
-              'amount' => -1999,
-              'reason' => 'order_payment',
-              'created_at' => date('Y-m-d H:i:s'),
+                'user_id' => 42,
+                'amount' => -1999,
+                'reason' => 'order_payment',
+                'created_at' => date('Y-m-d H:i:s'),
             ]);
 
             return true;

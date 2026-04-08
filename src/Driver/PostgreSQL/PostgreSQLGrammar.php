@@ -38,12 +38,12 @@ final class PostgreSQLGrammar extends Grammar
     public function compileInsertGetId(
         QueryBuilder $query,
         array $values,
-        ?string $sequence = null
+        ?string $sequence = null,
     ): string {
         $insert = $this->compileInsert($query, $values);
         $column = $sequence ?? 'id';
 
-        return $insert.' returning '.$this->wrap($column);
+        return $insert . ' returning ' . $this->wrap($column);
     }
 
     /**
@@ -66,7 +66,7 @@ final class PostgreSQLGrammar extends Grammar
     public function compileUpdateReturning(
         QueryBuilder $query,
         array $values,
-        array $returning = ['*']
+        array $returning = ['*'],
     ): string {
         $update  = $this->compileUpdate($query, $values);
         $columns = $this->columnize($returning);
@@ -85,7 +85,7 @@ final class PostgreSQLGrammar extends Grammar
         QueryBuilder $query,
         array $values,
         array $uniqueBy,
-        ?array $update = null
+        ?array $update = null,
     ): string {
         $insert   = $this->compileInsert($query, $values);
         $conflict = $this->columnize($uniqueBy);
@@ -96,9 +96,9 @@ final class PostgreSQLGrammar extends Grammar
 
         $updateColumns = implode(', ', array_map(
             function (string $key): string {
-                return $this->wrap($key).' = excluded.'.$this->wrap($key);
+                return $this->wrap($key) . ' = excluded.' . $this->wrap($key);
             },
-            array_keys($update)
+            array_keys($update),
         ));
 
         return "{$insert} on conflict ({$conflict}) do update set {$updateColumns}";
@@ -119,7 +119,7 @@ final class PostgreSQLGrammar extends Grammar
     {
         unset($query);
 
-        return 'limit '.(int) $limit;
+        return 'limit ' . (int) $limit;
     }
 
     /**
@@ -143,7 +143,7 @@ final class PostgreSQLGrammar extends Grammar
     {
         unset($query);
 
-        return 'offset '.(int) $offset;
+        return 'offset ' . (int) $offset;
     }
 
     /**
@@ -155,6 +155,6 @@ final class PostgreSQLGrammar extends Grammar
             return $value;
         }
 
-        return '"'.str_replace('"', '""', $value).'"';
+        return '"' . str_replace('"', '""', $value) . '"';
     }
 }

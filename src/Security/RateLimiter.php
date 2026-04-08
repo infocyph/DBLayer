@@ -79,8 +79,8 @@ final class RateLimiter
     public function getStats(): array
     {
         return [
-          'total_keys'     => count($this->storage),
-          'total_requests' => array_sum($this->storage),
+            'total_keys'     => count($this->storage),
+            'total_requests' => array_sum($this->storage),
         ];
     }
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Exceptions;
 
+use Throwable;
+
 /**
  * Errors related to transactions and savepoints.
  */
@@ -30,6 +32,14 @@ final class TransactionException extends DBException
         return new self($base);
     }
 
+    public static function failed(Throwable $previous): self
+    {
+        return new self(
+            'Transaction failed: ' . $previous->getMessage(),
+            previous: $previous,
+        );
+    }
+
     public static function isolationLevelError(string $level, string $reason): self
     {
         return new self("Invalid isolation level [{$level}]: {$reason}");
@@ -38,7 +48,7 @@ final class TransactionException extends DBException
     public static function lockWaitTimeout(string $resource): self
     {
         return new self(
-            "Lock wait timeout exceeded while waiting for resource [{$resource}]."
+            "Lock wait timeout exceeded while waiting for resource [{$resource}].",
         );
     }
 
@@ -73,7 +83,7 @@ final class TransactionException extends DBException
     public static function savepointError(string $savepoint, string $operation): self
     {
         return new self(
-            "Savepoint operation [{$operation}] failed for savepoint [{$savepoint}]."
+            "Savepoint operation [{$operation}] failed for savepoint [{$savepoint}].",
         );
     }
 
@@ -90,7 +100,7 @@ final class TransactionException extends DBException
         $elapsed = sprintf('%.4f', $elapsedSeconds);
 
         return new self(
-            "Transaction timeout after {$elapsed} seconds (max allowed: {$maxSeconds} seconds)."
+            "Transaction timeout after {$elapsed} seconds (max allowed: {$maxSeconds} seconds).",
         );
     }
 }

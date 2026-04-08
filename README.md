@@ -7,12 +7,14 @@ A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with 
 ### Core Features
 - ✅ **Query Builder** - Fluent, Laravel-like API
 - ✅ **Connection Manager** - Connection pooling + read replicas
+- ✅ **Replica Strategies** - `random`, `round_robin`, `least_latency`
 - ✅ **Multi-Driver** - MySQL, PostgreSQL, SQLite
 - ✅ **Security** - Multi-layer SQL injection protection
 - ✅ **Transactions** - Nested transactions with savepoints
 - ✅ **Caching** - Query result caching
 - ✅ **Profiling** - Performance monitoring
 - ✅ **Events** - Lifecycle hooks
+- ✅ **Telemetry** - Query + transaction observability export
 - ✅ **Pagination** - Length-aware, simple, and cursor pagination
 
 ### Performance
@@ -55,6 +57,7 @@ DB::addConnection([
 // Read replicas
 DB::addConnection([
     'driver' => 'mysql',
+    'read_strategy' => 'round_robin', // random | round_robin | least_latency
     'read' => [
         ['host' => 'replica1.example.com'],
         ['host' => 'replica2.example.com'],
@@ -63,6 +66,39 @@ DB::addConnection([
     'username' => 'root',
     'password' => 'secret',
 ]);
+```
+
+### Query Controls
+
+```php
+// Per-query timeout budget (milliseconds)
+DB::withQueryTimeout(500, function () {
+    DB::select('select * from users');
+});
+
+// Absolute deadline relative to now (seconds)
+DB::withQueryDeadline(0.25, function () {
+    DB::select('select * from users');
+});
+
+// Cooperative cancellation check
+DB::withQueryCancellation(
+    fn () => false,
+    fn () => DB::select('select 1')
+);
+```
+
+### Telemetry
+
+```php
+DB::enableTelemetry();
+
+DB::select('select 1');
+DB::beginTransaction();
+DB::rollBack();
+
+$snapshot = DB::telemetry();      // read buffer
+$exported = DB::flushTelemetry(); // read + clear
 ```
 
 ### Query Builder
@@ -135,6 +171,7 @@ try {
 ```bash
 composer test
 composer tests
+composer test:static:single
 ```
 
 ## Benchmarks

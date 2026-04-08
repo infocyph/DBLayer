@@ -34,7 +34,7 @@ final class SecurityValidator
         $value = (string) preg_replace(
             '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/',
             '',
-            $value
+            $value,
         );
 
         return $value;
@@ -48,7 +48,7 @@ final class SecurityValidator
         return str_replace(
             ['%', '_', '\\'],
             ['\\%', '\\_', '\\\\'],
-            $pattern
+            $pattern,
         );
     }
 
@@ -64,13 +64,13 @@ final class SecurityValidator
         // First char must be letter or underscore; rest can include dots.
         if (! preg_match('/^[a-zA-Z_][a-zA-Z0-9_.]*$/', $column)) {
             throw SecurityException::invalidConfiguration(
-                "Invalid column name [{$column}]."
+                "Invalid column name [{$column}].",
             );
         }
 
         if (strlen($column) > 64) {
             throw SecurityException::invalidConfiguration(
-                "Column name [{$column}] is too long (max 64 characters)."
+                "Column name [{$column}] is too long (max 64 characters).",
             );
         }
     }
@@ -86,7 +86,7 @@ final class SecurityValidator
 
         if ($count > $maxSize) {
             throw SecurityException::unsafeQuery(
-                "IN clause contains {$count} items (max allowed: {$maxSize})."
+                "IN clause contains {$count} items (max allowed: {$maxSize}).",
             );
         }
     }
@@ -102,7 +102,7 @@ final class SecurityValidator
 
         if ($length > $maxLength) {
             throw SecurityException::unsafeQuery(
-                "Query length {$length} exceeds maximum {$maxLength} bytes."
+                "Query length {$length} exceeds maximum {$maxLength} bytes.",
             );
         }
     }
@@ -118,13 +118,13 @@ final class SecurityValidator
     {
         if (! preg_match('/^[a-zA-Z_][a-zA-Z0-9_.]*$/', $table)) {
             throw SecurityException::invalidConfiguration(
-                "Invalid table name [{$table}]."
+                "Invalid table name [{$table}].",
             );
         }
 
         if (strlen($table) > 64) {
             throw SecurityException::invalidConfiguration(
-                "Table name [{$table}] is too long (max 64 characters)."
+                "Table name [{$table}] is too long (max 64 characters).",
             );
         }
     }
