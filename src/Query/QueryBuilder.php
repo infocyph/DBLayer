@@ -1014,7 +1014,6 @@ class QueryBuilder
         $unionPayloads = [];
 
         foreach ($this->unions as $union) {
-            /** @var QueryBuilder $unionQuery */
             $unionQuery = $union['query'];
 
             $unionPayloads[] = [

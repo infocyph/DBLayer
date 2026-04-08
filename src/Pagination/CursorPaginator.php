@@ -42,7 +42,7 @@ final class CursorPaginator extends AbstractPaginator
     ) {
         // Page number is mostly meaningless for cursor-based pagination,
         // but we keep it as 1 for interface compatibility.
-        parent::__construct($items, $perPage, 1);
+        parent::__construct($items, $perPage);
 
         $this->cursor     = $cursor;
         $this->nextCursor = $nextCursor;
@@ -54,11 +54,13 @@ final class CursorPaginator extends AbstractPaginator
         return $this->cursor;
     }
 
+    #[\Override]
     public function hasMorePages(): bool
     {
         return $this->hasMore;
     }
 
+    #[\Override]
     public function lastPage(): ?int
     {
         return null;
@@ -67,6 +69,7 @@ final class CursorPaginator extends AbstractPaginator
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     public function meta(): array
     {
         return [
@@ -86,6 +89,7 @@ final class CursorPaginator extends AbstractPaginator
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     public function toArray(): array
     {
         return [
@@ -94,6 +98,7 @@ final class CursorPaginator extends AbstractPaginator
         ];
     }
 
+    #[\Override]
     public function total(): ?int
     {
         return null;

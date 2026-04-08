@@ -50,6 +50,7 @@ final class SQLiteGrammar extends Grammar
     /**
      * Compile a truncate table statement (SQLite uses DELETE).
      */
+    #[\Override]
     public function compileTruncate(QueryBuilder $query): string
     {
         $components = $query->getComponents();
@@ -62,6 +63,7 @@ final class SQLiteGrammar extends Grammar
     /**
      * Get the format for database stored dates.
      */
+    #[\Override]
     public function getDateFormat(): string
     {
         return 'Y-m-d H:i:s';
@@ -122,16 +124,18 @@ final class SQLiteGrammar extends Grammar
     /**
      * Compile the "limit" portion.
      */
+    #[\Override]
     protected function compileLimit(QueryBuilder $query, int $limit): string
     {
         unset($query);
 
-        return 'limit ' . (int) $limit;
+        return 'limit ' . $limit;
     }
 
     /**
      * Compile the lock into SQL (SQLite doesn't support locking hints).
      */
+    #[\Override]
     protected function compileLock(QueryBuilder $query, string $lock): string
     {
         unset($query, $lock);
@@ -143,16 +147,18 @@ final class SQLiteGrammar extends Grammar
     /**
      * Compile the "offset" portion.
      */
+    #[\Override]
     protected function compileOffset(QueryBuilder $query, int $offset): string
     {
         unset($query);
 
-        return 'offset ' . (int) $offset;
+        return 'offset ' . $offset;
     }
 
     /**
      * Wrap a single string in keyword identifiers.
      */
+    #[\Override]
     protected function wrapValue(string $value): string
     {
         if ($value === '*') {

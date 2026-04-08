@@ -6,5 +6,21 @@
     "runner.attributes": true,
     "runner.annotations": false,
     "runner.progress": "dots",
-    "runner.retry_threshold": 8
+    "runner.retry_threshold": 8,
+    "report.generators": {
+        "chart": {
+            "title": "DBLayer Benchmark Chart",
+            "description": "Console bar chart grouped by benchmark subject",
+            "generator": "component",
+            "components": [
+                {
+                    "component": "bar_chart_aggregate",
+                    "x_partition": ["subject_name"],
+                    "bar_partition": ["benchmark_name"],
+                    "y_expr": "mode(partition['result_time_avg'])",
+                    "y_axes_label": "yValue as time precision 1"
+                }
+            ]
+        }
+    }
 }

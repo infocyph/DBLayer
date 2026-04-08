@@ -16,11 +16,13 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
  */
 final class SQLiteDriver extends AbstractPdoDriver
 {
+    #[\Override]
     public function createCompiler(): QueryCompilerInterface
     {
         return new SQLiteCompiler();
     }
 
+    #[\Override]
     public function getCapabilities(): Capabilities
     {
         // Treat JSON + window functions as available (SQLite 3.25+ with JSON1).
@@ -35,6 +37,7 @@ final class SQLiteDriver extends AbstractPdoDriver
         );
     }
 
+    #[\Override]
     public function getName(): string
     {
         return 'sqlite';
@@ -46,6 +49,7 @@ final class SQLiteDriver extends AbstractPdoDriver
      * @param  array<string,mixed>  $config
      * @return array<string,mixed>
      */
+    #[\Override]
     public function mergeDefaults(array $config): array
     {
         $config = parent::mergeDefaults($config);
@@ -59,6 +63,7 @@ final class SQLiteDriver extends AbstractPdoDriver
     /**
      * @param  array<string,mixed>  $config
      */
+    #[\Override]
     public function validateConfig(array $config): void
     {
         $driver = $this->getName();
@@ -85,6 +90,7 @@ final class SQLiteDriver extends AbstractPdoDriver
      *
      * @param  array<string,mixed>  $config
      */
+    #[\Override]
     protected function buildDsn(array $config, bool $readOnly): string
     {
         $database = (string) ($config['database'] ?? ':memory:');

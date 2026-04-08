@@ -22,13 +22,16 @@ abstract class AbstractPdoDriver implements DriverInterface
     /**
      * Concrete drivers must still provide compiler + capabilities.
      */
+    #[\Override]
     abstract public function createCompiler(): QueryCompilerInterface;
 
+    #[\Override]
     abstract public function getCapabilities(): Capabilities;
 
     /**
      * Canonical engine name, e.g. "mysql", "pgsql", "sqlite".
      */
+    #[\Override]
     abstract public function getName(): string;
 
     /**
@@ -43,9 +46,9 @@ abstract class AbstractPdoDriver implements DriverInterface
      *
      * Concrete drivers only need to implement buildDsn().
      */
+    #[\Override]
     final public function createPdo(ConnectionConfig $config, bool $readOnly = false): PDO
     {
-        /** @var array<string,mixed> $data */
         $data = method_exists($config, 'toArray') ? $config->toArray() : [];
 
         // Allow drivers to stamp their defaults and validate config.
@@ -82,6 +85,7 @@ abstract class AbstractPdoDriver implements DriverInterface
      * @param  array<string,mixed>  $config
      * @return array<string,mixed>
      */
+    #[\Override]
     public function mergeDefaults(array $config): array
     {
         $config['driver'] ??= $this->getName();
@@ -96,6 +100,7 @@ abstract class AbstractPdoDriver implements DriverInterface
      *
      * @param  array<string,mixed>  $config
      */
+    #[\Override]
     public function validateConfig(array $config): void
     {
         // Intentionally empty for now.

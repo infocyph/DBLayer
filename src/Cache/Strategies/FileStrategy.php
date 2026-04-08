@@ -63,7 +63,6 @@ final class FileStrategy implements CacheStrategy
                 continue;
             }
 
-            /** @var int $expires */
             $expires = (int) $data['expires'];
 
             if ($expires > 0 && $now >= $expires) {
@@ -78,6 +77,7 @@ final class FileStrategy implements CacheStrategy
     /**
      * Decrement value.
      */
+    #[\Override]
     public function decrement(string $key, int $value = 1): int
     {
         return $this->increment($key, -$value);
@@ -86,6 +86,7 @@ final class FileStrategy implements CacheStrategy
     /**
      * Clear all items.
      */
+    #[\Override]
     public function flush(): bool
     {
         $files = (array) glob($this->directory . '/*' . self::EXTENSION);
@@ -102,6 +103,7 @@ final class FileStrategy implements CacheStrategy
     /**
      * Delete item from cache.
      */
+    #[\Override]
     public function forget(string $key): bool
     {
         $path = $this->getPath($key);
@@ -116,6 +118,7 @@ final class FileStrategy implements CacheStrategy
     /**
      * Get item from cache.
      */
+    #[\Override]
     public function get(string $key): mixed
     {
         $path = $this->getPath($key);
@@ -162,6 +165,7 @@ final class FileStrategy implements CacheStrategy
     /**
      * Check if item exists.
      */
+    #[\Override]
     public function has(string $key): bool
     {
         return $this->get($key) !== null;
@@ -170,6 +174,7 @@ final class FileStrategy implements CacheStrategy
     /**
      * Increment value.
      */
+    #[\Override]
     public function increment(string $key, int $value = 1): int
     {
         $current = (int) $this->get($key);
@@ -183,6 +188,7 @@ final class FileStrategy implements CacheStrategy
     /**
      * Store item in cache.
      */
+    #[\Override]
     public function put(string $key, mixed $value, int $ttl): bool
     {
         if ($ttl < 0) {

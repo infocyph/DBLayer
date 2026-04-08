@@ -25,18 +25,6 @@ final class DBLayerBench
 
     private int $currentUserId = 1;
 
-    public function setUpBeforeSubject(): void
-    {
-        if (! self::$initialized) {
-            self::initializeRuntime();
-            self::$initialized = true;
-        }
-
-        self::$subjectCounter++;
-        $id = self::$subjectCounter % self::SEED_ROWS;
-        $this->currentUserId = $id === 0 ? self::SEED_ROWS : $id;
-    }
-
     public function benchBuildSelectSql(): void
     {
         DB::table('users')
@@ -63,6 +51,24 @@ final class DBLayerBench
             ->first();
     }
 
+    public function benchTransactionTwoPointReads(): void
+    {
+        $firstId = $this->currentUserId;
+        $secondId = $firstId === self::SEED_ROWS ? 1 : $firstId + 1;
+
+        if (! self::$sqliteAvailable) {
+            DB::table('users')->where('id', '=', $firstId)->toSql();
+            DB::table('users')->where('id', '=', $secondId)->toSql();
+
+            return;
+        }
+
+        DB::transaction(static function () use ($firstId, $secondId): void {
+            DB::select('SELECT score FROM users WHERE id = ?', [$firstId]);
+            DB::select('SELECT score FROM users WHERE id = ?', [$secondId]);
+        });
+    }
+
     public function benchUpdateSingleColumn(): void
     {
         if (! self::$sqliteAvailable) {
@@ -82,22 +88,32 @@ final class DBLayerBench
             ]);
     }
 
-    public function benchTransactionTwoPointReads(): void
+    public function setUpBeforeSubject(): void
     {
-        $firstId = $this->currentUserId;
-        $secondId = $firstId === self::SEED_ROWS ? 1 : $firstId + 1;
-
-        if (! self::$sqliteAvailable) {
-            DB::table('users')->where('id', '=', $firstId)->toSql();
-            DB::table('users')->where('id', '=', $secondId)->toSql();
-
-            return;
+        if (! self::$initialized) {
+            self::initializeRuntime();
+            self::$initialized = true;
         }
 
-        DB::transaction(static function () use ($firstId, $secondId): void {
-            DB::select('SELECT score FROM users WHERE id = ?', [$firstId]);
-            DB::select('SELECT score FROM users WHERE id = ?', [$secondId]);
-        });
+        self::$subjectCounter++;
+        $id = self::$subjectCounter % self::SEED_ROWS;
+        $this->currentUserId = $id === 0 ? self::SEED_ROWS : $id;
+    }
+
+    private static function createSchema(): void
+    {
+        DB::statement('DROP TABLE IF EXISTS users');
+        DB::statement(
+            'CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE,
+                active INTEGER NOT NULL,
+                score INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            )',
+        );
+        DB::statement('CREATE INDEX idx_users_active_score ON users (active, score)');
     }
 
     private static function initializeRuntime(): void
@@ -131,22 +147,6 @@ final class DBLayerBench
 
         self::createSchema();
         self::seedUsers();
-    }
-
-    private static function createSchema(): void
-    {
-        DB::statement('DROP TABLE IF EXISTS users');
-        DB::statement(
-            'CREATE TABLE users (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                email TEXT NOT NULL UNIQUE,
-                active INTEGER NOT NULL,
-                score INTEGER NOT NULL,
-                created_at TEXT NOT NULL
-            )',
-        );
-        DB::statement('CREATE INDEX idx_users_active_score ON users (active, score)');
     }
 
     private static function seedUsers(): void

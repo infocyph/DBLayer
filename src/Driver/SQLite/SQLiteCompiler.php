@@ -13,6 +13,7 @@ use Infocyph\DBLayer\Driver\AbstractSqlCompiler;
  */
 final class SQLiteCompiler extends AbstractSqlCompiler
 {
+    #[\Override]
     protected function wrapIdentifier(string $identifier): string
     {
         $identifier = trim($identifier);

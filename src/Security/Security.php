@@ -441,7 +441,7 @@ final class Security
             $length = strlen($value);
 
             if ($length > $maxParamBytes) {
-                $paramKey = is_int($key) ? (string) $key : (string) $key;
+                $paramKey = is_int($key) ? (string) $key : $key;
 
                 throw SecurityException::unsafeQuery(
                     "Parameter [{$paramKey}] length {$length} exceeds maximum {$maxParamBytes} bytes.",

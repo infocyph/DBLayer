@@ -14,11 +14,13 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
  */
 final class MySQLDriver extends AbstractPdoDriver
 {
+    #[\Override]
     public function createCompiler(): QueryCompilerInterface
     {
         return new MySQLCompiler();
     }
 
+    #[\Override]
     public function getCapabilities(): Capabilities
     {
         // We assume modern MySQL (8.x) / MariaDB with JSON + window functions.
@@ -33,6 +35,7 @@ final class MySQLDriver extends AbstractPdoDriver
         );
     }
 
+    #[\Override]
     public function getName(): string
     {
         return 'mysql';
@@ -44,6 +47,7 @@ final class MySQLDriver extends AbstractPdoDriver
      * @param  array<string,mixed>  $config
      * @return array<string,mixed>
      */
+    #[\Override]
     public function mergeDefaults(array $config): array
     {
         $config = parent::mergeDefaults($config);
@@ -58,6 +62,7 @@ final class MySQLDriver extends AbstractPdoDriver
     /**
      * @param  array<string,mixed>  $config
      */
+    #[\Override]
     public function validateConfig(array $config): void
     {
         $driver = $this->getName();
@@ -108,6 +113,7 @@ final class MySQLDriver extends AbstractPdoDriver
      *
      * @param  array<string,mixed>  $config
      */
+    #[\Override]
     protected function buildDsn(array $config, bool $readOnly): string
     {
         unset($readOnly); // handled via transaction semantics, not DSN

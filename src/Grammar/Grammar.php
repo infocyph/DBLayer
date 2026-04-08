@@ -466,7 +466,7 @@ abstract class Grammar
     {
         unset($query);
 
-        return 'limit ' . (int) $limit;
+        return 'limit ' . $limit;
     }
 
     /**
@@ -486,7 +486,7 @@ abstract class Grammar
     {
         unset($query);
 
-        return 'offset ' . (int) $offset;
+        return 'offset ' . $offset;
     }
 
     /**

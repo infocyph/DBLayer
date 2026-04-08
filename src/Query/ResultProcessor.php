@@ -127,9 +127,6 @@ class ResultProcessor
      */
     public function transform(array $results, callable $callback): array
     {
-        /** @var list<array<string,mixed>> $mapped */
-        $mapped = \array_map($callback, $results);
-
-        return $mapped;
+        return \array_map($callback, $results);
     }
 }

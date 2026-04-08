@@ -56,7 +56,6 @@ final class Profiler
      *
      * This should be called after start(), passing the executed SQL and bindings.
      *
-     * @param string $sql
      * @param array<array-key, mixed> $bindings
      */
     public function finish(string $sql, array $bindings = []): void

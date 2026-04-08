@@ -9,6 +9,7 @@ namespace Infocyph\DBLayer\Exceptions;
  */
 final class SecurityException extends DBException
 {
+    #[\Override]
     public static function invalidConfiguration(string $message): static
     {
         return new static('Invalid security configuration: ' . $message);

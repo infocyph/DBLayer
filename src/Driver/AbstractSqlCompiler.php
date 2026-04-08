@@ -27,6 +27,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
      */
     abstract protected function wrapIdentifier(string $identifier): string;
 
+    #[\Override]
     public function compile(QueryPayload $payload): CompiledQuery
     {
         $type = $payload->type;
@@ -80,7 +81,6 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $first    = true;
 
         foreach ($payload->havings as $having) {
-            /** @var array<string,mixed> $having */
             $column   = (string) ($having['column'] ?? '');
             $operator = (string) ($having['operator'] ?? '=');
             $boolean  = strtolower((string) ($having['boolean'] ?? 'and'));
@@ -138,7 +138,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
                     );
                 }
             } elseif (is_object($join) && method_exists($join, '__toString')) {
-                $sql .= ' ' . (string) $join;
+                $sql .= ' ' . $join;
             } else {
                 throw new LogicException('Unsupported JOIN representation in payload.');
             }
@@ -182,7 +182,6 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $segments = [];
 
         foreach ($payload->orders as $order) {
-            /** @var array{column:string,direction:string} $order */
             $column    = $order['column'];
             $direction = strtoupper($order['direction']);
 
@@ -388,7 +387,6 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $first    = true;
 
         foreach ($payload->wheres as $where) {
-            /** @var array<string,mixed> $where */
             $type    = $where['type'] ?? 'basic';
             $boolean = strtolower((string) ($where['boolean'] ?? 'and'));
 

@@ -57,6 +57,7 @@ final class ConnectionException extends DBException
         return new self("Database driver [{$driver}] is not supported.");
     }
 
+    #[\Override]
     public static function invalidConfiguration(string $message): static
     {
         return new static('Invalid connection configuration: ' . $message);

@@ -44,32 +44,40 @@ abstract class AbstractPaginator implements PaginatorInterface
     /**
      * Concrete paginators must implement these.
      */
+    #[\Override]
     abstract public function hasMorePages(): bool;
 
+    #[\Override]
     abstract public function lastPage(): ?int;
 
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     abstract public function meta(): array;
 
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     abstract public function toArray(): array;
 
+    #[\Override]
     abstract public function total(): ?int;
 
+    #[\Override]
     public function count(): int
     {
         return \count($this->items);
     }
 
+    #[\Override]
     public function currentPage(): int
     {
         return $this->currentPage;
     }
 
+    #[\Override]
     public function firstItem(): ?int
     {
         if ($this->items === []) {
@@ -82,6 +90,7 @@ abstract class AbstractPaginator implements PaginatorInterface
     /**
      * @return Traversable<int, mixed>
      */
+    #[\Override]
     public function getIterator(): Traversable
     {
         return new ArrayIterator($this->items);
@@ -90,16 +99,19 @@ abstract class AbstractPaginator implements PaginatorInterface
     /**
      * @return list<mixed>
      */
+    #[\Override]
     public function items(): array
     {
         return $this->items;
     }
 
+    #[\Override]
     public function jsonSerialize(): mixed
     {
         return $this->toArray();
     }
 
+    #[\Override]
     public function lastItem(): ?int
     {
         if ($this->items === []) {
@@ -111,6 +123,7 @@ abstract class AbstractPaginator implements PaginatorInterface
         return $first === null ? null : $first + $this->count() - 1;
     }
 
+    #[\Override]
     public function perPage(): int
     {
         return $this->perPage;

@@ -55,7 +55,7 @@ final class ValidationException extends DBException
                     continue;
                 }
 
-                return (string) reset($error);
+                return reset($error);
             }
 
             return (string) $error;

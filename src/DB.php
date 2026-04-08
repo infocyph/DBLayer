@@ -689,6 +689,7 @@ class DB
                 $this->table = $table;
             }
 
+            #[\Override]
             protected function table(): string
             {
                 return $this->table;
@@ -1054,6 +1055,42 @@ class DB
     }
 
     /**
+     * Build a normalized query event payload.
+     *
+     * @return array{
+     *   query:string,
+     *   bindings:list<mixed>,
+     *   time:float,
+     *   connection:string|null,
+     *   rows:int|null
+     * }
+     */
+    private static function buildQueryEventPayload(QueryExecuted $event): array
+    {
+        $connectionName = array_find_key(static::$connections, fn($connection) => $connection === $event->connection);
+
+        return [
+            'query'      => $event->sql,
+            'bindings'   => $event->bindings,
+            'time'       => $event->time, // ms
+            'connection' => $connectionName,
+            'rows'       => $event->rowsAffected,
+        ];
+    }
+
+    /**
+     * Notify facade listeners for one query event payload.
+     *
+     * @param  array<string,mixed>  $payload
+     */
+    private static function dispatchQueryPayloadToListeners(array $payload): void
+    {
+        foreach (static::$listeners as $listener) {
+            $listener($payload);
+        }
+    }
+
+    /**
      * Ensure the global query event listener is registered.
      *
      * Bridges typed QueryExecuted events into the DB facade
@@ -1066,50 +1103,48 @@ class DB
         }
 
         static::$eventsHooked = true;
+        static::registerEventBridges();
+    }
 
-        Events::listen('db.query.executing', static function (QueryExecuting $event): void {
-            unset($event);
+    /**
+     * Handle post-execution query event.
+     */
+    private static function handleQueryExecuted(QueryExecuted $event): void
+    {
+        $profilerEnabled = static::$profiler !== null && static::$profiler->isEnabled();
+        $loggerEnabled = static::$logger !== null && static::$logger->isEnabled();
 
-            if (static::$profiler !== null && static::$profiler->isEnabled()) {
-                static::$profiler->start();
-            }
-        });
+        if (! static::shouldHandleQueryEvent($profilerEnabled, $loggerEnabled)) {
+            return;
+        }
 
-        Events::listen('db.query.executed', function (QueryExecuted $event): void {
-            $profilerEnabled = static::$profiler !== null && static::$profiler->isEnabled();
-            $loggerEnabled = static::$logger !== null && static::$logger->isEnabled();
+        $payload = static::buildQueryEventPayload($event);
 
-            // Skip work if nothing is interested.
-            if (! static::$loggingQueries && static::$listeners === [] && ! $profilerEnabled && ! $loggerEnabled) {
-                return;
-            }
+        if ($profilerEnabled) {
+            static::$profiler?->finish($event->sql, $event->bindings);
+        }
 
-            $connectionName = array_find_key(static::$connections, fn($connection) => $connection === $event->connection);
+        if ($loggerEnabled) {
+            static::$logger?->query($event->sql, $event->bindings, $event->time);
+        }
 
-            $payload = [
-                'query'      => $event->sql,
-                'bindings'   => $event->bindings,
-                'time'       => $event->time, // ms
-                'connection' => $connectionName,
-                'rows'       => $event->rowsAffected,
-            ];
+        static::dispatchQueryPayloadToListeners($payload);
 
-            if ($profilerEnabled) {
-                static::$profiler?->finish($event->sql, $event->bindings);
-            }
+        if (static::$loggingQueries) {
+            static::appendQueryLogEntry($payload);
+        }
+    }
 
-            if ($loggerEnabled) {
-                static::$logger?->query($event->sql, $event->bindings, $event->time);
-            }
+    /**
+     * Handle pre-execution query event.
+     */
+    private static function handleQueryExecuting(QueryExecuting $event): void
+    {
+        unset($event);
 
-            foreach (static::$listeners as $listener) {
-                $listener($payload);
-            }
-
-            if (static::$loggingQueries) {
-                static::appendQueryLogEntry($payload);
-            }
-        });
+        if (static::$profiler !== null && static::$profiler->isEnabled()) {
+            static::$profiler->start();
+        }
     }
 
     /**
@@ -1170,6 +1205,19 @@ class DB
     }
 
     /**
+     * Register facade bridges for query lifecycle events.
+     */
+    private static function registerEventBridges(): void
+    {
+        Events::listen('db.query.executing', static function (QueryExecuting $event): void {
+            static::handleQueryExecuting($event);
+        });
+        Events::listen('db.query.executed', static function (QueryExecuted $event): void {
+            static::handleQueryExecuted($event);
+        });
+    }
+
+    /**
      * Resolve and validate connection name against registered configs.
      *
      * @throws ConnectionException
@@ -1183,5 +1231,13 @@ class DB
         }
 
         return $name;
+    }
+
+    /**
+     * Determine whether any facade subscriber needs query event handling.
+     */
+    private static function shouldHandleQueryEvent(bool $profilerEnabled, bool $loggerEnabled): bool
+    {
+        return static::$loggingQueries || static::$listeners !== [] || $profilerEnabled || $loggerEnabled;
     }
 }

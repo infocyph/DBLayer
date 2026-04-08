@@ -39,11 +39,6 @@ use PDOStatement;
 final class Connection
 {
     /**
-     * Connection timeout in seconds (reserved; configured via driver options).
-     */
-    private const CONNECTION_TIMEOUT = 5;
-
-    /**
      * Hard upper bound for retry-policy guided query retries.
      */
     private const MAX_QUERY_RETRY_ATTEMPTS = 5;
@@ -93,7 +88,7 @@ final class Connection
      *
      * @var null|callable():bool
      */
-    private $queryCancellationChecker = null;
+    private $queryCancellationChecker;
 
     /**
      * Optional absolute query deadline (microtime(true) timestamp).
@@ -105,14 +100,14 @@ final class Connection
      *
      * @var null|callable(string,array<int|string,mixed>):void
      */
-    private $queryRecorder = null;
+    private $queryRecorder;
 
     /**
      * Optional retry policy callback for connection errors.
      *
      * @var null|callable(\Throwable,int,string,array<int|string,mixed>):bool
      */
-    private $queryRetryPolicy = null;
+    private $queryRetryPolicy;
 
     /**
      * Optional per-query timeout budget in milliseconds.
@@ -1046,7 +1041,7 @@ final class Connection
             [$index, $pdo] = $this->resolveReadReplicaPdo($readConfigs);
             $this->readReplicaIndex = $index;
             $this->readPdo = $pdo;
-        } catch (PDOException | ConnectionException) {
+        } catch (PDOException|ConnectionException) {
             // Silent fallback to write connection; readPdo stays null.
             $this->readPdo = null;
             $this->readReplicaIndex = null;
@@ -1263,7 +1258,7 @@ final class Connection
                     $bestIndex   = $index;
                     $bestPdo     = $pdo;
                 }
-            } catch (PDOException | ConnectionException) {
+            } catch (PDOException|ConnectionException) {
                 continue;
             }
         }

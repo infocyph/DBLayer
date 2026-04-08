@@ -94,7 +94,6 @@ final class DriverRegistry
 
         $class = self::$map[$driver];
 
-        /** @var DriverInterface $instance */
         $instance = new $class();
 
         return self::$cache[$driver] = $instance;

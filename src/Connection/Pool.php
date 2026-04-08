@@ -451,7 +451,7 @@ final class Pool
         $now = microtime(true);
 
         foreach ($this->idle as $name => $connections) {
-            foreach ($connections as $connectionId => $data) {
+            foreach ($connections as $data) {
                 $idleTime = $now - $data['idle_since'];
 
                 if ($idleTime > $this->poolConfig['idle_timeout']) {

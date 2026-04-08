@@ -202,8 +202,8 @@ final class HealthCheck
 
         return [
             'avg_duration' => round($avg, 4),
-            'min_duration' => round((float) min($durations), 4),
-            'max_duration' => round((float) max($durations), 4),
+            'min_duration' => round(min($durations), 4),
+            'max_duration' => round(max($durations), 4),
             'p50_duration' => round($this->percentile($durations, 50.0), 4),
             'p95_duration' => round($this->percentile($durations, 95.0), 4),
             'p99_duration' => round($this->percentile($durations, 99.0), 4),

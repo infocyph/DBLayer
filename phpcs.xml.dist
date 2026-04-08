@@ -4,7 +4,7 @@
     xsi:noNamespaceSchemaLocation="vendor/squizlabs/php_codesniffer/phpcs.xsd"
     name="DBLayer"
 >
-    <description>PSR-12 plus semantic checks not primarily enforced by Pint/Psalm/PHPStan.</description>
+    <description>Semantic PHPCS checks not covered by Pint/Psalm/PHPStan.</description>
 
     <arg name="basepath" value="."/>
     <arg name="extensions" value="php"/>
@@ -13,16 +13,10 @@
 
     <file>./src</file>
     <file>./tests</file>
-    <file>./examples</file>
 
     <exclude-pattern>*/vendor/*</exclude-pattern>
     <exclude-pattern>*/.git/*</exclude-pattern>
     <exclude-pattern>*/.idea/*</exclude-pattern>
-
-    <rule ref="PSR12">
-        <exclude name="Generic.Files.LineLength.TooLong"/>
-        <exclude name="PSR1.Files.SideEffects.FoundWithSymbols"/>
-    </rule>
 
     <rule ref="Generic.Commenting.Fixme"/>
     <rule ref="Generic.Commenting.Todo"/>

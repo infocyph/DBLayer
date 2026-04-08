@@ -176,7 +176,6 @@ final class Events
      */
     public static function getListeners(string $event): array
     {
-        /** @var list<callable> */
         return self::$listeners[$event] ?? [];
     }
 
@@ -238,7 +237,6 @@ final class Events
     /**
      * Queue an event for later dispatch.
      *
-     * @param string           $event
      * @param array<int,mixed> $payload
      */
     public static function queue(string $event, array $payload = []): void

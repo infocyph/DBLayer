@@ -14,11 +14,13 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
  */
 final class PostgreSQLDriver extends AbstractPdoDriver
 {
+    #[\Override]
     public function createCompiler(): QueryCompilerInterface
     {
         return new PostgreSQLCompiler();
     }
 
+    #[\Override]
     public function getCapabilities(): Capabilities
     {
         return new Capabilities(
@@ -32,6 +34,7 @@ final class PostgreSQLDriver extends AbstractPdoDriver
         );
     }
 
+    #[\Override]
     public function getName(): string
     {
         return 'pgsql';
@@ -43,6 +46,7 @@ final class PostgreSQLDriver extends AbstractPdoDriver
      * @param  array<string,mixed>  $config
      * @return array<string,mixed>
      */
+    #[\Override]
     public function mergeDefaults(array $config): array
     {
         $config = parent::mergeDefaults($config);
@@ -55,6 +59,7 @@ final class PostgreSQLDriver extends AbstractPdoDriver
     /**
      * @param  array<string,mixed>  $config
      */
+    #[\Override]
     public function validateConfig(array $config): void
     {
         $driver = $this->getName();
@@ -98,6 +103,7 @@ final class PostgreSQLDriver extends AbstractPdoDriver
      *
      * @param  array<string,mixed>  $config
      */
+    #[\Override]
     protected function buildDsn(array $config, bool $readOnly): string
     {
         unset($readOnly); // handled at transaction-level

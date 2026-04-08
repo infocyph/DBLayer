@@ -29,11 +29,13 @@ final class SimplePaginator extends AbstractPaginator
         $this->hasMore = $hasMore;
     }
 
+    #[\Override]
     public function hasMorePages(): bool
     {
         return $this->hasMore;
     }
 
+    #[\Override]
     public function lastPage(): ?int
     {
         return null;
@@ -42,6 +44,7 @@ final class SimplePaginator extends AbstractPaginator
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     public function meta(): array
     {
         return [
@@ -59,6 +62,7 @@ final class SimplePaginator extends AbstractPaginator
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     public function toArray(): array
     {
         return [
@@ -67,6 +71,7 @@ final class SimplePaginator extends AbstractPaginator
         ];
     }
 
+    #[\Override]
     public function total(): ?int
     {
         return null;

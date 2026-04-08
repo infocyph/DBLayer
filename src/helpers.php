@@ -235,7 +235,6 @@ if (! function_exists('data_get_resolve_segment')) {
     /**
      * Resolve one segment lookup for data_get().
      *
-     * @param  string|int  $segment
      * @return array{exists:bool,value:mixed}
      */
     function data_get_resolve_segment(mixed $target, string|int $segment): array

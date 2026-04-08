@@ -276,8 +276,8 @@ final class Executor
             'total_queries'  => $this->queryLogCount,
             'total_time'     => \round($totalTime, 4),          // ms
             'avg_time'       => \round($totalTime / $count, 4), // ms
-            'min_time'       => \round((float) \min($times), 4),
-            'max_time'       => \round((float) \max($times), 4),
+            'min_time'       => \round(\min($times), 4),
+            'max_time'       => \round(\max($times), 4),
             'failed_queries' => \count($failed),
         ];
     }
@@ -539,7 +539,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null),
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -552,7 +552,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null),
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -626,7 +626,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null),
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -639,7 +639,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null),
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -672,7 +672,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null),
+                    new QueryExecuted($sql, [], $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -685,7 +685,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null),
+                    new QueryExecuted($sql, [], $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -769,7 +769,6 @@ final class Executor
             return true;
         }
 
-        /** @var array<string,mixed> $firstRow */
         $firstRow = $rows[0];
 
         if ($update === null) {

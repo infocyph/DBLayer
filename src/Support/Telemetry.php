@@ -25,7 +25,7 @@ final class Telemetry
      *
      * @var null|callable(array<string,mixed>):void
      */
-    private static $exporter = null;
+    private static $exporter;
 
     /**
      * Whether event listeners are already registered.
@@ -49,9 +49,7 @@ final class Telemetry
     /**
      * Prevent static-only class instantiation.
      */
-    private function __construct()
-    {
-    }
+    private function __construct() {}
 
     /**
      * Clear all collected telemetry buffers.
