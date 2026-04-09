@@ -3,6 +3,9 @@ API: Driver Capabilities
 
 Class: ``Infocyph\DBLayer\Driver\Support\Capabilities``
 
+Capabilities make SQL feature branching explicit. Instead of guessing by driver
+name in application code, query capability flags and choose the correct path.
+
 Read capabilities via:
 
 .. code-block:: php

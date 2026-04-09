@@ -3,6 +3,16 @@ API: DB Facade
 
 Class: ``Infocyph\DBLayer\DB``
 
+The facade is the orchestration layer. It resolves named connections, exposes
+raw SQL helpers, and proxies advanced runtime controls (pooling, telemetry,
+timeouts, and retry policy wrappers).
+
+Most applications use a mix of:
+
+- ``DB::table()`` for query builder flows
+- ``DB::repository()`` for table-oriented app services
+- ``DB::transaction()`` for write consistency boundaries
+
 Connection Methods
 ------------------
 

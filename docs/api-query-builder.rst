@@ -3,6 +3,10 @@ API: QueryBuilder
 
 Class: ``Infocyph\DBLayer\Query\QueryBuilder``
 
+``QueryBuilder`` is mutable and chainable. Compose clauses first, then execute
+with ``get()``, ``first()``, ``update()``, ``delete()``, and related methods.
+Use ``cloneBuilder()`` or ``newQuery()`` when branching logic needs isolation.
+
 Select/Read
 -----------
 
