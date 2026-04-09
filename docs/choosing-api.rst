@@ -302,6 +302,7 @@ Related Guides
 --------------
 
 - See ``table-model`` for class-based model-like usage patterns.
+- See ``examples-cookbook`` for ready-to-use end-to-end snippets.
 - See ``query-builder`` for SQL composition patterns.
 - See ``repository`` for policy features and lifecycle hooks.
 - See ``transactions`` for retry and nested transaction behavior.
