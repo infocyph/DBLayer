@@ -67,17 +67,17 @@ abstract class TableModel
     /**
      * Alias for query().
      */
-    public static function builder(): QueryBuilder
+    public static function builder(?string $connection = null): QueryBuilder
     {
-        return static::query();
+        return static::query($connection);
     }
 
     /**
      * Get the connection instance used by this model.
      */
-    public static function connection(): Connection
+    public static function connection(?string $connection = null): Connection
     {
-        return DB::connection(static::connectionName());
+        return DB::connection(static::resolveConnectionName($connection));
     }
 
     /**
@@ -86,25 +86,25 @@ abstract class TableModel
      * Uses repository->builder() so repository-level policy can be applied
      * before returning the builder instance.
      */
-    public static function query(): QueryBuilder
+    public static function query(?string $connection = null): QueryBuilder
     {
-        return static::configureQuery(static::repository()->builder());
+        return static::configureQuery(static::repository($connection)->builder());
     }
 
     /**
      * Alias for repository() to match common naming preference.
      */
-    public static function repo(): Repository
+    public static function repo(?string $connection = null): Repository
     {
-        return static::repository();
+        return static::repository($connection);
     }
 
     /**
      * Build a repository for this model.
      */
-    public static function repository(): Repository
+    public static function repository(?string $connection = null): Repository
     {
-        $repository = DB::repository(static::tableName(), static::connectionName());
+        $repository = DB::repository(static::tableName(), static::resolveConnectionName($connection));
 
         return static::configureRepository($repository);
     }
@@ -114,9 +114,9 @@ abstract class TableModel
      *
      * @param array<int,mixed> $bindings
      */
-    public static function sqlScalar(string $query, array $bindings = []): mixed
+    public static function sqlScalar(string $query, array $bindings = [], ?string $connection = null): mixed
     {
-        return DB::scalar($query, $bindings, static::connectionName());
+        return DB::scalar($query, $bindings, static::resolveConnectionName($connection));
     }
 
     /**
@@ -125,9 +125,9 @@ abstract class TableModel
      * @param array<int,mixed> $bindings
      * @return list<array<string,mixed>>
      */
-    public static function sqlSelect(string $query, array $bindings = []): array
+    public static function sqlSelect(string $query, array $bindings = [], ?string $connection = null): array
     {
-        return DB::select($query, $bindings, static::connectionName());
+        return DB::select($query, $bindings, static::resolveConnectionName($connection));
     }
 
     /**
@@ -135,17 +135,17 @@ abstract class TableModel
      *
      * @param array<int,mixed> $bindings
      */
-    public static function sqlStatement(string $query, array $bindings = []): bool
+    public static function sqlStatement(string $query, array $bindings = [], ?string $connection = null): bool
     {
-        return DB::statement($query, $bindings, static::connectionName());
+        return DB::statement($query, $bindings, static::resolveConnectionName($connection));
     }
 
     /**
      * Run a transaction on this model's configured connection.
      */
-    public static function transaction(callable $callback, int $attempts = 1): mixed
+    public static function transaction(callable $callback, int $attempts = 1, ?string $connection = null): mixed
     {
-        return DB::transaction($callback, $attempts, static::connectionName());
+        return DB::transaction($callback, $attempts, static::resolveConnectionName($connection));
     }
 
     /**
@@ -170,6 +170,14 @@ abstract class TableModel
     protected static function connectionName(): ?string
     {
         return static::$connection;
+    }
+
+    /**
+     * Resolve explicit connection override or model default.
+     */
+    protected static function resolveConnectionName(?string $connection = null): ?string
+    {
+        return $connection ?? static::connectionName();
     }
 
     /**
@@ -220,7 +228,7 @@ abstract class TableModel
             }
 
             if (! array_key_exists('connection', $namedArgs)) {
-                $namedArgs['connection'] = static::connectionName();
+                $namedArgs['connection'] = static::resolveConnectionName();
             }
 
             break;

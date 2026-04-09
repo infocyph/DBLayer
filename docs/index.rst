@@ -23,8 +23,9 @@ If you are new to the project, follow this order:
 2. ``quickstart`` for a working end-to-end flow.
 3. ``choosing-api`` to choose DB vs QueryBuilder vs Repository.
 4. ``configuration`` and ``connections`` to move from local to production use.
-5. ``query-builder`` and ``repository`` for day-to-day application code.
-6. ``security`` and ``observability`` before deploying.
+5. ``table-model`` for model-like class workflows without ORM.
+6. ``query-builder`` and ``repository`` for day-to-day application code.
+7. ``security`` and ``observability`` before deploying.
 
 The API reference sections are intentionally method-oriented and are best used
 as lookup pages after reading the guides.
@@ -44,6 +45,7 @@ as lookup pages after reading the guides.
    configuration
    connections
    choosing-api
+   table-model
    query-builder
    repository
    transactions

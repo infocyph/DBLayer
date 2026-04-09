@@ -46,6 +46,27 @@ function setupTableModelFixture(): void
     );
 }
 
+function setupTableModelAltFixture(): void
+{
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'table_model_alt');
+
+    DB::statement(
+        'create table users (
+            id integer primary key autoincrement,
+            tenant_id integer not null,
+            email text not null unique,
+            name text not null,
+            active integer not null default 1,
+            deleted_at text null
+        )',
+        [],
+        'table_model_alt',
+    );
+}
+
 it('delegates to repository API with model-level repository defaults', function (): void {
     setupTableModelFixture();
 
@@ -107,6 +128,36 @@ it('forwards DB facade methods and injects configured connection when available'
     $stats = TableModelUser::stats();
     expect($stats['database'] ?? null)->toBe(':memory:');
     expect($stats['driver'] ?? null)->toBe('sqlite');
+});
+
+it('supports per-call connection override for repository, query, and raw SQL helpers', function (): void {
+    setupTableModelFixture();
+    setupTableModelAltFixture();
+
+    DB::table('users', 'table_model_conn')->insert([
+        'tenant_id' => 10,
+        'email' => 'default@example.test',
+        'name' => 'Default',
+        'active' => 1,
+        'deleted_at' => null,
+    ]);
+
+    DB::table('users', 'table_model_alt')->insert([
+        'tenant_id' => 10,
+        'email' => 'alt@example.test',
+        'name' => 'Alt',
+        'active' => 1,
+        'deleted_at' => null,
+    ]);
+
+    expect(TableModelUser::repository()->count())->toBe(1);
+    expect(TableModelUser::repository('table_model_alt')->count())->toBe(1);
+
+    expect(TableModelUser::query()->pluck('email'))->toBe(['default@example.test']);
+    expect(TableModelUser::query('table_model_alt')->pluck('email'))->toBe(['alt@example.test']);
+
+    expect((int) TableModelUser::sqlScalar('select count(*) from users'))->toBe(1);
+    expect((int) TableModelUser::sqlScalar('select count(*) from users', [], 'table_model_alt'))->toBe(1);
 });
 
 it('throws a clear exception when table is not configured', function (): void {

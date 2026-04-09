@@ -10,6 +10,8 @@ repository style. It delegates calls by priority:
 2. QueryBuilder methods
 3. DB facade methods (with connection auto-injection when supported)
 
+For scenario-oriented usage patterns, see ``table-model``.
+
 Because dispatch is repository/query-first, use ``sqlSelect()`` for raw SQL
 reads to avoid ambiguity with QueryBuilder ``select()``.
 
@@ -22,11 +24,13 @@ Required/Optional Static Properties
 Core Methods
 ------------
 
-- ``repository()`` / ``repo()``
-- ``query()`` / ``builder()``
-- ``connection()``
-- ``transaction()``
-- ``sqlSelect()``, ``sqlStatement()``, ``sqlScalar()``
+- ``repository(?string $connection = null)`` / ``repo(...)``
+- ``query(?string $connection = null)`` / ``builder(...)``
+- ``connection(?string $connection = null)``
+- ``transaction(callable $callback, int $attempts = 1, ?string $connection = null)``
+- ``sqlSelect(..., ?string $connection = null)``,
+  ``sqlStatement(..., ?string $connection = null)``,
+  ``sqlScalar(..., ?string $connection = null)``
 
 Customization Hooks
 -------------------
@@ -36,6 +40,56 @@ Customization Hooks
 
 These hooks let subclasses set reusable defaults such as soft deletes, tenant
 scope, optimistic locking, and default ordering.
+
+Scope Pattern
+-------------
+
+- ``configureRepository()`` for reusable table policies.
+- ``configureQuery()`` for reusable query shape defaults.
+
+.. code-block:: php
+
+   protected static function configureRepository(Repository $repository): Repository
+   {
+       return $repository->forTenant(10)->enableSoftDeletes();
+   }
+
+   protected static function configureQuery(QueryBuilder $query): QueryBuilder
+   {
+       return $query->where('active', '=', 1);
+   }
+
+Connection Pattern
+------------------
+
+Set model default connection in static property, and override per-call when
+needed:
+
+.. code-block:: php
+
+   final class User extends TableModel
+   {
+       protected static string $table = 'users';
+       protected static ?string $connection = 'main';
+   }
+
+   $defaultRows = User::query()->get();
+   $reportRows = User::query('reporting')->get();
+   $reportCount = User::sqlScalar('select count(*) from users', [], 'reporting');
+
+DB Interface Access
+-------------------
+
+You can call DB facade methods through ``TableModel`` static dispatch:
+
+.. code-block:: php
+
+   $stats = User::stats();                // forwarded to DB::stats()
+   $caps = User::capabilities();          // forwarded to DB::capabilities()
+   $rows = User::sqlSelect('select 1');   // explicit raw SQL helper
+
+For raw SQL, prefer ``sqlSelect/sqlStatement/sqlScalar`` to avoid ambiguity with
+QueryBuilder ``select()``.
 
 Example
 -------
