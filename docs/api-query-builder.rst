@@ -7,6 +7,8 @@ Class: ``Infocyph\DBLayer\Query\QueryBuilder``
 with ``get()``, ``first()``, ``update()``, ``delete()``, and related methods.
 Use ``cloneBuilder()`` or ``newQuery()`` when branching logic needs isolation.
 
+For API selection guidance, see ``choosing-api`` and ``api-table-model``.
+
 Select/Read
 -----------
 
