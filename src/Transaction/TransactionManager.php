@@ -26,11 +26,11 @@ final class TransactionManager
      * }
      */
     private array $globalStats = [
-      'total_transactions'  => 0,
-      'active_transactions' => 0,
-      'total_commits'       => 0,
-      'total_rollbacks'     => 0,
-      'total_deadlocks'     => 0,
+        'total_transactions'  => 0,
+        'active_transactions' => 0,
+        'total_commits'       => 0,
+        'total_rollbacks'     => 0,
+        'total_deadlocks'     => 0,
     ];
 
     /**
@@ -211,11 +211,11 @@ final class TransactionManager
     public function resetStats(): void
     {
         $this->globalStats = [
-          'total_transactions'  => 0,
-          'active_transactions' => 0,
-          'total_commits'       => 0,
-          'total_rollbacks'     => 0,
-          'total_deadlocks'     => 0,
+            'total_transactions'  => 0,
+            'active_transactions' => 0,
+            'total_commits'       => 0,
+            'total_rollbacks'     => 0,
+            'total_deadlocks'     => 0,
         ];
 
         foreach ($this->transactions as $transaction) {

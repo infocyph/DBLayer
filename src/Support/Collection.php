@@ -25,22 +25,14 @@ use JsonSerializable;
  * @implements Iterator<TKey, TValue>
  * @implements JsonSerializable
  */
-final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
+final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable, \Stringable
 {
-    /**
-     * @var array<TKey, TValue>
-     */
-    protected array $items;
-
     /**
      * Create a new collection.
      *
      * @param array<TKey, TValue> $items Initial items
      */
-    public function __construct(array $items = [])
-    {
-        $this->items = $items;
-    }
+    public function __construct(protected array $items = []) {}
 
     /**
      * Convert collection to JSON string.
@@ -52,8 +44,6 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
 
     /**
      * Create an empty collection.
-     *
-     * @return static
      */
     public static function empty(): static
     {
@@ -64,7 +54,6 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
      * Create a collection from an array.
      *
      * @param array<TKey, TValue> $items
-     * @return static
      */
     public static function make(array $items = []): static
     {
@@ -86,7 +75,6 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
      * Only numeric values are considered in the average.
      *
      * @param string|null $key Key to average
-     * @return int|float
      */
     public function avg(?string $key = null): int|float
     {
@@ -121,7 +109,6 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
             $chunks[] = new static($chunk);
         }
 
-        /** @var static<int, static<TKey, TValue>> */
         return new static($chunks);
     }
 
@@ -143,6 +130,7 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     /**
      * Count the number of items (Countable implementation).
      */
+    #[\Override]
     public function count(): int
     {
         return count($this->items);
@@ -153,6 +141,7 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
      *
      * @return TValue
      */
+    #[\Override]
     public function current(): mixed
     {
         return current($this->items);
@@ -171,7 +160,6 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
         }
 
         if ($callback === null) {
-            /** @var array<TKey, TValue> $filtered */
             $filtered = array_filter($this->items);
 
             return new static($filtered);
@@ -185,7 +173,6 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
             }
         }
 
-        /** @var static<TKey, TValue> */
         return new static($results);
     }
 
@@ -193,7 +180,6 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
      * Get the first item, optionally matching a callback.
      *
      * @param callable(TValue, TKey): bool|null $callback
-     * @param mixed $default
      * @return TValue|mixed
      */
     public function first(?callable $callback = null, mixed $default = null): mixed
@@ -240,6 +226,7 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
      *
      * @return array<TKey, TValue>
      */
+    #[\Override]
     public function jsonSerialize(): array
     {
         return $this->items;
@@ -247,9 +234,8 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
 
     /**
      * Get the current key (Iterator implementation).
-     *
-     * @return TKey|null
      */
+    #[\Override]
     public function key(): int|string|null
     {
         /** @var TKey|null */
@@ -274,13 +260,13 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
             $results[$key] = $callback($value, $key);
         }
 
-        /** @var static<TKey, mixed> */
         return new static($results);
     }
 
     /**
      * Move to the next item (Iterator implementation).
      */
+    #[\Override]
     public function next(): void
     {
         next($this->items);
@@ -288,9 +274,8 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
 
     /**
      * Check if offset exists (ArrayAccess implementation).
-     *
-     * @param mixed $offset
      */
+    #[\Override]
     public function offsetExists(mixed $offset): bool
     {
         return array_key_exists($offset, $this->items);
@@ -299,9 +284,9 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     /**
      * Get offset value (ArrayAccess implementation).
      *
-     * @param mixed $offset
      * @return TValue|null
      */
+    #[\Override]
     public function offsetGet(mixed $offset): mixed
     {
         return $this->items[$offset] ?? null;
@@ -310,9 +295,9 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     /**
      * Set offset value (ArrayAccess implementation).
      *
-     * @param mixed  $offset
      * @param TValue $value
      */
+    #[\Override]
     public function offsetSet(mixed $offset, mixed $value): void
     {
         if ($offset === null) {
@@ -326,9 +311,8 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
 
     /**
      * Unset offset value (ArrayAccess implementation).
-     *
-     * @param mixed $offset
      */
+    #[\Override]
     public function offsetUnset(mixed $offset): void
     {
         unset($this->items[$offset]);
@@ -337,6 +321,7 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     /**
      * Rewind the iterator (Iterator implementation).
      */
+    #[\Override]
     public function rewind(): void
     {
         reset($this->items);
@@ -346,7 +331,6 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
      * Get the sum of a given key (or of values themselves if $key is null).
      *
      * @param string|null $key Key to sum
-     * @return int|float
      */
     public function sum(?string $key = null): int|float
     {
@@ -400,7 +384,7 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     {
         $json = json_encode(
             $this->jsonSerialize(),
-            $options | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            $options | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
         );
 
         return $json === false ? '[]' : $json;
@@ -409,6 +393,7 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     /**
      * Check if the current position is valid (Iterator implementation).
      */
+    #[\Override]
     public function valid(): bool
     {
         return key($this->items) !== null;
@@ -417,17 +402,15 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     /**
      * Filter items by key/value.
      *
-     * @param string $key
-     * @param mixed  $value
      * @return static<TKey, TValue>
      */
     public function where(string $key, mixed $value): static
     {
         return $this->filter(
-            static fn ($item) => (
+            static fn($item) => (
                 (is_array($item) && array_key_exists($key, $item) && $item[$key] === $value)
             || (is_object($item) && isset($item->{$key}) && $item->{$key} === $value)
-            )
+            ),
         );
     }
 

@@ -24,21 +24,24 @@ final class ConnectionConfig
      *
      * @var array<string,mixed>
      */
-    private const DEFAULTS = [
-      'driver'    => 'mysql',
-      'host'      => '127.0.0.1',
-      'port'      => null,
-      'database'  => '',
-      'username'  => '',
-      'password'  => '',
-      'charset'   => null,
-      'collation' => null,
-      'schema'    => null,
-      'prefix'    => '',
-      'options'   => [],
-      'write'     => [],
-      'read'      => [],
-      'security'  => [],
+    private const array DEFAULTS = [
+        'driver'    => 'mysql',
+        'host'      => '127.0.0.1',
+        'port'      => null,
+        'database'  => '',
+        'username'  => '',
+        'password'  => '',
+        'charset'   => null,
+        'collation' => null,
+        'schema'    => null,
+        'prefix'    => '',
+        'options'   => [],
+        'write'     => [],
+        'read'      => [],
+        'read_strategy' => 'random',
+        'read_health_cooldown' => 30,
+        'sticky'    => false,
+        'security'  => [],
     ];
 
     /**
@@ -46,16 +49,16 @@ final class ConnectionConfig
      *
      * @var array<string,string>
      */
-    private const DRIVER_ALIASES = [
-      'pdo_mysql'  => 'mysql',
-      'mysqli'     => 'mysql',
-      'mariadb'    => 'mysql',
+    private const array DRIVER_ALIASES = [
+        'pdo_mysql'  => 'mysql',
+        'mysqli'     => 'mysql',
+        'mariadb'    => 'mysql',
 
-      'pgsql'      => 'pgsql',
-      'postgres'   => 'pgsql',
-      'postgresql' => 'pgsql',
+        'pgsql'      => 'pgsql',
+        'postgres'   => 'pgsql',
+        'postgresql' => 'pgsql',
 
-      'sqlite3'    => 'sqlite',
+        'sqlite3'    => 'sqlite',
     ];
 
     /**
@@ -63,11 +66,11 @@ final class ConnectionConfig
      *
      * @var array<string,mixed>
      */
-    private const SECURITY_DEFAULT = [
-      'enabled'         => true,
-      'max_sql_length'  => 16_384,
-      'max_params'      => 512,
-      'max_param_bytes' => 1_024,
+    private const array SECURITY_DEFAULT = [
+        'enabled'         => true,
+        'max_sql_length'  => 16_384,
+        'max_params'      => 512,
+        'max_param_bytes' => 1_024,
     ];
 
     /**
@@ -185,7 +188,89 @@ final class ConnectionConfig
             return [];
         }
 
-        return $this->normalizeReplicaConfigs($read);
+        return $this->expandReplicaHostVariants(
+            $this->normalizeReplicaConfigs($read),
+        );
+    }
+
+    /**
+     * Get read-replica health cooldown in seconds after a failed probe.
+     */
+    public function getReadHealthCooldown(): int
+    {
+        $seconds = $this->config['read_health_cooldown'] ?? 30;
+
+        if (! is_int($seconds) && ! is_numeric($seconds)) {
+            return 30;
+        }
+
+        return max(0, (int) $seconds);
+    }
+
+    /**
+     * Get read-replica selection strategy.
+     *
+     * Supported values:
+     *  - random
+     *  - round_robin
+     *  - least_latency
+     *  - weighted
+     */
+    public function getReadStrategy(): string
+    {
+        $strategy = $this->config['read_strategy'] ?? 'random';
+
+        if (! is_string($strategy)) {
+            return 'random';
+        }
+
+        $strategy = strtolower(trim($strategy));
+
+        return match ($strategy) {
+            'round-robin' => 'round_robin',
+            'least-latency' => 'least_latency',
+            'weighted-random' => 'weighted',
+            'health-aware' => 'weighted',
+            'random', 'round_robin', 'least_latency', 'weighted' => $strategy,
+            default => 'random',
+        };
+    }
+
+    /**
+     * Get the write override configuration (if any).
+     *
+     * Returns the first normalized write config for backward compatibility.
+     *
+     * @return array<string,mixed>
+     */
+    public function getWriteConfig(): array
+    {
+        $write = $this->getWriteConfigs();
+
+        return $write[0] ?? [];
+    }
+
+    /**
+     * Get all write override configurations.
+     *
+     * Supports:
+     *  - write => ['host' => 'writer']
+     *  - write => [['host' => 'writer-1'], ['host' => 'writer-2']]
+     *  - write => ['host' => ['writer-1', 'writer-2']]
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function getWriteConfigs(): array
+    {
+        $write = $this->config['write'] ?? [];
+
+        if (! is_array($write) || $write === []) {
+            return [];
+        }
+
+        return $this->expandReplicaHostVariants(
+            $this->normalizeReplicaConfigs($write),
+        );
     }
 
     /**
@@ -197,6 +282,14 @@ final class ConnectionConfig
     }
 
     /**
+     * Whether write override configuration is present.
+     */
+    public function hasWriteConfig(): bool
+    {
+        return $this->getWriteConfigs() !== [];
+    }
+
+    /**
      * Whether SQL security checks are enabled.
      */
     public function isSecurityEnabled(): bool
@@ -204,6 +297,14 @@ final class ConnectionConfig
         $security = $this->config['security'] ?? [];
 
         return is_array($security) && ! empty($security['enabled']);
+    }
+
+    /**
+     * Whether sticky read-after-write is enabled.
+     */
+    public function isSticky(): bool
+    {
+        return (bool) ($this->config['sticky'] ?? false);
     }
 
     /**
@@ -240,6 +341,46 @@ final class ConnectionConfig
     }
 
     /**
+     * Expand config fragments that define host as a list into one fragment per host.
+     *
+     * @param  list<array<string,mixed>>  $replicas
+     * @return list<array<string,mixed>>
+     */
+    private function expandReplicaHostVariants(array $replicas): array
+    {
+        $expanded = [];
+
+        foreach ($replicas as $replica) {
+            $hosts = $replica['host'] ?? null;
+
+            if (! is_array($hosts)) {
+                $expanded[] = $replica;
+
+                continue;
+            }
+
+            $hasExpandedHost = false;
+
+            foreach ($hosts as $host) {
+                if (! is_string($host) || trim($host) === '') {
+                    continue;
+                }
+
+                $copy = $replica;
+                $copy['host'] = trim($host);
+                $expanded[] = $copy;
+                $hasExpandedHost = true;
+            }
+
+            if (! $hasExpandedHost) {
+                $expanded[] = $replica;
+            }
+        }
+
+        return $expanded;
+    }
+
+    /**
      * Normalize a driver name (aliases → canonical).
      */
     private function normalizeDriverName(string $driver): string
@@ -258,13 +399,6 @@ final class ConnectionConfig
     private function normalizeReplicaConfigs(array $replicas): array
     {
         if ($replicas === []) {
-            return [];
-        }
-
-        $first = reset($replicas);
-
-        // Single associative config: ['host' => 'replica']
-        if (! is_array($first)) {
             return [];
         }
 
@@ -308,7 +442,7 @@ final class ConnectionConfig
                 || $config['database'] === ''
             ) {
                 throw ConnectionException::invalidConfig(
-                    sprintf("Config key 'database' is required for driver '%s'.", $driver)
+                    sprintf("Config key 'database' is required for driver '%s'.", $driver),
                 );
             }
         }
@@ -322,7 +456,7 @@ final class ConnectionConfig
                     || $config[$key] === ''
                 ) {
                     throw ConnectionException::invalidConfig(
-                        sprintf("Config key '%s' is required for driver '%s'.", $key, $driver)
+                        sprintf("Config key '%s' is required for driver '%s'.", $key, $driver),
                     );
                 }
             }

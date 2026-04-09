@@ -56,7 +56,6 @@ final class Profiler
      *
      * This should be called after start(), passing the executed SQL and bindings.
      *
-     * @param string $sql
      * @param array<array-key, mixed> $bindings
      */
     public function finish(string $sql, array $bindings = []): void
@@ -72,10 +71,10 @@ final class Profiler
         $memory = $endMemory - $this->startMemory;
 
         $this->profiles[] = [
-          'sql'      => $sql,
-          'bindings' => $bindings,
-          'time'     => round($timeMs, 2),
-          'memory'   => $memory,
+            'sql'      => $sql,
+            'bindings' => $bindings,
+            'time'     => round($timeMs, 2),
+            'memory'   => $memory,
         ];
 
         // Reset for next measurement.
@@ -121,10 +120,10 @@ final class Profiler
 
         if ($count === 0) {
             return [
-              'count'        => 0,
-              'total_time'   => 0.0,
-              'avg_time'     => 0.0,
-              'total_memory' => 0,
+                'count'        => 0,
+                'total_time'   => 0.0,
+                'avg_time'     => 0.0,
+                'total_memory' => 0,
             ];
         }
 
@@ -137,10 +136,10 @@ final class Profiler
         }
 
         return [
-          'count'        => $count,
-          'total_time'   => round($totalTime, 2),
-          'avg_time'     => round($totalTime / $count, 2),
-          'total_memory' => $totalMemory,
+            'count'        => $count,
+            'total_time'   => round($totalTime, 2),
+            'avg_time'     => round($totalTime / $count, 2),
+            'total_memory' => $totalMemory,
         ];
     }
 

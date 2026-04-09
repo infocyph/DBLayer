@@ -14,14 +14,6 @@ use Throwable;
  */
 class DBException extends RuntimeException
 {
-    public function __construct(
-        string $message = '',
-        int $code = 0,
-        ?Throwable $previous = null
-    ) {
-        parent::__construct($message, $code, $previous);
-    }
-
     /**
      * Wrap a lower-level throwable into a DBLayer exception.
      *
@@ -30,7 +22,7 @@ class DBException extends RuntimeException
      */
     public static function fromThrowable(
         Throwable $throwable,
-        ?string $prefix = null
+        ?string $prefix = null,
     ): static {
         $message = $throwable->getMessage();
 

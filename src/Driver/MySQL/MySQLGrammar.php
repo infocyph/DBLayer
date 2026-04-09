@@ -36,7 +36,7 @@ final class MySQLGrammar extends Grammar
     public function compileInsertOnDuplicateKeyUpdate(
         QueryBuilder $query,
         array $values,
-        array $update
+        array $update,
     ): string {
         $insert = $this->compileInsert($query, $values);
 
@@ -46,7 +46,7 @@ final class MySQLGrammar extends Grammar
 
                 return "{$wrapped} = VALUES({$wrapped})";
             },
-            array_keys($update)
+            array_keys($update),
         ));
 
         return "{$insert} on duplicate key update {$updateColumns}";
@@ -65,16 +65,18 @@ final class MySQLGrammar extends Grammar
     /**
      * Compile a truncate table statement (MySQL-specific).
      */
+    #[\Override]
     public function compileTruncate(QueryBuilder $query): string
     {
         $components = $query->getComponents();
 
-        return 'truncate table '.$this->wrapTable($components['from']);
+        return 'truncate table ' . $this->wrapTable($components['from']);
     }
 
     /**
      * Get the format for database stored dates.
      */
+    #[\Override]
     public function getDateFormat(): string
     {
         return 'Y-m-d H:i:s';
@@ -83,21 +85,23 @@ final class MySQLGrammar extends Grammar
     /**
      * Compile the "limit" portion with offset support (MySQL-specific).
      */
+    #[\Override]
     protected function compileLimit(QueryBuilder $query, int $limit): string
     {
         $components = $query->getComponents();
         $offset     = $components['offset'];
 
         if ($offset !== null) {
-            return 'limit '.(int) $offset.', '.(int) $limit;
+            return 'limit ' . (int) $offset . ', ' . $limit;
         }
 
-        return 'limit '.(int) $limit;
+        return 'limit ' . $limit;
     }
 
     /**
      * Compile the lock into SQL (MySQL-specific).
      */
+    #[\Override]
     protected function compileLock(QueryBuilder $query, string $lock): string
     {
         unset($query);
@@ -112,6 +116,7 @@ final class MySQLGrammar extends Grammar
     /**
      * Compile the "offset" portion (handled by limit in MySQL).
      */
+    #[\Override]
     protected function compileOffset(QueryBuilder $query, int $offset): string
     {
         unset($query, $offset);
@@ -123,12 +128,13 @@ final class MySQLGrammar extends Grammar
     /**
      * Wrap a single string in keyword identifiers.
      */
+    #[\Override]
     protected function wrapValue(string $value): string
     {
         if ($value === '*') {
             return $value;
         }
 
-        return '`'.str_replace('`', '``', $value).'`';
+        return '`' . str_replace('`', '``', $value) . '`';
     }
 }

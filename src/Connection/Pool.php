@@ -30,18 +30,18 @@ final class Pool
      *   health_check_interval:int
      * }
      */
-    private const DEFAULTS = [
-      'min_connections'       => 1,
-      'max_connections'       => 10,
-      'idle_timeout'          => 60,
-      'max_lifetime'          => 3_600,
-      'health_check_interval' => 30,
+    private const array DEFAULTS = [
+        'min_connections'       => 1,
+        'max_connections'       => 10,
+        'idle_timeout'          => 60,
+        'max_lifetime'          => 3_600,
+        'health_check_interval' => 30,
     ];
 
     /**
      * Max number of active connections to probe per health-check run.
      */
-    private const HEALTH_CHECK_BATCH_SIZE = 5;
+    private const int HEALTH_CHECK_BATCH_SIZE = 5;
 
     /**
      * Connection configurations.
@@ -99,11 +99,11 @@ final class Pool
      * }
      */
     private array $stats = [
-      'created'         => 0,
-      'reused'          => 0,
-      'closed'          => 0,
-      'health_checks'   => 0,
-      'health_failures' => 0,
+        'created'         => 0,
+        'reused'          => 0,
+        'closed'          => 0,
+        'health_checks'   => 0,
+        'health_failures' => 0,
     ];
 
     /**
@@ -116,11 +116,11 @@ final class Pool
         $merged = array_merge(self::DEFAULTS, $poolConfig);
 
         $this->poolConfig = [
-          'min_connections'       => (int) $merged['min_connections'],
-          'max_connections'       => (int) $merged['max_connections'],
-          'idle_timeout'          => (int) $merged['idle_timeout'],
-          'max_lifetime'          => (int) $merged['max_lifetime'],
-          'health_check_interval' => (int) $merged['health_check_interval'],
+            'min_connections'       => (int) $merged['min_connections'],
+            'max_connections'       => (int) $merged['max_connections'],
+            'idle_timeout'          => (int) $merged['idle_timeout'],
+            'max_lifetime'          => (int) $merged['max_lifetime'],
+            'health_check_interval' => (int) $merged['health_check_interval'],
         ];
     }
 
@@ -212,16 +212,16 @@ final class Pool
         $utilization = $max > 0 ? ($activeCount / $max) * 100.0 : 0.0;
 
         return [
-          'created'            => $this->stats['created'],
-          'reused'             => $this->stats['reused'],
-          'closed'             => $this->stats['closed'],
-          'health_checks'      => $this->stats['health_checks'],
-          'health_failures'    => $this->stats['health_failures'],
-          'active_connections' => $activeCount,
-          'idle_connections'   => $idleCount,
-          'total_connections'  => $totalConnections,
-          'max_connections'    => $max,
-          'pool_utilization'   => $utilization,
+            'created'            => $this->stats['created'],
+            'reused'             => $this->stats['reused'],
+            'closed'             => $this->stats['closed'],
+            'health_checks'      => $this->stats['health_checks'],
+            'health_failures'    => $this->stats['health_failures'],
+            'active_connections' => $activeCount,
+            'idle_connections'   => $idleCount,
+            'total_connections'  => $totalConnections,
+            'max_connections'    => $max,
+            'pool_utilization'   => $utilization,
         ];
     }
 
@@ -252,8 +252,8 @@ final class Pool
         foreach ($this->connections as $name => $connections) {
             foreach ($connections as $data) {
                 $candidates[] = [
-                  'name'       => $name,
-                  'connection' => $data['connection'],
+                    'name'       => $name,
+                    'connection' => $data['connection'],
                 ];
             }
         }
@@ -314,8 +314,8 @@ final class Pool
         }
 
         $this->idle[$name][$connectionId] = [
-          'connection' => $connection,
-          'idle_since' => microtime(true),
+            'connection' => $connection,
+            'idle_since' => microtime(true),
         ];
     }
 
@@ -347,11 +347,11 @@ final class Pool
     public function resetStats(): void
     {
         $this->stats = [
-          'created'         => 0,
-          'reused'          => 0,
-          'closed'          => 0,
-          'health_checks'   => 0,
-          'health_failures' => 0,
+            'created'         => 0,
+            'reused'          => 0,
+            'closed'          => 0,
+            'health_checks'   => 0,
+            'health_failures' => 0,
         ];
     }
 
@@ -383,8 +383,8 @@ final class Pool
         // Attach HealthCheck monitor tuned with pool config.
         $connection->attachHealthCheck(
             new HealthCheck($connection, [
-            'check_interval' => $this->poolConfig['health_check_interval'],
-          ])
+                'check_interval' => $this->poolConfig['health_check_interval'],
+            ]),
         );
 
         $connectionId = spl_object_id($connection);
@@ -394,8 +394,8 @@ final class Pool
         }
 
         $this->connections[$name][$connectionId] = [
-          'connection' => $connection,
-          'created_at' => microtime(true),
+            'connection' => $connection,
+            'created_at' => microtime(true),
         ];
 
         $this->stats['created']++;
@@ -451,7 +451,7 @@ final class Pool
         $now = microtime(true);
 
         foreach ($this->idle as $name => $connections) {
-            foreach ($connections as $connectionId => $data) {
+            foreach ($connections as $data) {
                 $idleTime = $now - $data['idle_since'];
 
                 if ($idleTime > $this->poolConfig['idle_timeout']) {

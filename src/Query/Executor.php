@@ -25,16 +25,6 @@ use Infocyph\DBLayer\Grammar\Grammar;
 final class Executor
 {
     /**
-     * Database connection.
-     */
-    private readonly Connection $connection;
-
-    /**
-     * SQL grammar compiler (legacy path).
-     */
-    private readonly Grammar $grammar;
-
-    /**
      * Whether to dispatch query events.
      */
     private bool $dispatchEvents = true;
@@ -87,11 +77,16 @@ final class Executor
     /**
      * Create a new executor instance.
      */
-    public function __construct(Connection $connection, Grammar $grammar)
-    {
-        $this->connection = $connection;
-        $this->grammar    = $grammar;
-    }
+    public function __construct(
+        /**
+         * Database connection.
+         */
+        private readonly Connection $connection,
+        /**
+         * SQL grammar compiler (legacy path).
+         */
+        private readonly Grammar $grammar,
+    ) {}
 
     /**
      * Clear the query log.
@@ -118,7 +113,7 @@ final class Executor
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
                 'db.query.executing',
-                new QueryExecuting($sql, $bindings, $this->connection)
+                new QueryExecuting($sql, $bindings, $this->connection),
             );
         }
 
@@ -131,7 +126,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected),
                 );
             }
 
@@ -144,7 +139,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
                 );
             }
 
@@ -218,7 +213,7 @@ final class Executor
         /** @var list<array{sql:string,bindings:list<mixed>,time:float,timestamp:float,error:string}> $failed */
         $failed = \array_values(\array_filter(
             $logs,
-            static fn (array $log): bool => isset($log['error'])
+            static fn(array $log): bool => isset($log['error']),
         ));
 
         return $failed;
@@ -256,12 +251,12 @@ final class Executor
     {
         if ($this->queryLogCount === 0) {
             return [
-              'total_queries'  => 0,
-              'total_time'     => 0.0,
-              'avg_time'       => 0.0,
-              'min_time'       => 0.0,
-              'max_time'       => 0.0,
-              'failed_queries' => 0,
+                'total_queries'  => 0,
+                'total_time'     => 0.0,
+                'avg_time'       => 0.0,
+                'min_time'       => 0.0,
+                'max_time'       => 0.0,
+                'failed_queries' => 0,
             ];
         }
 
@@ -273,12 +268,12 @@ final class Executor
         $count     = \count($times);
 
         return [
-          'total_queries'  => $this->queryLogCount,
-          'total_time'     => \round($totalTime, 4),          // ms
-          'avg_time'       => \round($totalTime / $count, 4), // ms
-          'min_time'       => \round((float) \min($times), 4),
-          'max_time'       => \round((float) \max($times), 4),
-          'failed_queries' => \count($failed),
+            'total_queries'  => $this->queryLogCount,
+            'total_time'     => \round($totalTime, 4),          // ms
+            'avg_time'       => \round($totalTime / $count, 4), // ms
+            'min_time'       => \round(\min($times), 4),
+            'max_time'       => \round(\max($times), 4),
+            'failed_queries' => \count($failed),
         ];
     }
 
@@ -299,7 +294,7 @@ final class Executor
 
         \usort(
             $queries,
-            static fn (array $a, array $b): int => $b['time'] <=> $a['time']
+            static fn(array $a, array $b): int => $b['time'] <=> $a['time'],
         );
 
         return \array_slice($queries, 0, $limit);
@@ -328,7 +323,7 @@ final class Executor
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
                 'db.query.executing',
-                new QueryExecuting($sql, $bindings, $this->connection)
+                new QueryExecuting($sql, $bindings, $this->connection),
             );
         }
 
@@ -343,7 +338,7 @@ final class Executor
 
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount),
                 );
             }
 
@@ -356,7 +351,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
                 );
             }
 
@@ -398,7 +393,7 @@ final class Executor
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
                 'db.query.executing',
-                new QueryExecuting($sql, $bindings, $this->connection)
+                new QueryExecuting($sql, $bindings, $this->connection),
             );
         }
 
@@ -413,7 +408,7 @@ final class Executor
 
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount),
                 );
             }
 
@@ -426,7 +421,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
                 );
             }
 
@@ -446,7 +441,7 @@ final class Executor
     public function insertReturning(
         QueryBuilder $query,
         array $values,
-        ?string $column = null
+        ?string $column = null,
     ): ?array {
         $rows = $this->normalizeInsertValues($values);
 
@@ -467,7 +462,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executing',
-                    new QueryExecuting($sql, $bindings, $this->connection)
+                    new QueryExecuting($sql, $bindings, $this->connection),
                 );
             }
 
@@ -480,7 +475,7 @@ final class Executor
                 if ($this->dispatchEvents) {
                     $this->dispatchEvent(
                         'db.query.executed',
-                        new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, \count($resultRows))
+                        new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, \count($resultRows)),
                     );
                 }
 
@@ -493,7 +488,7 @@ final class Executor
                 if ($this->dispatchEvents) {
                     $this->dispatchEvent(
                         'db.query.executed',
-                        new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                        new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
                     );
                 }
 
@@ -526,7 +521,7 @@ final class Executor
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
                 'db.query.executing',
-                new QueryExecuting($sql, $bindings, $this->connection)
+                new QueryExecuting($sql, $bindings, $this->connection),
             );
         }
 
@@ -539,7 +534,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -552,7 +547,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -613,7 +608,7 @@ final class Executor
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
                 'db.query.executing',
-                new QueryExecuting($sql, $bindings, $this->connection)
+                new QueryExecuting($sql, $bindings, $this->connection),
             );
         }
 
@@ -626,7 +621,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -639,7 +634,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, null)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -659,7 +654,7 @@ final class Executor
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
                 'db.query.executing',
-                new QueryExecuting($sql, [], $this->connection)
+                new QueryExecuting($sql, [], $this->connection),
             );
         }
 
@@ -672,7 +667,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null)
+                    new QueryExecuted($sql, [], $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -685,7 +680,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, [], $elapsed * 1000, $this->connection, null)
+                    new QueryExecuted($sql, [], $elapsed * 1000, $this->connection),
                 );
             }
 
@@ -714,7 +709,7 @@ final class Executor
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
                 'db.query.executing',
-                new QueryExecuting($sql, $bindings, $this->connection)
+                new QueryExecuting($sql, $bindings, $this->connection),
             );
         }
 
@@ -727,7 +722,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $affected),
                 );
             }
 
@@ -740,7 +735,7 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
                 );
             }
 
@@ -761,7 +756,7 @@ final class Executor
         QueryBuilder $query,
         array $values,
         array $uniqueBy,
-        ?array $update = null
+        ?array $update = null,
     ): bool {
         $rows = $this->normalizeInsertValues($values);
 
@@ -769,7 +764,6 @@ final class Executor
             return true;
         }
 
-        /** @var array<string,mixed> $firstRow */
         $firstRow = $rows[0];
 
         if ($update === null) {
@@ -803,7 +797,7 @@ final class Executor
         if ($this->dispatchEvents) {
             $this->dispatchEvent(
                 'db.query.executing',
-                new QueryExecuting($sql, $bindings, $this->connection)
+                new QueryExecuting($sql, $bindings, $this->connection),
             );
         }
 
@@ -818,7 +812,7 @@ final class Executor
 
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, $rowsCount),
                 );
             }
 
@@ -831,12 +825,52 @@ final class Executor
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
                     'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0)
+                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection, 0),
                 );
             }
 
             throw QueryException::executionFailed($sql, $e->getMessage());
         }
+    }
+
+    /**
+     * Execute an UPSERT and return affected rows.
+     *
+     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>|null  $update
+     * @param  list<string>  $returning
+     * @return list<array<string,mixed>>
+     */
+    public function upsertReturning(
+        QueryBuilder $query,
+        array $values,
+        array $uniqueBy,
+        ?array $update = null,
+        array $returning = ['*'],
+    ): array {
+        $rows = $this->normalizeInsertValues($values);
+
+        if ($rows === []) {
+            return [];
+        }
+
+        $updateAssoc = $this->resolveUpsertUpdateAssoc($rows[0], $uniqueBy, $update);
+
+        $native = $this->runNativeUpsertReturning($query, $rows, $uniqueBy, $updateAssoc, $returning);
+        if ($native !== null) {
+            return $native;
+        }
+
+        // Portable fallback: run UPSERT, then fetch rows back by unique keys.
+        $this->upsert($query, $rows, $uniqueBy, $update);
+
+        $table = $this->tableFromQuery($query);
+        if ($table === null || $uniqueBy === []) {
+            return [];
+        }
+
+        return $this->fetchRowsByUniqueKeys($table, $rows, $uniqueBy, $returning);
     }
 
     /**
@@ -897,7 +931,12 @@ final class Executor
         $components = $query->getComponents();
 
         // Keep grammar as the canonical path for currently unsupported components.
-        if ($components['distinct'] || $components['unions'] !== [] || $components['lock'] !== null) {
+        if (
+            ($components['ctes'] ?? []) !== []
+            || $components['distinct']
+            || $components['unions'] !== []
+            || $components['lock'] !== null
+        ) {
             return false;
         }
 
@@ -926,6 +965,47 @@ final class Executor
         }
 
         Events::dispatch($event, [$payload]);
+    }
+
+    /**
+     * Fetch rows back using the unique key filters used by UPSERT fallback.
+     *
+     * @param  list<array<string,mixed>>  $rows
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>  $returning
+     * @return list<array<string,mixed>>
+     */
+    private function fetchRowsByUniqueKeys(
+        string $table,
+        array $rows,
+        array $uniqueBy,
+        array $returning,
+    ): array {
+        $fetch = new QueryBuilder($this->connection, $this->grammar, $this);
+        $fetch->from($table)->select($returning);
+
+        $hasAnyFilter = false;
+
+        foreach ($rows as $row) {
+            $subset = $this->uniqueSubsetFromRow($row, $uniqueBy);
+
+            if ($subset === []) {
+                continue;
+            }
+
+            $hasAnyFilter = true;
+            $fetch->orWhere(static function (QueryBuilder $nested) use ($subset): void {
+                foreach ($subset as $column => $value) {
+                    $nested->where($column, '=', $value);
+                }
+            });
+        }
+
+        if (! $hasAnyFilter) {
+            return [];
+        }
+
+        return $fetch->get();
     }
 
     /**
@@ -961,10 +1041,10 @@ final class Executor
         }
 
         $entry = [
-          'sql'       => $sql,
-          'bindings'  => \array_values($bindings),
-          'time'      => \round($time * 1000, 2), // ms
-          'timestamp' => \microtime(true),
+            'sql'       => $sql,
+            'bindings'  => \array_values($bindings),
+            'time'      => \round($time * 1000, 2), // ms
+            'timestamp' => \microtime(true),
         ];
 
         if ($error !== null) {
@@ -1043,6 +1123,94 @@ final class Executor
         $this->queryLog = \array_values($ordered);
         $this->queryLogCount = \count($this->queryLog);
         $this->queryLogStart = 0;
+    }
+
+    /**
+     * @param  array<string,mixed>  $firstRow
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>|null  $update
+     * @return array<string,mixed>
+     */
+    private function resolveUpsertUpdateAssoc(array $firstRow, array $uniqueBy, ?array $update): array
+    {
+        if ($update === null) {
+            $allColumns = \array_keys($firstRow);
+            $updateCols = \array_values(\array_diff($allColumns, $uniqueBy));
+        } else {
+            $updateCols = $update;
+        }
+
+        $updateAssoc = [];
+        foreach ($updateCols as $col) {
+            $updateAssoc[$col] = null;
+        }
+
+        return $updateAssoc;
+    }
+
+    /**
+     * Try native UPSERT ... RETURNING when supported by grammar.
+     *
+     * @param  list<array<string,mixed>>  $rows
+     * @param  list<string>  $uniqueBy
+     * @param  array<string,mixed>  $updateAssoc
+     * @param  list<string>  $returning
+     * @return list<array<string,mixed>>|null
+     */
+    private function runNativeUpsertReturning(
+        QueryBuilder $query,
+        array $rows,
+        array $uniqueBy,
+        array $updateAssoc,
+        array $returning,
+    ): ?array {
+        if (! \method_exists($this->grammar, 'compileUpsertReturning')) {
+            return null;
+        }
+
+        $sql = $this->grammar->compileUpsertReturning($query, $rows, $uniqueBy, $updateAssoc, $returning);
+        $bindings = $this->getInsertBindings($rows);
+
+        $this->validateBindingCount($sql, $bindings);
+
+        return $this->raw($sql, $bindings);
+    }
+
+    /**
+     * Resolve table name from query components for fallback fetch.
+     */
+    private function tableFromQuery(QueryBuilder $query): ?string
+    {
+        $components = $query->getComponents();
+        $table = $components['from'] ?? null;
+
+        if (! \is_string($table) || $table === '') {
+            return null;
+        }
+
+        return $table;
+    }
+
+    /**
+     * Build unique-key subset for one row (or return empty when incomplete).
+     *
+     * @param  array<string,mixed>  $row
+     * @param  list<string>  $uniqueBy
+     * @return array<string,mixed>
+     */
+    private function uniqueSubsetFromRow(array $row, array $uniqueBy): array
+    {
+        $subset = [];
+
+        foreach ($uniqueBy as $key) {
+            if (! \array_key_exists($key, $row)) {
+                return [];
+            }
+
+            $subset[$key] = $row[$key];
+        }
+
+        return $subset;
     }
 
     /**

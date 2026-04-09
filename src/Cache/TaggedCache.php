@@ -10,30 +10,19 @@ namespace Infocyph\DBLayer\Cache;
  * Manages cache items with tags for group operations.
  * Allows invalidating multiple cache items by tag.
  */
-final class TaggedCache
+final readonly class TaggedCache
 {
     /**
      * Tag namespace separator.
      */
-    private const TAG_SEPARATOR = '|';
-
-    private Cache $cache;
-
-    /**
-     * @var array<int, string>
-     */
-    private array $tags;
+    private const string TAG_SEPARATOR = '|';
 
     /**
      * Create a new tagged cache instance.
      *
      * @param array<int, string> $tags
      */
-    public function __construct(Cache $cache, array $tags)
-    {
-        $this->cache = $cache;
-        $this->tags  = $tags;
-    }
+    public function __construct(private Cache $cache, private array $tags) {}
 
     /**
      * Flush all items with these tags.

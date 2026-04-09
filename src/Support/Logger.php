@@ -67,12 +67,12 @@ final class Logger
         }
 
         $context = [
-          'level'   => 'ERROR',
-          'message' => $message,
+            'level'   => 'ERROR',
+            'message' => $message,
         ];
 
         if ($exception !== null) {
-            $context['exception'] = get_class($exception);
+            $context['exception'] = $exception::class;
             $context['file']      = $exception->getFile();
             $context['line']      = $exception->getLine();
             $context['trace']     = $exception->getTraceAsString();
@@ -111,8 +111,8 @@ final class Logger
         }
 
         $context = [
-          'level' => 'QUERY',
-          'sql'   => $sql,
+            'level' => 'QUERY',
+            'sql'   => $sql,
         ];
 
         if ($bindings !== []) {
@@ -140,14 +140,14 @@ final class Logger
 
         $json = json_encode(
             $context,
-            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
         ) ?: '{}';
 
         $entry = sprintf(
             "[%s] %s: %s\n",
             $timestamp,
             $level,
-            $json
+            $json,
         );
 
         @file_put_contents($this->logFile, $entry, FILE_APPEND | LOCK_EX);

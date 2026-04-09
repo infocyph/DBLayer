@@ -18,7 +18,7 @@ use Infocyph\DBLayer\Query\Executor;
 use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Security\Security;
-use Infocyph\DBLayer\Transaction\Transaction;
+use Infocyph\DBLayer\Transaction\TransactionManager;
 use PDO;
 use PDOException;
 use PDOStatement;
@@ -39,29 +39,24 @@ use PDOStatement;
 final class Connection
 {
     /**
-     * Connection timeout in seconds (reserved; configured via driver options).
+     * Hard upper bound for retry-policy guided query retries.
      */
-    private const CONNECTION_TIMEOUT = 5;
+    private const int MAX_QUERY_RETRY_ATTEMPTS = 5;
 
     /**
      * Maximum reconnection attempts for a single failing operation.
      */
-    private const MAX_RECONNECT_ATTEMPTS = 3;
+    private const int MAX_RECONNECT_ATTEMPTS = 3;
 
     /**
      * Query compiler for this connection.
      */
-    private QueryCompilerInterface $compiler;
-
-    /**
-     * Connection configuration.
-     */
-    private ConnectionConfig $config;
+    private readonly QueryCompilerInterface $compiler;
 
     /**
      * Driver for this connection.
      */
-    private DriverInterface $driver;
+    private readonly DriverInterface $driver;
 
     /**
      * Query executor for this connection (legacy path).
@@ -84,16 +79,71 @@ final class Connection
     private ?PDO $pdo = null;
 
     /**
+     * Optional cancellation checker called before query attempts.
+     *
+     * @var null|callable():bool
+     */
+    private $queryCancellationChecker;
+
+    /**
+     * Optional absolute query deadline (microtime(true) timestamp).
+     */
+    private ?float $queryDeadlineAt = null;
+
+    /**
      * Optional query recorder for "pretend" mode.
      *
      * @var null|callable(string,array<int|string,mixed>):void
      */
-    private $queryRecorder = null;
+    private $queryRecorder;
+
+    /**
+     * Optional retry policy callback for connection errors.
+     *
+     * @var null|callable(\Throwable,int,string,array<int|string,mixed>):bool
+     */
+    private $queryRetryPolicy;
+
+    /**
+     * Optional per-query timeout budget in milliseconds.
+     */
+    private ?int $queryTimeoutMs = null;
 
     /**
      * Read replica PDO connection.
      */
     private ?PDO $readPdo = null;
+
+    /**
+     * Round-robin cursor for read-replica selection.
+     */
+    private int $readReplicaCursor = 0;
+
+    /**
+     * Last selected read-replica index.
+     */
+    private ?int $readReplicaIndex = null;
+
+    /**
+     * Last measured read-replica latencies (milliseconds), keyed by replica index.
+     *
+     * @var array<int,float>
+     */
+    private array $readReplicaLatenciesMs = [];
+
+    /**
+     * Temporary read-replica suppression map: index => unix timestamp when retry is allowed.
+     *
+     * @var array<int,int>
+     */
+    private array $readReplicaUnavailableUntil = [];
+
+    /**
+     * Indicates whether a write has occurred on this connection instance.
+     *
+     * Used by sticky read-after-write behavior.
+     */
+    private bool $recordsModified = false;
 
     /**
      * Whether to run SQL security checks (heuristics, length, bindings).
@@ -118,21 +168,23 @@ final class Connection
     private string $tablePrefix = '';
 
     /**
-     * Transaction wrapper for this connection.
+     * Transaction manager for this connection.
      */
-    private ?Transaction $transaction = null;
+    private ?TransactionManager $transactionManager = null;
 
     /**
      * Create a new connection instance.
      */
-    public function __construct(ConnectionConfig $config)
-    {
-        $this->config = $config;
-        $this->tablePrefix = (string) ($config->get('prefix') ?? '');
-        $this->securityChecks = $config->isSecurityEnabled();
+    public function __construct(/**
+     * Connection configuration.
+     */
+        private ConnectionConfig $config,
+    ) {
+        $this->tablePrefix = (string) ($this->config->get('prefix') ?? '');
+        $this->securityChecks = $this->config->isSecurityEnabled();
 
         // Resolve driver and compiler up front; all engines go through DriverRegistry.
-        $this->driver = DriverRegistry::resolve($config->getDriver());
+        $this->driver = DriverRegistry::resolve($this->config->getDriver());
         $this->compiler = $this->driver->createCompiler();
     }
 
@@ -149,7 +201,7 @@ final class Connection
      */
     public function begin(): void
     {
-        $this->getTransactionManager()->begin();
+        $this->getTransactionManager()->begin($this);
     }
 
     /**
@@ -181,7 +233,7 @@ final class Connection
      */
     public function commitTransaction(): void
     {
-        $this->getTransactionManager()->commit();
+        $this->getTransactionManager()->commit($this);
     }
 
     /**
@@ -209,6 +261,10 @@ final class Connection
     {
         $this->pdo = null;
         $this->readPdo = null;
+        $this->readReplicaIndex = null;
+        $this->readReplicaLatenciesMs = [];
+        $this->readReplicaUnavailableUntil = [];
+        $this->recordsModified = false;
     }
 
     /**
@@ -238,41 +294,41 @@ final class Connection
         $success = false;
 
         try {
-            try {
-                $statement = $this->runStatement($pdo, $sql, $bindings);
-                $this->recordQuery($isWrite);
-                $this->recordPretend($sql, $bindings);
-                $success = true;
+            $attempt = 0;
 
-                return $statement;
-            } catch (PDOException $e) {
-                if (! $this->isConnectionError($e)) {
-                    $this->stats['errors']++;
-                    $this->recordPretend($sql, $bindings);
+            while (true) {
+                $attempt++;
 
-                    throw ConnectionException::queryFailed($sql, $e->getMessage());
-                }
-
-                // Attempt reconnect.
-                $this->handleReconnectForPdo($pdo);
+                $this->assertNotCancelled();
+                $this->assertWithinQueryBudget($start);
 
                 try {
-                    $statement = $this->runStatement(
-                        $isWrite ? $this->getPdo() : $this->getReadPdo(),
-                        $sql,
-                        $bindings
-                    );
+                    $statement = $this->runStatement($pdo, $sql, $bindings);
 
+                    $this->assertWithinQueryBudget($start);
                     $this->recordQuery($isWrite);
                     $this->recordPretend($sql, $bindings);
                     $success = true;
 
                     return $statement;
-                } catch (PDOException $e2) {
-                    $this->stats['errors']++;
-                    $this->recordPretend($sql, $bindings);
+                } catch (PDOException $e) {
+                    if (! $this->isConnectionError($e)) {
+                        $this->stats['errors']++;
+                        $this->recordPretend($sql, $bindings);
 
-                    throw ConnectionException::queryFailed($sql, $e2->getMessage());
+                        throw ConnectionException::queryFailed($sql, $e->getMessage());
+                    }
+
+                    if (! $this->shouldRetryQuery($e, $attempt, $sql, $bindings)) {
+                        $this->stats['errors']++;
+                        $this->recordPretend($sql, $bindings);
+
+                        throw ConnectionException::queryFailed($sql, $e->getMessage());
+                    }
+
+                    // Attempt reconnect and retry.
+                    $this->handleReconnectForPdo($pdo);
+                    $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
                 }
             }
         } finally {
@@ -330,6 +386,22 @@ final class Connection
     }
 
     /**
+     * Expose the configured query executor instance.
+     */
+    public function getExecutorInstance(): Executor
+    {
+        return $this->getExecutor();
+    }
+
+    /**
+     * Expose the configured grammar instance.
+     */
+    public function getGrammarInstance(): Grammar
+    {
+        return $this->getGrammar();
+    }
+
+    /**
      * Lazily create / get the HealthCheck monitor for this connection.
      */
     public function getHealthCheck(): HealthCheck
@@ -354,10 +426,22 @@ final class Connection
     }
 
     /**
+     * Get active per-query timeout budget in milliseconds.
+     */
+    public function getQueryTimeoutMs(): ?int
+    {
+        return $this->queryTimeoutMs;
+    }
+
+    /**
      * Get read PDO connection (for read/write splitting).
      */
     public function getReadPdo(): PDO
     {
+        if ($this->shouldUseWritePdoForRead()) {
+            return $this->getPdo();
+        }
+
         if (! $this->config->hasReadConfig()) {
             return $this->getPdo();
         }
@@ -367,6 +451,24 @@ final class Connection
         }
 
         return $this->readPdo ?? $this->getPdo();
+    }
+
+    /**
+     * Get read-replica selection telemetry for this connection.
+     *
+     * @return array{
+     *   strategy:string,
+     *   selected_index:int|null,
+     *   latencies_ms:array<int,float>
+     * }
+     */
+    public function getReadReplicaInfo(): array
+    {
+        return [
+            'strategy' => $this->config->getReadStrategy(),
+            'selected_index' => $this->readReplicaIndex,
+            'latencies_ms' => $this->readReplicaLatenciesMs,
+        ];
     }
 
     /**
@@ -477,6 +579,14 @@ final class Connection
     }
 
     /**
+     * Create a fresh query builder bound to this connection.
+     */
+    public function query(): QueryBuilder
+    {
+        return new QueryBuilder($this, $this->getGrammar(), $this->getExecutor());
+    }
+
+    /**
      * Create a raw SQL expression.
      */
     public function raw(string $value): Expression
@@ -541,7 +651,7 @@ final class Connection
      */
     public function rollbackTransaction(): void
     {
-        $this->getTransactionManager()->rollBack();
+        $this->getTransactionManager()->rollback($this);
     }
 
     /**
@@ -591,6 +701,22 @@ final class Connection
     }
 
     /**
+     * Run a query and return the first column from the first row.
+     *
+     * @param  array<int|string,mixed>  $bindings
+     */
+    public function scalar(string $sql, array $bindings = []): mixed
+    {
+        $row = $this->select($sql, $bindings)[0] ?? null;
+
+        if (! is_array($row) || $row === []) {
+            return null;
+        }
+
+        return $row[array_key_first($row)];
+    }
+
+    /**
      * Run a select statement.
      *
      * @param  array<int|string,mixed>  $bindings
@@ -607,12 +733,62 @@ final class Connection
     }
 
     /**
+     * Run a query that may return multiple result sets.
+     *
+     * @param  array<int|string,mixed>  $bindings
+     * @return list<list<array<string,mixed>>>
+     */
+    public function selectResultSets(string $sql, array $bindings = []): array
+    {
+        $statement = $this->execute($sql, $bindings);
+        $results = [];
+
+        while (true) {
+            /** @var list<array<string,mixed>> $rows */
+            $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+            $results[] = $rows;
+
+            try {
+                $hasMore = $statement->nextRowset();
+            } catch (PDOException) {
+                $hasMore = false;
+            }
+
+            if ($hasMore !== true) {
+                break;
+            }
+        }
+
+        return $results;
+    }
+
+    /**
      * Set database name (returns self for chaining).
      */
     public function setDatabaseName(string $database): self
     {
         $this->config = $this->config->with('database', $database);
         $this->disconnect();
+
+        return $this;
+    }
+
+    /**
+     * Set absolute query deadline timestamp (microtime(true) format).
+     */
+    public function setQueryDeadlineAt(?float $deadlineAt): self
+    {
+        $this->queryDeadlineAt = $deadlineAt;
+
+        return $this;
+    }
+
+    /**
+     * Set per-query timeout budget in milliseconds.
+     */
+    public function setQueryTimeoutMs(?int $timeoutMs): self
+    {
+        $this->queryTimeoutMs = $timeoutMs !== null && $timeoutMs > 0 ? $timeoutMs : null;
 
         return $this;
     }
@@ -686,11 +862,7 @@ final class Connection
      */
     public function table(string $table): QueryBuilder
     {
-        return new QueryBuilder(
-            $this,
-            $this->getGrammar(),
-            $this->getExecutor()
-        )->from($table);
+        return $this->query()->from($table);
     }
 
     /**
@@ -701,8 +873,9 @@ final class Connection
     public function transaction(callable $callback, int $attempts = 1): mixed
     {
         return $this->getTransactionManager()->execute(
-            static fn (self $connection): mixed => $callback($connection),
-            $attempts
+            $this,
+            static fn(self $connection): mixed => $callback($connection),
+            $attempts,
         );
     }
 
@@ -711,7 +884,27 @@ final class Connection
      */
     public function transactionLevel(): int
     {
-        return $this->getTransactionManager()->level();
+        return $this->getTransactionManager()->level($this);
+    }
+
+    /**
+     * Get transaction statistics for this connection.
+     *
+     * @return array{
+     *   total:int,
+     *   committed:int,
+     *   rolled_back:int,
+     *   deadlocks:int,
+     *   timeouts:int,
+     *   in_transaction:bool,
+     *   current_level:int,
+     *   savepoints:int,
+     *   elapsed_time:float
+     * }|array{}
+     */
+    public function transactionStats(): array
+    {
+        return $this->getTransactionManager()->getStats($this);
     }
 
     /**
@@ -730,38 +923,40 @@ final class Connection
         $success = false;
 
         try {
-            try {
-                $pdo->exec($sql);
-                $this->recordQuery($isWrite);
-                $this->recordPretend($sql, []);
+            $attempt = 0;
 
-                $success = true;
+            while (true) {
+                $attempt++;
 
-                return true;
-            } catch (PDOException $e) {
-                if (! $this->isConnectionError($e)) {
-                    $this->stats['errors']++;
-                    $this->recordPretend($sql, []);
-
-                    throw ConnectionException::queryFailed($sql, $e->getMessage());
-                }
-
-                $this->handleReconnectForPdo($pdo);
+                $this->assertNotCancelled();
+                $this->assertWithinQueryBudget($start);
 
                 try {
-                    $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
                     $pdo->exec($sql);
+
+                    $this->assertWithinQueryBudget($start);
                     $this->recordQuery($isWrite);
                     $this->recordPretend($sql, []);
-
                     $success = true;
 
                     return true;
-                } catch (PDOException $e2) {
-                    $this->stats['errors']++;
-                    $this->recordPretend($sql, []);
+                } catch (PDOException $e) {
+                    if (! $this->isConnectionError($e)) {
+                        $this->stats['errors']++;
+                        $this->recordPretend($sql, []);
 
-                    throw ConnectionException::queryFailed($sql, $e2->getMessage());
+                        throw ConnectionException::queryFailed($sql, $e->getMessage());
+                    }
+
+                    if (! $this->shouldRetryQuery($e, $attempt, $sql, [])) {
+                        $this->stats['errors']++;
+                        $this->recordPretend($sql, []);
+
+                        throw ConnectionException::queryFailed($sql, $e->getMessage());
+                    }
+
+                    $this->handleReconnectForPdo($pdo);
+                    $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
                 }
             }
         } finally {
@@ -781,16 +976,175 @@ final class Connection
     }
 
     /**
+     * Execute callback with temporary cancellation checker.
+     */
+    public function withQueryCancellation(callable $checker, callable $callback): mixed
+    {
+        $previous = $this->queryCancellationChecker;
+        $this->queryCancellationChecker = $checker;
+
+        try {
+            return $callback();
+        } finally {
+            $this->queryCancellationChecker = $previous;
+        }
+    }
+
+    /**
+     * Execute callback with an absolute deadline relative to now.
+     */
+    public function withQueryDeadline(float $seconds, callable $callback): mixed
+    {
+        $previous = $this->queryDeadlineAt;
+        $deadlineAt = microtime(true) + max(0.0, $seconds);
+        $this->queryDeadlineAt = $previous === null ? $deadlineAt : min($previous, $deadlineAt);
+
+        try {
+            return $callback();
+        } finally {
+            $this->queryDeadlineAt = $previous;
+        }
+    }
+
+    /**
+     * Execute callback with temporary retry policy.
+     *
+     * Retry policy signature:
+     *  fn(Throwable $error, int $attempt, string $sql, array $bindings): bool
+     */
+    public function withQueryRetryPolicy(callable $policy, callable $callback): mixed
+    {
+        $previous = $this->queryRetryPolicy;
+        $this->queryRetryPolicy = $policy;
+
+        try {
+            return $callback();
+        } finally {
+            $this->queryRetryPolicy = $previous;
+        }
+    }
+
+    /**
+     * Execute callback with temporary query timeout.
+     */
+    public function withQueryTimeoutMs(?int $timeoutMs, callable $callback): mixed
+    {
+        $previous = $this->queryTimeoutMs;
+        $this->setQueryTimeoutMs($timeoutMs);
+
+        try {
+            return $callback();
+        } finally {
+            $this->queryTimeoutMs = $previous;
+        }
+    }
+
+    /**
+     * Fail fast when cooperative cancellation requests query abort.
+     */
+    private function assertNotCancelled(): void
+    {
+        if ($this->queryCancellationChecker === null) {
+            return;
+        }
+
+        if (($this->queryCancellationChecker)()) {
+            throw ConnectionException::queryCancelled();
+        }
+    }
+
+    /**
+     * Fail when active timeout/deadline budgets are exceeded.
+     */
+    private function assertWithinQueryBudget(float $startedAt): void
+    {
+        $deadlineAt = $this->resolveEffectiveDeadlineAt($startedAt);
+
+        if ($deadlineAt === null) {
+            return;
+        }
+
+        if (microtime(true) <= $deadlineAt) {
+            return;
+        }
+
+        throw ConnectionException::queryTimeout(microtime(true) - $startedAt);
+    }
+
+    /**
+     * Return healthy read-replica indexes based on cooldown windows.
+     *
+     * @return list<int>
+     */
+    private function availableReadReplicaIndexes(int $count): array
+    {
+        $now = \time();
+        $available = [];
+
+        for ($index = 0; $index < $count; $index++) {
+            $retryAt = $this->readReplicaUnavailableUntil[$index] ?? null;
+
+            if ($retryAt === null || $retryAt <= $now) {
+                unset($this->readReplicaUnavailableUntil[$index]);
+                $available[] = $index;
+            }
+        }
+
+        return $available;
+    }
+
+    /**
+     * Build probe order for read replicas respecting strategy and health suppression.
+     *
+     * @param  list<array<string,mixed>>  $readConfigs
+     * @return list<int>
+     */
+    private function buildReadReplicaProbeOrder(array $readConfigs, string $strategy): array
+    {
+        $count = \count($readConfigs);
+        if ($count <= 1) {
+            return [0];
+        }
+
+        $available = $this->availableReadReplicaIndexes($count);
+        $fallback  = \array_values(\array_diff(\range(0, $count - 1), $available));
+        $pool      = $available !== [] ? $available : \range(0, $count - 1);
+
+        $primary = match ($strategy) {
+            'round_robin' => $this->nextRoundRobinIndexFrom($pool),
+            'weighted' => $this->selectWeightedReadReplicaIndex($pool, $readConfigs),
+            default => $pool[random_int(0, \count($pool) - 1)],
+        };
+
+        $rest = \array_values(\array_diff($pool, [$primary]));
+
+        if (\count($rest) > 1) {
+            \shuffle($rest);
+        }
+
+        if ($fallback !== []) {
+            if (\count($fallback) > 1) {
+                \shuffle($fallback);
+            }
+
+            $rest = \array_merge($rest, $fallback);
+        }
+
+        return \array_values(\array_unique(\array_merge([$primary], $rest)));
+    }
+
+    /**
      * Establish write database connection via the driver.
      */
     private function connect(): void
     {
         try {
-            $this->pdo = $this->driver->createPdo($this->config, false);
+            $config = $this->resolveWriteConnectionConfig();
+            $this->pdo = $this->driver->createPdo($config, false);
         } catch (PDOException $e) {
             throw ConnectionException::connectionFailed(
                 $this->config->getDriver(),
-                $e->getMessage()
+                $e->getMessage(),
             );
         }
     }
@@ -804,23 +1158,35 @@ final class Connection
 
         if ($readConfigs === []) {
             $this->readPdo = null;
+            $this->readReplicaIndex = null;
+            $this->readReplicaLatenciesMs = [];
 
             return;
         }
 
-        $index = \array_rand($readConfigs);
-        $readConfig = $readConfigs[$index];
-
         try {
-            $merged = array_merge($this->config->toArray(), $readConfig);
-            unset($merged['read'], $merged['write']);
-            $config = ConnectionConfig::fromArray($merged);
-
-            $this->readPdo = $this->driver->createPdo($config, true);
+            [$index, $pdo] = $this->resolveReadReplicaPdo($readConfigs);
+            $this->readReplicaIndex = $index;
+            $this->readPdo = $pdo;
         } catch (PDOException|ConnectionException) {
             // Silent fallback to write connection; readPdo stays null.
             $this->readPdo = null;
+            $this->readReplicaIndex = null;
         }
+    }
+
+    /**
+     * Build one read-replica PDO from an override config fragment.
+     *
+     * @param  array<string,mixed>  $readConfig
+     */
+    private function createReadReplicaPdo(array $readConfig): PDO
+    {
+        $merged = array_merge($this->config->toArray(), $readConfig);
+        unset($merged['read'], $merged['write']);
+        $config = ConnectionConfig::fromArray($merged);
+
+        return $this->driver->createPdo($config, true);
     }
 
     /**
@@ -870,15 +1236,15 @@ final class Connection
     }
 
     /**
-     * Get the Transaction wrapper for this connection.
+     * Get transaction manager for this connection.
      */
-    private function getTransactionManager(): Transaction
+    private function getTransactionManager(): TransactionManager
     {
-        if ($this->transaction === null) {
-            $this->transaction = new Transaction($this);
+        if ($this->transactionManager === null) {
+            $this->transactionManager = new TransactionManager();
         }
 
-        return $this->transaction;
+        return $this->transactionManager;
     }
 
     /**
@@ -932,8 +1298,40 @@ final class Connection
         return in_array(
             $firstWord,
             ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'REPLACE'],
-            true
+            true,
         );
+    }
+
+    /**
+     * Mark a read replica as unavailable for a cooldown period.
+     */
+    private function markReadReplicaFailure(int $index): void
+    {
+        $cooldownSeconds = $this->config->getReadHealthCooldown();
+
+        if ($cooldownSeconds <= 0) {
+            return;
+        }
+
+        $this->readReplicaUnavailableUntil[$index] = \time() + $cooldownSeconds;
+    }
+
+    /**
+     * Pick next round-robin replica from an explicit index pool.
+     *
+     * @param  list<int>  $indexes
+     */
+    private function nextRoundRobinIndexFrom(array $indexes): int
+    {
+        $count = \count($indexes);
+        if ($count === 0) {
+            return 0;
+        }
+
+        $slot = $this->readReplicaCursor % $count;
+        $this->readReplicaCursor = ($slot + 1) % $count;
+
+        return $indexes[$slot];
     }
 
     /**
@@ -967,9 +1365,135 @@ final class Connection
 
         if ($isWrite) {
             $this->stats['writes']++;
+            $this->recordsModified = true;
         } else {
             $this->stats['reads']++;
         }
+    }
+
+    /**
+     * Resolve the effective query deadline from absolute and relative budgets.
+     */
+    private function resolveEffectiveDeadlineAt(float $startedAt): ?float
+    {
+        $deadlineAt = $this->queryDeadlineAt;
+
+        if ($this->queryTimeoutMs === null) {
+            return $deadlineAt;
+        }
+
+        $relativeDeadline = $startedAt + ($this->queryTimeoutMs / 1_000.0);
+
+        if ($deadlineAt === null) {
+            return $relativeDeadline;
+        }
+
+        return min($deadlineAt, $relativeDeadline);
+    }
+
+    /**
+     * Resolve the fastest healthy read replica by probing each replica.
+     *
+     * @param  list<array<string,mixed>>  $readConfigs
+     * @return array{0:int,1:PDO}
+     */
+    private function resolveLeastLatencyReadReplica(array $readConfigs): array
+    {
+        $bestIndex   = null;
+        $bestPdo     = null;
+        $bestLatency = \INF;
+        $latencies   = [];
+        $indexes     = $this->availableReadReplicaIndexes(\count($readConfigs));
+
+        if ($indexes === []) {
+            $indexes = \range(0, \count($readConfigs) - 1);
+        }
+
+        foreach ($indexes as $index) {
+            $readConfig = $readConfigs[$index];
+            try {
+                $probeStart = microtime(true);
+                $pdo        = $this->createReadReplicaPdo($readConfig);
+                $pdo->query('SELECT 1');
+                $latencyMs = (microtime(true) - $probeStart) * 1_000.0;
+
+                $latencies[$index] = round($latencyMs, 4);
+                unset($this->readReplicaUnavailableUntil[$index]);
+
+                if ($latencyMs < $bestLatency) {
+                    $bestLatency = $latencyMs;
+                    $bestIndex   = $index;
+                    $bestPdo     = $pdo;
+                }
+            } catch (PDOException|ConnectionException) {
+                $this->markReadReplicaFailure($index);
+                continue;
+            }
+        }
+
+        $this->readReplicaLatenciesMs = $latencies;
+
+        if ($bestIndex === null || ! $bestPdo instanceof PDO) {
+            throw ConnectionException::connectionFailed(
+                $this->config->getDriver(),
+                'No healthy read replica available for least_latency strategy.',
+            );
+        }
+
+        return [$bestIndex, $bestPdo];
+    }
+
+    /**
+     * Resolve one read-replica PDO using configured read strategy.
+     *
+     * @param  list<array<string,mixed>>  $readConfigs
+     * @return array{0:int,1:PDO}
+     */
+    private function resolveReadReplicaPdo(array $readConfigs): array
+    {
+        $strategy = $this->config->getReadStrategy();
+
+        if ($strategy === 'least_latency') {
+            return $this->resolveLeastLatencyReadReplica($readConfigs);
+        }
+
+        $this->readReplicaLatenciesMs = [];
+        $probeOrder = $this->buildReadReplicaProbeOrder($readConfigs, $strategy);
+
+        foreach ($probeOrder as $index) {
+            try {
+                $pdo = $this->createReadReplicaPdo($readConfigs[$index]);
+                unset($this->readReplicaUnavailableUntil[$index]);
+
+                return [$index, $pdo];
+            } catch (PDOException|ConnectionException) {
+                $this->markReadReplicaFailure($index);
+                continue;
+            }
+        }
+
+        throw ConnectionException::connectionFailed(
+            $this->config->getDriver(),
+            'No healthy read replica available.',
+        );
+    }
+
+    /**
+     * Resolve effective write connection config with optional write overrides.
+     */
+    private function resolveWriteConnectionConfig(): ConnectionConfig
+    {
+        $writeConfigs = $this->config->getWriteConfigs();
+
+        if ($writeConfigs === []) {
+            return $this->config;
+        }
+
+        $selected = $writeConfigs[random_int(0, \count($writeConfigs) - 1)];
+        $merged = array_merge($this->config->toArray(), $selected);
+        unset($merged['read'], $merged['write']);
+
+        return ConnectionConfig::fromArray($merged);
     }
 
     /**
@@ -989,5 +1513,87 @@ final class Connection
         $statement->execute();
 
         return $statement;
+    }
+
+    /**
+     * Pick a replica index based on configured weights.
+     *
+     * @param  list<int>  $indexes
+     * @param  list<array<string,mixed>>|null  $readConfigs
+     */
+    private function selectWeightedReadReplicaIndex(array $indexes, ?array $readConfigs = null): int
+    {
+        if ($indexes === []) {
+            return 0;
+        }
+
+        $weights = [];
+        $totalWeight = 0;
+
+        foreach ($indexes as $index) {
+            $weight = 1;
+
+            if ($readConfigs !== null && isset($readConfigs[$index]['weight'])) {
+                $rawWeight = $readConfigs[$index]['weight'];
+
+                if (\is_numeric($rawWeight)) {
+                    $weight = max(1, (int) $rawWeight);
+                }
+            }
+
+            $weights[$index] = $weight;
+            $totalWeight += $weight;
+        }
+
+        if ($totalWeight <= 0) {
+            return $indexes[random_int(0, \count($indexes) - 1)];
+        }
+
+        $ticket = random_int(1, $totalWeight);
+
+        foreach ($weights as $index => $weight) {
+            $ticket -= $weight;
+
+            if ($ticket <= 0) {
+                return (int) $index;
+            }
+        }
+
+        return $indexes[\count($indexes) - 1];
+    }
+
+    /**
+     * Decide whether a failed connection-level query attempt should be retried.
+     *
+     * @param  array<int|string,mixed>  $bindings
+     */
+    private function shouldRetryQuery(PDOException $e, int $attempt, string $sql, array $bindings): bool
+    {
+        if ($attempt >= self::MAX_QUERY_RETRY_ATTEMPTS) {
+            return false;
+        }
+
+        if ($this->queryRetryPolicy !== null) {
+            return (bool) ($this->queryRetryPolicy)($e, $attempt, $sql, $bindings);
+        }
+
+        // Backward-compatible default: a single reconnect retry.
+        return $attempt < 2;
+    }
+
+    /**
+     * Determine whether reads should use the write PDO.
+     */
+    private function shouldUseWritePdoForRead(): bool
+    {
+        if ($this->getTransactionManager()->level($this) > 0) {
+            return true;
+        }
+
+        if (! $this->config->isSticky()) {
+            return false;
+        }
+
+        return $this->recordsModified;
     }
 }

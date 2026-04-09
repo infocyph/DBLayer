@@ -57,6 +57,7 @@ final class ConnectionException extends DBException
         return new self("Database driver [{$driver}] is not supported.");
     }
 
+    #[\Override]
     public static function invalidConfiguration(string $message): static
     {
         return new static('Invalid connection configuration: ' . $message);
@@ -95,7 +96,7 @@ final class ConnectionException extends DBException
     public static function missingExtension(string $extension): self
     {
         return new self(
-            "Required database extension or package [{$extension}] is not installed or enabled."
+            "Required database extension or package [{$extension}] is not installed or enabled.",
         );
     }
 
@@ -105,8 +106,13 @@ final class ConnectionException extends DBException
     public static function poolExhausted(int $maxConnections): self
     {
         return new self(
-            "Connection pool exhausted (max {$maxConnections} connections in use)."
+            "Connection pool exhausted (max {$maxConnections} connections in use).",
         );
+    }
+
+    public static function queryCancelled(string $reason = 'Database query was cancelled.'): self
+    {
+        return new self($reason);
     }
 
     /**
@@ -115,6 +121,13 @@ final class ConnectionException extends DBException
     public static function queryFailed(string $sql, string $error): self
     {
         return new self("Database query failed: {$error}. SQL: {$sql}");
+    }
+
+    public static function queryTimeout(float $seconds): self
+    {
+        $formatted = sprintf('%.4f', $seconds);
+
+        return new self('Database query timeout after ' . $formatted . ' seconds.');
     }
 
     public static function timeout(float $seconds): self

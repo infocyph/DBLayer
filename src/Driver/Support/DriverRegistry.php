@@ -30,12 +30,12 @@ final class DriverRegistry
      */
     private static array $map = [
         // defaults; concrete classes implemented in driver sub-namespaces
-      'mysql'    => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
-      'mariadb'  => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
-      'pgsql'    => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
-      'postgres' => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
-      'sqlite'   => \Infocyph\DBLayer\Driver\SQLite\SQLiteDriver::class,
-      'sqlite3'  => \Infocyph\DBLayer\Driver\SQLite\SQLiteDriver::class,
+        'mysql'    => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
+        'mariadb'  => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
+        'pgsql'    => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
+        'postgres' => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
+        'sqlite'   => \Infocyph\DBLayer\Driver\SQLite\SQLiteDriver::class,
+        'sqlite3'  => \Infocyph\DBLayer\Driver\SQLite\SQLiteDriver::class,
     ];
 
     /**
@@ -69,7 +69,7 @@ final class DriverRegistry
             throw new InvalidArgumentException(sprintf(
                 'Driver class "%s" must implement %s.',
                 $class,
-                DriverInterface::class
+                DriverInterface::class,
             ));
         }
 
@@ -94,7 +94,6 @@ final class DriverRegistry
 
         $class = self::$map[$driver];
 
-        /** @var DriverInterface $instance */
         $instance = new $class();
 
         return self::$cache[$driver] = $instance;

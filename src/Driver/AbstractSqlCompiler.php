@@ -27,6 +27,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
      */
     abstract protected function wrapIdentifier(string $identifier): string;
 
+    #[\Override]
     public function compile(QueryPayload $payload): CompiledQuery
     {
         $type = $payload->type;
@@ -36,8 +37,8 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
                 sprintf(
                     'Only SELECT queries are supported by %s currently (got %s).',
                     static::class,
-                    $type->value
-                )
+                    $type->value,
+                ),
             );
         }
 
@@ -52,7 +53,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
             return '';
         }
 
-        return 'FROM '.$this->wrapIdentifier($payload->table);
+        return 'FROM ' . $this->wrapIdentifier($payload->table);
     }
 
     protected function compileGroupBy(QueryPayload $payload): string
@@ -67,7 +68,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
             $columns[] = $this->wrapIdentifier((string) $column);
         }
 
-        return 'GROUP BY '.implode(', ', $columns);
+        return 'GROUP BY ' . implode(', ', $columns);
     }
 
     protected function compileHavings(QueryPayload $payload): string
@@ -80,7 +81,6 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $first    = true;
 
         foreach ($payload->havings as $having) {
-            /** @var array<string,mixed> $having */
             $column   = (string) ($having['column'] ?? '');
             $operator = (string) ($having['operator'] ?? '=');
             $boolean  = strtolower((string) ($having['boolean'] ?? 'and'));
@@ -93,11 +93,11 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
             $segment = sprintf(
                 '%s %s ?',
                 $this->wrapIdentifier($column),
-                $operator
+                $operator,
             );
 
             if (! $first) {
-                $segments[] = $boolean.' '.$segment;
+                $segments[] = $boolean . ' ' . $segment;
             } else {
                 $segments[] = $segment;
                 $first      = false;
@@ -138,7 +138,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
                     );
                 }
             } elseif (is_object($join) && method_exists($join, '__toString')) {
-                $sql .= ' '.(string) $join;
+                $sql .= ' ' . $join;
             } else {
                 throw new LogicException('Unsupported JOIN representation in payload.');
             }
@@ -159,7 +159,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $sql = '';
 
         if ($limit !== null) {
-            $sql .= 'LIMIT '.$limit;
+            $sql .= 'LIMIT ' . $limit;
         }
 
         if ($offset !== null) {
@@ -167,7 +167,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
                 $sql .= ' ';
             }
 
-            $sql .= 'OFFSET '.$offset;
+            $sql .= 'OFFSET ' . $offset;
         }
 
         return $sql;
@@ -182,7 +182,6 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $segments = [];
 
         foreach ($payload->orders as $order) {
-            /** @var array{column:string,direction:string} $order */
             $column    = $order['column'];
             $direction = strtoupper($order['direction']);
 
@@ -193,11 +192,11 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
             $segments[] = sprintf(
                 '%s %s',
                 $this->wrapIdentifier($column),
-                $direction
+                $direction,
             );
         }
 
-        return 'ORDER BY '.implode(', ', $segments);
+        return 'ORDER BY ' . implode(', ', $segments);
     }
 
     /**
@@ -217,7 +216,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
         $where = $this->compileWheres($payload);
         if ($where !== '') {
-            $sqlParts[] = 'WHERE '.$where;
+            $sqlParts[] = 'WHERE ' . $where;
         }
 
         $groupBy = $this->compileGroupBy($payload);
@@ -227,7 +226,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
         $having = $this->compileHavings($payload);
         if ($having !== '') {
-            $sqlParts[] = 'HAVING '.$having;
+            $sqlParts[] = 'HAVING ' . $having;
         }
 
         $orderBy = $this->compileOrderBy($payload);
@@ -284,7 +283,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
             }
         }
 
-        return 'SELECT '.implode(', ', $parts);
+        return 'SELECT ' . implode(', ', $parts);
     }
 
     /**
@@ -302,7 +301,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         return sprintf(
             '%s %s ?',
             $this->wrapIdentifier($column),
-            $operator
+            $operator,
         );
     }
 
@@ -323,7 +322,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         return sprintf(
             '%s %sBETWEEN ? AND ?',
             $this->wrapIdentifier($column),
-            $not ? 'NOT ' : ''
+            $not ? 'NOT ' : '',
         );
     }
 
@@ -347,7 +346,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
             '%s %sIN (%s)',
             $this->wrapIdentifier($column),
             $not ? 'NOT ' : '',
-            $placeholders
+            $placeholders,
         );
     }
 
@@ -366,7 +365,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         return sprintf(
             '%s IS %sNULL',
             $this->wrapIdentifier($column),
-            $not ? 'NOT ' : ''
+            $not ? 'NOT ' : '',
         );
     }
 
@@ -388,7 +387,6 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $first    = true;
 
         foreach ($payload->wheres as $where) {
-            /** @var array<string,mixed> $where */
             $type    = $where['type'] ?? 'basic';
             $boolean = strtolower((string) ($where['boolean'] ?? 'and'));
 
@@ -408,7 +406,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
             }
 
             if (! $first) {
-                $segments[] = $boolean.' '.$segment;
+                $segments[] = $boolean . ' ' . $segment;
             } else {
                 $segments[] = $segment;
                 $first      = false;

@@ -22,11 +22,11 @@ final class HealthCheck
      *
      * @var array{check_interval:int,max_latency_ms:int,max_error_rate:float,sample_size:int}
      */
-    private const DEFAULTS = [
-      'check_interval' => 30,
-      'max_latency_ms' => 1_000,
-      'max_error_rate' => 0.1,
-      'sample_size'    => 100,
+    private const array DEFAULTS = [
+        'check_interval' => 30,
+        'max_latency_ms' => 1_000,
+        'max_error_rate' => 0.1,
+        'sample_size'    => 100,
     ];
 
     /**
@@ -35,11 +35,6 @@ final class HealthCheck
      * @var array{check_interval:int,max_latency_ms:int,max_error_rate:float,sample_size:int}
      */
     private array $config;
-
-    /**
-     * Connection to monitor.
-     */
-    private Connection $connection;
 
     /**
      * Health metrics.
@@ -55,13 +50,13 @@ final class HealthCheck
      * }
      */
     private array $metrics = [
-      'last_check'    => null,
-      'is_healthy'    => true,
-      'latency_ms'    => 0.0,
-      'error_rate'    => 0.0,
-      'total_checks'  => 0,
-      'failed_checks' => 0,
-      'last_error'    => null,
+        'last_check'    => null,
+        'is_healthy'    => true,
+        'latency_ms'    => 0.0,
+        'error_rate'    => 0.0,
+        'total_checks'  => 0,
+        'failed_checks' => 0,
+        'last_error'    => null,
     ];
 
     /**
@@ -76,17 +71,19 @@ final class HealthCheck
      *
      * @param  array<string,mixed>  $config
      */
-    public function __construct(Connection $connection, array $config = [])
-    {
-        $this->connection = $connection;
-
+    public function __construct(/**
+     * Connection to monitor.
+     */
+        private readonly Connection $connection,
+        array $config = [],
+    ) {
         $merged = array_merge(self::DEFAULTS, $config);
 
         $this->config = [
-          'check_interval' => (int) $merged['check_interval'],
-          'max_latency_ms' => (int) $merged['max_latency_ms'],
-          'max_error_rate' => (float) $merged['max_error_rate'],
-          'sample_size'    => (int) $merged['sample_size'],
+            'check_interval' => (int) $merged['check_interval'],
+            'max_latency_ms' => (int) $merged['max_latency_ms'],
+            'max_error_rate' => (float) $merged['max_error_rate'],
+            'sample_size'    => (int) $merged['sample_size'],
         ];
     }
 
@@ -109,7 +106,7 @@ final class HealthCheck
             // Check latency threshold.
             if ($latency > $this->config['max_latency_ms']) {
                 $this->metrics['is_healthy'] = false;
-                $this->metrics['last_error'] = 'High latency: '.round($latency, 2).'ms';
+                $this->metrics['last_error'] = 'High latency: ' . round($latency, 2) . 'ms';
 
                 return false;
             }
@@ -122,7 +119,7 @@ final class HealthCheck
 
                 if ($errorRate > $this->config['max_error_rate']) {
                     $this->metrics['is_healthy'] = false;
-                    $this->metrics['last_error'] = 'High error rate: '.round($errorRate * 100, 2).'%';
+                    $this->metrics['last_error'] = 'High error rate: ' . round($errorRate * 100, 2) . '%';
 
                     return false;
                 }
@@ -176,13 +173,13 @@ final class HealthCheck
     {
         if ($this->samples === []) {
             return [
-              'avg_duration' => 0.0,
-              'min_duration' => 0.0,
-              'max_duration' => 0.0,
-              'p50_duration' => 0.0,
-              'p95_duration' => 0.0,
-              'p99_duration' => 0.0,
-              'success_rate' => 0.0,
+                'avg_duration' => 0.0,
+                'min_duration' => 0.0,
+                'max_duration' => 0.0,
+                'p50_duration' => 0.0,
+                'p95_duration' => 0.0,
+                'p99_duration' => 0.0,
+                'success_rate' => 0.0,
             ];
         }
 
@@ -201,13 +198,13 @@ final class HealthCheck
         $avg = array_sum($durations) / count($durations);
 
         return [
-          'avg_duration' => round($avg, 4),
-          'min_duration' => round((float) min($durations), 4),
-          'max_duration' => round((float) max($durations), 4),
-          'p50_duration' => round($this->percentile($durations, 50.0), 4),
-          'p95_duration' => round($this->percentile($durations, 95.0), 4),
-          'p99_duration' => round($this->percentile($durations, 99.0), 4),
-          'success_rate' => round($successes / $count, 4),
+            'avg_duration' => round($avg, 4),
+            'min_duration' => round(min($durations), 4),
+            'max_duration' => round(max($durations), 4),
+            'p50_duration' => round($this->percentile($durations, 50.0), 4),
+            'p95_duration' => round($this->percentile($durations, 95.0), 4),
+            'p99_duration' => round($this->percentile($durations, 99.0), 4),
+            'success_rate' => round($successes / $count, 4),
         ];
     }
 
@@ -225,11 +222,11 @@ final class HealthCheck
     public function getReport(): array
     {
         return [
-          'status'           => $this->getStatus(),
-          'metrics'          => $this->getMetrics(),
-          'performance'      => $this->getPerformanceStats(),
-          'connection_stats' => $this->connection->getStats(),
-          'config'           => $this->config,
+            'status'           => $this->getStatus(),
+            'metrics'          => $this->getMetrics(),
+            'performance'      => $this->getPerformanceStats(),
+            'connection_stats' => $this->connection->getStats(),
+            'config'           => $this->config,
         ];
     }
 
@@ -270,9 +267,9 @@ final class HealthCheck
     public function recordSample(float $duration, bool $success): void
     {
         $this->samples[] = [
-          'duration'  => $duration,
-          'success'   => $success,
-          'timestamp' => microtime(true),
+            'duration'  => $duration,
+            'success'   => $success,
+            'timestamp' => microtime(true),
         ];
 
         // Keep only recent samples.
@@ -287,13 +284,13 @@ final class HealthCheck
     public function reset(): void
     {
         $this->metrics = [
-          'last_check'    => null,
-          'is_healthy'    => true,
-          'latency_ms'    => 0.0,
-          'error_rate'    => 0.0,
-          'total_checks'  => 0,
-          'failed_checks' => 0,
-          'last_error'    => null,
+            'last_check'    => null,
+            'is_healthy'    => true,
+            'latency_ms'    => 0.0,
+            'error_rate'    => 0.0,
+            'total_checks'  => 0,
+            'failed_checks' => 0,
+            'last_error'    => null,
         ];
 
         $this->samples = [];

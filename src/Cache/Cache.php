@@ -46,10 +46,10 @@ final class Cache
      * }
      */
     private array $stats = [
-      'hits'    => 0,
-      'misses'  => 0,
-      'writes'  => 0,
-      'deletes' => 0,
+        'hits'    => 0,
+        'misses'  => 0,
+        'writes'  => 0,
+        'deletes' => 0,
     ];
 
     /**
@@ -244,13 +244,13 @@ final class Cache
         $hitRate = $total > 0 ? ($this->stats['hits'] / $total) * 100 : 0.0;
 
         return [
-          'hits'           => $this->stats['hits'],
-          'misses'         => $this->stats['misses'],
-          'writes'         => $this->stats['writes'],
-          'deletes'        => $this->stats['deletes'],
-          'total_requests' => $total,
-          'hit_rate'       => round($hitRate, 2),
-          'miss_rate'      => round(100 - $hitRate, 2),
+            'hits'           => $this->stats['hits'],
+            'misses'         => $this->stats['misses'],
+            'writes'         => $this->stats['writes'],
+            'deletes'        => $this->stats['deletes'],
+            'total_requests' => $total,
+            'hit_rate'       => round($hitRate, 2),
+            'miss_rate'      => round(100 - $hitRate, 2),
         ];
     }
 
@@ -304,7 +304,7 @@ final class Cache
         }
 
         $key = $this->makeKey($key);
-        $ttl = $ttl ?? $this->defaultTtl;
+        $ttl ??= $this->defaultTtl;
 
         if ($ttl < 0) {
             $ttl = 0;
@@ -361,10 +361,10 @@ final class Cache
     public function resetStats(): void
     {
         $this->stats = [
-          'hits'    => 0,
-          'misses'  => 0,
-          'writes'  => 0,
-          'deletes' => 0,
+            'hits'    => 0,
+            'misses'  => 0,
+            'writes'  => 0,
+            'deletes' => 0,
         ];
     }
 

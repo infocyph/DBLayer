@@ -1,12 +1,12 @@
 <?php
 
-declare(strict_types=1);
-
 /**
  * DBLayer Helper Functions
  *
  * Global helper functions for database operations.
  */
+
+declare(strict_types=1);
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
@@ -235,7 +235,6 @@ if (! function_exists('data_get_resolve_segment')) {
     /**
      * Resolve one segment lookup for data_get().
      *
-     * @param  string|int  $segment
      * @return array{exists:bool,value:mixed}
      */
     function data_get_resolve_segment(mixed $target, string|int $segment): array
@@ -249,14 +248,14 @@ if (! function_exists('data_get_resolve_segment')) {
         }
 
         if ($target instanceof ArrayAccess) {
-            if (! isset($target[$segment])) {
+            if (! $target->offsetExists($segment)) {
                 return ['exists' => false, 'value' => null];
             }
 
             return ['exists' => true, 'value' => $target[$segment]];
         }
 
-        if (is_object($target) && isset($target->{$segment})) {
+        if (is_object($target) && property_exists($target, (string) $segment)) {
             return ['exists' => true, 'value' => $target->{$segment}];
         }
 
@@ -278,30 +277,59 @@ if (! function_exists('data_set')) {
         }
 
         if ($segments === []) {
-            if (! $overwrite && is_array($target) && array_key_exists($segment, $target)) {
-                return $target;
+            data_set_assign_leaf($target, (string) $segment, $value, $overwrite);
+            return $target;
+        }
+
+        if (is_object($target)) {
+            if (! property_exists($target, (string) $segment) || $target->{$segment} === null) {
+                $target->{$segment} = [];
             }
 
-            if (! is_array($target)) {
-                $target = [];
-            }
-
-            $target[$segment] = $value;
+            data_set($target->{$segment}, $segments, $value, $overwrite);
 
             return $target;
         }
 
-        if (! is_array($target) || ! array_key_exists($segment, $target)) {
-            if (! is_array($target)) {
-                $target = [];
-            }
+        if (! is_array($target)) {
+            $target = [];
+        }
 
+        if (! array_key_exists($segment, $target) || $target[$segment] === null) {
             $target[$segment] = [];
         }
 
         data_set($target[$segment], $segments, $value, $overwrite);
 
         return $target;
+    }
+}
+
+if (! function_exists('data_set_assign_leaf')) {
+    /**
+     * Assign final dot-segment while preserving array/object target shape.
+     */
+    function data_set_assign_leaf(mixed &$target, string $segment, mixed $value, bool $overwrite): void
+    {
+        if (is_object($target)) {
+            if (! $overwrite && property_exists($target, $segment)) {
+                return;
+            }
+
+            $target->{$segment} = $value;
+
+            return;
+        }
+
+        if (! is_array($target)) {
+            $target = [];
+        }
+
+        if (! $overwrite && array_key_exists($segment, $target)) {
+            return;
+        }
+
+        $target[$segment] = $value;
     }
 }
 
@@ -323,7 +351,7 @@ if (! function_exists('array_all')) {
      */
     function array_all(array $array, callable $callback): bool
     {
-        return array_all($array, fn ($value, $key) => $callback($value, $key));
+        return array_all($array, fn($value, $key) => $callback($value, $key));
     }
 }
 
@@ -333,7 +361,7 @@ if (! function_exists('class_basename')) {
      */
     function class_basename(string|object $class): string
     {
-        $class = is_object($class) ? get_class($class) : $class;
+        $class = is_object($class) ? $class::class : $class;
 
         return basename(str_replace('\\', '/', $class));
     }
@@ -346,7 +374,7 @@ if (! function_exists('class_uses_recursive')) {
     function class_uses_recursive(object|string $class): array
     {
         if (is_object($class)) {
-            $class = get_class($class);
+            $class = $class::class;
         }
 
         $results = [];
@@ -469,7 +497,7 @@ if (! function_exists('rescue')) {
             return $callback();
         } catch (Throwable $e) {
             if ($report) {
-                // Hook for logging if needed.
+                error_log((string) $e);
             }
 
             return value($rescue);
@@ -515,7 +543,7 @@ if (! function_exists('now')) {
             'now',
             $tz instanceof DateTimeZone
             ? $tz
-            : new DateTimeZone($tz ?? date_default_timezone_get())
+            : new DateTimeZone($tz ?? date_default_timezone_get()),
         );
     }
 }

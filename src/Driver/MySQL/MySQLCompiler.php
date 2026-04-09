@@ -14,6 +14,7 @@ use Infocyph\DBLayer\Driver\AbstractSqlCompiler;
  */
 final class MySQLCompiler extends AbstractSqlCompiler
 {
+    #[\Override]
     protected function wrapIdentifier(string $identifier): string
     {
         $identifier = trim($identifier);
@@ -30,8 +31,8 @@ final class MySQLCompiler extends AbstractSqlCompiler
         $parts = explode('.', $identifier);
 
         $wrapped = array_map(
-            static fn (string $part): string => $part === '*' ? '*' : sprintf('`%s`', $part),
-            $parts
+            static fn(string $part): string => $part === '*' ? '*' : sprintf('`%s`', $part),
+            $parts,
         );
 
         return implode('.', $wrapped);

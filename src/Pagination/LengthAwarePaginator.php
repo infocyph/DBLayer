@@ -16,7 +16,7 @@ final class LengthAwarePaginator extends AbstractPaginator
     /**
      * Total matching items.
      */
-    private int $total;
+    private readonly int $total;
 
     /**
      * @param list<mixed> $items
@@ -28,12 +28,14 @@ final class LengthAwarePaginator extends AbstractPaginator
         $this->total = max(0, $total);
     }
 
+    #[\Override]
     public function hasMorePages(): bool
     {
         return $this->currentPage < $this->lastPage();
     }
 
-    public function lastPage(): ?int
+    #[\Override]
+    public function lastPage(): int
     {
         if ($this->total === 0) {
             return 1;
@@ -45,32 +47,35 @@ final class LengthAwarePaginator extends AbstractPaginator
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     public function meta(): array
     {
         return [
-          'current_page' => $this->currentPage(),
-          'per_page'     => $this->perPage(),
-          'total'        => $this->total(),
-          'last_page'    => $this->lastPage(),
-          'from'         => $this->firstItem(),
-          'to'           => $this->lastItem(),
-          'count'        => $this->count(),
-          'has_more'     => $this->hasMorePages(),
+            'current_page' => $this->currentPage(),
+            'per_page'     => $this->perPage(),
+            'total'        => $this->total(),
+            'last_page'    => $this->lastPage(),
+            'from'         => $this->firstItem(),
+            'to'           => $this->lastItem(),
+            'count'        => $this->count(),
+            'has_more'     => $this->hasMorePages(),
         ];
     }
 
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     public function toArray(): array
     {
         return [
-          'data' => $this->items(),
-          'meta' => $this->meta(),
+            'data' => $this->items(),
+            'meta' => $this->meta(),
         ];
     }
 
-    public function total(): ?int
+    #[\Override]
+    public function total(): int
     {
         return $this->total;
     }

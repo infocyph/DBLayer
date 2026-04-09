@@ -13,8 +13,6 @@ namespace Infocyph\DBLayer\Pagination;
  */
 final class SimplePaginator extends AbstractPaginator
 {
-    private bool $hasMore;
-
     /**
      * @param list<mixed> $items
      */
@@ -22,18 +20,18 @@ final class SimplePaginator extends AbstractPaginator
         array $items,
         int $perPage,
         int $currentPage = 1,
-        bool $hasMore = false
+        private readonly bool $hasMore = false,
     ) {
         parent::__construct($items, $perPage, $currentPage);
-
-        $this->hasMore = $hasMore;
     }
 
+    #[\Override]
     public function hasMorePages(): bool
     {
         return $this->hasMore;
     }
 
+    #[\Override]
     public function lastPage(): ?int
     {
         return null;
@@ -42,31 +40,34 @@ final class SimplePaginator extends AbstractPaginator
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     public function meta(): array
     {
         return [
-          'current_page' => $this->currentPage(),
-          'per_page'     => $this->perPage(),
-          'total'        => null,
-          'last_page'    => null,
-          'from'         => $this->firstItem(),
-          'to'           => $this->lastItem(),
-          'count'        => $this->count(),
-          'has_more'     => $this->hasMorePages(),
+            'current_page' => $this->currentPage(),
+            'per_page'     => $this->perPage(),
+            'total'        => null,
+            'last_page'    => null,
+            'from'         => $this->firstItem(),
+            'to'           => $this->lastItem(),
+            'count'        => $this->count(),
+            'has_more'     => $this->hasMorePages(),
         ];
     }
 
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     public function toArray(): array
     {
         return [
-          'data' => $this->items(),
-          'meta' => $this->meta(),
+            'data' => $this->items(),
+            'meta' => $this->meta(),
         ];
     }
 
+    #[\Override]
     public function total(): ?int
     {
         return null;

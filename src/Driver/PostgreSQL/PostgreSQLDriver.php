@@ -14,11 +14,13 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
  */
 final class PostgreSQLDriver extends AbstractPdoDriver
 {
+    #[\Override]
     public function createCompiler(): QueryCompilerInterface
     {
         return new PostgreSQLCompiler();
     }
 
+    #[\Override]
     public function getCapabilities(): Capabilities
     {
         return new Capabilities(
@@ -32,6 +34,7 @@ final class PostgreSQLDriver extends AbstractPdoDriver
         );
     }
 
+    #[\Override]
     public function getName(): string
     {
         return 'pgsql';
@@ -43,6 +46,7 @@ final class PostgreSQLDriver extends AbstractPdoDriver
      * @param  array<string,mixed>  $config
      * @return array<string,mixed>
      */
+    #[\Override]
     public function mergeDefaults(array $config): array
     {
         $config = parent::mergeDefaults($config);
@@ -55,6 +59,7 @@ final class PostgreSQLDriver extends AbstractPdoDriver
     /**
      * @param  array<string,mixed>  $config
      */
+    #[\Override]
     public function validateConfig(array $config): void
     {
         $driver = $this->getName();
@@ -65,14 +70,12 @@ final class PostgreSQLDriver extends AbstractPdoDriver
         if (! is_string($database) || $database === '') {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                'Missing or empty "database" for PostgreSQL connection.'
             );
         }
 
         if (! is_string($host) || $host === '') {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                'Missing or empty "host" for PostgreSQL connection.'
             );
         }
 
@@ -80,7 +83,6 @@ final class PostgreSQLDriver extends AbstractPdoDriver
             if (! is_int($config['port']) && ! ctype_digit((string) $config['port'])) {
                 throw ConnectionException::invalidConfiguration(
                     $driver,
-                    '"port" must be an integer for PostgreSQL connection.'
                 );
             }
         }
@@ -88,7 +90,6 @@ final class PostgreSQLDriver extends AbstractPdoDriver
         if (isset($config['schema']) && ! is_string($config['schema'])) {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                '"schema" must be a string for PostgreSQL connection.'
             );
         }
     }
@@ -98,6 +99,7 @@ final class PostgreSQLDriver extends AbstractPdoDriver
      *
      * @param  array<string,mixed>  $config
      */
+    #[\Override]
     protected function buildDsn(array $config, bool $readOnly): string
     {
         unset($readOnly); // handled at transaction-level
@@ -110,13 +112,13 @@ final class PostgreSQLDriver extends AbstractPdoDriver
             'pgsql:host=%s;port=%d;dbname=%s',
             $host,
             $port,
-            $database
+            $database,
         );
 
         // Allow sslmode to be passed (if provided).
         if (! empty($config['sslmode'])) {
             $sslmode = (string) $config['sslmode'];
-            $dsn .= ';sslmode='.$sslmode;
+            $dsn .= ';sslmode=' . $sslmode;
         }
 
         return $dsn;

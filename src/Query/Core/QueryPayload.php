@@ -41,8 +41,7 @@ final readonly class QueryPayload
         public ?string $lock,
         public ?array $aggregate,
         public array $bindings,
-    ) {
-    }
+    ) {}
 
     /**
      * Lightweight clone with overridden pieces.

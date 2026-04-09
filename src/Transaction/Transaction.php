@@ -6,6 +6,10 @@ namespace Infocyph\DBLayer\Transaction;
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Driver\Support\DriverProfile;
+use Infocyph\DBLayer\Events\DatabaseEvents\TransactionBeginning;
+use Infocyph\DBLayer\Events\DatabaseEvents\TransactionCommitted;
+use Infocyph\DBLayer\Events\DatabaseEvents\TransactionRolledBack;
+use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\TransactionException;
 use Throwable;
 
@@ -21,17 +25,12 @@ final class Transaction
     /**
      * Base backoff in microseconds for deadlock retries.
      */
-    private const BASE_BACKOFF_US = 100_000;
+    private const int BASE_BACKOFF_US = 100_000;
 
     /**
      * Maximum number of retry attempts for deadlocks.
      */
-    private const MAX_ATTEMPTS = 3;
-
-    /**
-     * Underlying connection.
-     */
-    private Connection $connection;
+    private const int MAX_ATTEMPTS = 3;
 
     /**
      * Current nesting level.
@@ -59,21 +58,23 @@ final class Transaction
      * }
      */
     private array $stats = [
-      'total'           => 0,
-      'committed'       => 0,
-      'rolled_back'     => 0,
-      'deadlocks'       => 0,
-      'timeouts'        => 0,
-      'in_transaction'  => false,
-      'current_level'   => 0,
-      'savepoints'      => 0,
-      'elapsed_time'    => 0.0,
+        'total'           => 0,
+        'committed'       => 0,
+        'rolled_back'     => 0,
+        'deadlocks'       => 0,
+        'timeouts'        => 0,
+        'in_transaction'  => false,
+        'current_level'   => 0,
+        'savepoints'      => 0,
+        'elapsed_time'    => 0.0,
     ];
 
-    public function __construct(Connection $connection)
-    {
-        $this->connection = $connection;
-    }
+    public function __construct(
+        /**
+         * Underlying connection.
+         */
+        private readonly Connection $connection,
+    ) {}
 
     /**
      * Begin a new transaction or create a savepoint for nested transactions.
@@ -85,6 +86,7 @@ final class Transaction
             $this->stats['total']++;
             $this->stats['in_transaction'] = true;
             $this->startedAt               = microtime(true);
+            Events::dispatch('db.transaction.beginning', [new TransactionBeginning($this->connection)]);
         } else {
             $this->createSavepoint($this->level);
             $this->stats['savepoints']++;
@@ -110,7 +112,11 @@ final class Transaction
         if ($this->level === 0) {
             $this->connection->commit();
             $this->stats['committed']++;
+            $durationMs = $this->transactionDurationMs();
             $this->finishTopLevel();
+            Events::dispatch('db.transaction.committed', [
+                new TransactionCommitted($this->connection, $durationMs),
+            ]);
         } else {
             $this->releaseSavepoint($this->level);
         }
@@ -201,15 +207,15 @@ final class Transaction
     public function resetStats(): void
     {
         $this->stats = [
-          'total'           => 0,
-          'committed'       => 0,
-          'rolled_back'     => 0,
-          'deadlocks'       => 0,
-          'timeouts'        => 0,
-          'in_transaction'  => $this->level > 0,
-          'current_level'   => $this->level,
-          'savepoints'      => 0,
-          'elapsed_time'    => 0.0,
+            'total'           => 0,
+            'committed'       => 0,
+            'rolled_back'     => 0,
+            'deadlocks'       => 0,
+            'timeouts'        => 0,
+            'in_transaction'  => $this->level > 0,
+            'current_level'   => $this->level,
+            'savepoints'      => 0,
+            'elapsed_time'    => 0.0,
         ];
 
         $this->startedAt = $this->level > 0 ? (microtime(true)) : null;
@@ -230,7 +236,11 @@ final class Transaction
         if ($this->level === 0) {
             $this->connection->rollBack();
             $this->stats['rolled_back']++;
+            $durationMs = $this->transactionDurationMs();
             $this->finishTopLevel();
+            Events::dispatch('db.transaction.rolled_back', [
+                new TransactionRolledBack($this->connection, $durationMs),
+            ]);
         } else {
             $this->rollbackToSavepoint($this->level);
         }
@@ -267,7 +277,7 @@ final class Transaction
             return;
         }
 
-        $this->connection->statement('SAVEPOINT trans_'.$level);
+        $this->connection->statement('SAVEPOINT trans_' . $level);
     }
 
     /**
@@ -294,7 +304,7 @@ final class Transaction
             return;
         }
 
-        $this->connection->statement('RELEASE SAVEPOINT trans_'.$level);
+        $this->connection->statement('RELEASE SAVEPOINT trans_' . $level);
     }
 
     /**
@@ -308,6 +318,18 @@ final class Transaction
             return;
         }
 
-        $this->connection->statement('ROLLBACK TO SAVEPOINT trans_'.$level);
+        $this->connection->statement('ROLLBACK TO SAVEPOINT trans_' . $level);
+    }
+
+    /**
+     * Get elapsed transaction duration in milliseconds for current top-level tx.
+     */
+    private function transactionDurationMs(): float
+    {
+        if ($this->startedAt === null) {
+            return 0.0;
+        }
+
+        return (microtime(true) - $this->startedAt) * 1_000.0;
     }
 }

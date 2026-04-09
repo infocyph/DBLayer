@@ -44,8 +44,8 @@ final class Events
      * @var array{dispatched:int,queued:int}
      */
     private static array $stats = [
-      'dispatched' => 0,
-      'queued'     => 0,
+        'dispatched' => 0,
+        'queued'     => 0,
     ];
 
     /**
@@ -165,7 +165,7 @@ final class Events
     {
         return \array_values(\array_merge(
             \array_keys(self::$listeners),
-            \array_keys(self::$wildcardListeners)
+            \array_keys(self::$wildcardListeners),
         ));
     }
 
@@ -176,7 +176,6 @@ final class Events
      */
     public static function getListeners(string $event): array
     {
-        /** @var list<callable> */
         return self::$listeners[$event] ?? [];
     }
 
@@ -193,15 +192,15 @@ final class Events
      */
     public static function getStats(): array
     {
-        $totalListeners = \array_sum(\array_map('count', self::$listeners))
-          + \array_sum(\array_map('count', self::$wildcardListeners));
+        $totalListeners = \array_sum(\array_map(count(...), self::$listeners))
+          + \array_sum(\array_map(count(...), self::$wildcardListeners));
 
         return [
-          'dispatched'        => self::$stats['dispatched'],
-          'queued'            => self::$stats['queued'],
-          'registered_events' => \count(self::$listeners) + \count(self::$wildcardListeners),
-          'queued_events'     => \count(self::$queue),
-          'total_listeners'   => $totalListeners,
+            'dispatched'        => self::$stats['dispatched'],
+            'queued'            => self::$stats['queued'],
+            'registered_events' => \count(self::$listeners) + \count(self::$wildcardListeners),
+            'queued_events'     => \count(self::$queue),
+            'total_listeners'   => $totalListeners,
         ];
     }
 
@@ -238,15 +237,14 @@ final class Events
     /**
      * Queue an event for later dispatch.
      *
-     * @param string           $event
      * @param array<int,mixed> $payload
      */
     public static function queue(string $event, array $payload = []): void
     {
         self::$queue[] = [
-          'event'   => $event,
-          'payload' => $payload,
-          'time'    => microtime(true),
+            'event'   => $event,
+            'payload' => $payload,
+            'time'    => microtime(true),
         ];
 
         self::$stats['queued']++;
@@ -258,8 +256,8 @@ final class Events
     public static function resetStats(): void
     {
         self::$stats = [
-          'dispatched' => 0,
-          'queued'     => 0,
+            'dispatched' => 0,
+            'queued'     => 0,
         ];
     }
 
@@ -308,6 +306,10 @@ final class Events
         }
 
         $bucket[$event] = \array_values($bucket[$event]);
+
+        if ($bucket[$event] === []) {
+            unset($bucket[$event]);
+        }
     }
 
     /**

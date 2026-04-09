@@ -35,6 +35,7 @@ interface PaginatorInterface extends Countable, IteratorAggregate, JsonSerializa
      *
      * @return Traversable<int, mixed>
      */
+    #[\Override]
     public function getIterator(): Traversable;
 
     /**

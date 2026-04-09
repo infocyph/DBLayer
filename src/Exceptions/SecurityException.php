@@ -9,6 +9,7 @@ namespace Infocyph\DBLayer\Exceptions;
  */
 final class SecurityException extends DBException
 {
+    #[\Override]
     public static function invalidConfiguration(string $message): static
     {
         return new static('Invalid security configuration: ' . $message);
@@ -17,21 +18,21 @@ final class SecurityException extends DBException
     public static function rateLimitExceeded(
         string $key,
         int $maxAttempts,
-        int $ttlSeconds
+        int $ttlSeconds,
     ): self {
         return new self(
-            "Rate limit exceeded for key [{$key}]: max {$maxAttempts} attempts within {$ttlSeconds} seconds."
+            "Rate limit exceeded for key [{$key}]: max {$maxAttempts} attempts within {$ttlSeconds} seconds.",
         );
     }
 
     public static function sqlInjectionDetected(string $pattern, string $fragment): self
     {
         return new self(
-            'Potential SQL injection detected using pattern [' .
-          $pattern .
-          '] in fragment [' .
-          $fragment .
-          '].'
+            'Potential SQL injection detected using pattern ['
+            . $pattern
+            . '] in fragment ['
+            . $fragment
+            . '].',
         );
     }
 

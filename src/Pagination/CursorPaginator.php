@@ -16,37 +16,27 @@ namespace Infocyph\DBLayer\Pagination;
 final class CursorPaginator extends AbstractPaginator
 {
     /**
-     * Cursor used to generate this page (opaque).
-     */
-    private ?string $cursor;
-
-    /**
-     * Whether there is a next page.
-     */
-    private bool $hasMore;
-
-    /**
-     * Cursor for the next page (opaque).
-     */
-    private ?string $nextCursor;
-
-    /**
      * @param list<mixed> $items
      */
     public function __construct(
         array $items,
         int $perPage,
-        ?string $cursor,
-        ?string $nextCursor,
-        bool $hasMore
+        /**
+         * Cursor used to generate this page (opaque).
+         */
+        private readonly ?string $cursor,
+        /**
+         * Cursor for the next page (opaque).
+         */
+        private readonly ?string $nextCursor,
+        /**
+         * Whether there is a next page.
+         */
+        private readonly bool $hasMore,
     ) {
         // Page number is mostly meaningless for cursor-based pagination,
         // but we keep it as 1 for interface compatibility.
-        parent::__construct($items, $perPage, 1);
-
-        $this->cursor     = $cursor;
-        $this->nextCursor = $nextCursor;
-        $this->hasMore    = $hasMore;
+        parent::__construct($items, $perPage);
     }
 
     public function cursor(): ?string
@@ -54,11 +44,13 @@ final class CursorPaginator extends AbstractPaginator
         return $this->cursor;
     }
 
+    #[\Override]
     public function hasMorePages(): bool
     {
         return $this->hasMore;
     }
 
+    #[\Override]
     public function lastPage(): ?int
     {
         return null;
@@ -67,14 +59,15 @@ final class CursorPaginator extends AbstractPaginator
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     public function meta(): array
     {
         return [
-          'cursor'      => $this->cursor(),
-          'next_cursor' => $this->nextCursor(),
-          'per_page'    => $this->perPage(),
-          'count'       => $this->count(),
-          'has_more'    => $this->hasMorePages(),
+            'cursor'      => $this->cursor(),
+            'next_cursor' => $this->nextCursor(),
+            'per_page'    => $this->perPage(),
+            'count'       => $this->count(),
+            'has_more'    => $this->hasMorePages(),
         ];
     }
 
@@ -86,14 +79,16 @@ final class CursorPaginator extends AbstractPaginator
     /**
      * @return array<string, mixed>
      */
+    #[\Override]
     public function toArray(): array
     {
         return [
-          'data' => $this->items(),
-          'meta' => $this->meta(),
+            'data' => $this->items(),
+            'meta' => $this->meta(),
         ];
     }
 
+    #[\Override]
     public function total(): ?int
     {
         return null;

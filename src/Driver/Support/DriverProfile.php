@@ -30,10 +30,10 @@ final class DriverProfile
      *
      * @var array<string,list<string>>
      */
-    private const DEADLOCK_ERROR_CODES = [
+    private const array DEADLOCK_ERROR_CODES = [
         // MySQL / MariaDB: ER_LOCK_DEADLOCK
-      'mysql'   => ['1213'],
-      'mariadb' => ['1213'],
+        'mysql'   => ['1213'],
+        'mariadb' => ['1213'],
         // PostgreSQL typically uses only SQLSTATE for deadlock ⇒ no extra here
     ];
 
@@ -42,30 +42,30 @@ final class DriverProfile
      *
      * @var array<string,list<string>>
      */
-    private const DEADLOCK_MESSAGE_HINTS = [
-      'mysql' => [
-        'deadlock found when trying to get lock',
-        'lock wait timeout exceeded; try restarting transaction',
-        'deadlock',
-      ],
-      'mariadb' => [
-        'deadlock',
-      ],
-      'pgsql' => [
-        'deadlock detected',
-        'deadlock',
-      ],
-      'postgres' => [
-        'deadlock detected',
-        'deadlock',
-      ],
-      'sqlite' => [
-        'database is locked',
-        'deadlock',
-      ],
-      'default' => [
-        'deadlock',
-      ],
+    private const array DEADLOCK_MESSAGE_HINTS = [
+        'mysql' => [
+            'deadlock found when trying to get lock',
+            'lock wait timeout exceeded; try restarting transaction',
+            'deadlock',
+        ],
+        'mariadb' => [
+            'deadlock',
+        ],
+        'pgsql' => [
+            'deadlock detected',
+            'deadlock',
+        ],
+        'postgres' => [
+            'deadlock detected',
+            'deadlock',
+        ],
+        'sqlite' => [
+            'database is locked',
+            'deadlock',
+        ],
+        'default' => [
+            'deadlock',
+        ],
     ];
 
     /**
@@ -73,14 +73,14 @@ final class DriverProfile
      *
      * @var array<string,list<string>>
      */
-    private const DEADLOCK_SQLSTATES = [
+    private const array DEADLOCK_SQLSTATES = [
         // MySQL / MariaDB
-      'mysql'   => ['40001'],
-      'mariadb' => ['40001'],
+        'mysql'   => ['40001'],
+        'mariadb' => ['40001'],
 
         // PostgreSQL
-      'pgsql'    => ['40P01', '40001'],
-      'postgres' => ['40P01', '40001'],
+        'pgsql'    => ['40P01', '40001'],
+        'postgres' => ['40P01', '40001'],
     ];
 
     /**
@@ -88,12 +88,12 @@ final class DriverProfile
      *
      * @var array<string,int|null>
      */
-    private const DEFAULT_PORTS = [
-      'mysql'   => 3306,
-      'mariadb' => 3306,
-      'pgsql'   => 5432,
-      'postgres' => 5432,
-      'sqlite'  => null,
+    private const array DEFAULT_PORTS = [
+        'mysql'   => 3306,
+        'mariadb' => 3306,
+        'pgsql'   => 5432,
+        'postgres' => 5432,
+        'sqlite'  => null,
     ];
 
     private function __construct()
@@ -215,7 +215,7 @@ final class DriverProfile
     {
         $hints = self::DEADLOCK_MESSAGE_HINTS[$driver]
           ?? self::DEADLOCK_MESSAGE_HINTS['default'];
-        return array_any($hints, fn ($needle) => $needle !== '' && stripos($message, $needle) !== false);
+        return array_any($hints, fn($needle) => $needle !== '' && stripos($message, (string) $needle) !== false);
     }
 
     /**

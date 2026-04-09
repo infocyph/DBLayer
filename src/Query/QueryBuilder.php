@@ -32,21 +32,6 @@ use Infocyph\DBLayer\Query\Core\QueryType;
 class QueryBuilder
 {
     /**
-     * Database connection.
-     */
-    private readonly Connection $connection;
-
-    /**
-     * Query executor.
-     */
-    private readonly Executor $executor;
-
-    /**
-     * SQL grammar compiler.
-     */
-    private readonly Grammar $grammar;
-
-    /**
      * Aggregate function definition or null.
      *
      * @var array{function:string,column:string}|null
@@ -66,6 +51,20 @@ class QueryBuilder
      * @var list<string|Expression>
      */
     private array $columns = ['*'];
+
+    /**
+     * Bindings from CTE definitions (must be emitted before main-query bindings).
+     *
+     * @var list<mixed>
+     */
+    private array $cteBindings = [];
+
+    /**
+     * Common table expressions.
+     *
+     * @var list<array{name:string,query:string|QueryBuilder,recursive:bool}>
+     */
+    private array $ctes = [];
 
     /**
      * DISTINCT flag.
@@ -143,14 +142,19 @@ class QueryBuilder
      * Create a new query builder instance.
      */
     public function __construct(
-        Connection $connection,
-        Grammar $grammar,
-        Executor $executor
-    ) {
-        $this->connection = $connection;
-        $this->grammar    = $grammar;
-        $this->executor   = $executor;
-    }
+        /**
+         * Database connection.
+         */
+        private readonly Connection $connection,
+        /**
+         * SQL grammar compiler.
+         */
+        private readonly Grammar $grammar,
+        /**
+         * Query executor.
+         */
+        private readonly Executor $executor,
+    ) {}
 
     /**
      * Add a select column (no duplicates).
@@ -231,7 +235,7 @@ class QueryBuilder
         int $count,
         callable $callback,
         string $column = 'id',
-        mixed $fromId = null
+        mixed $fromId = null,
     ): bool {
         if ($count <= 0) {
             throw QueryException::invalidLimit($count);
@@ -292,8 +296,8 @@ class QueryBuilder
     public function crossJoin(string $table): self
     {
         $this->joins[] = [
-          'type'  => 'cross',
-          'table' => $table,
+            'type'  => 'cross',
+            'table' => $table,
         ];
 
         return $this;
@@ -355,7 +359,7 @@ class QueryBuilder
         int $perPage = 15,
         mixed $cursor = null,
         string $column = 'id',
-        string $direction = 'asc'
+        string $direction = 'asc',
     ): CursorPaginator {
         if ($perPage <= 0) {
             throw QueryException::invalidLimit($perPage);
@@ -409,7 +413,7 @@ class QueryBuilder
             $perPage,
             $currentCursor,
             $nextCursor,
-            $hasMore
+            $hasMore,
         );
     }
 
@@ -470,7 +474,7 @@ class QueryBuilder
     public function firstWhere(
         string|callable $column,
         mixed $operator = null,
-        mixed $value = null
+        mixed $value = null,
     ): ?array {
         return $this->where($column, $operator, $value)->first();
     }
@@ -505,6 +509,33 @@ class QueryBuilder
     }
 
     /**
+     * Set table source to a subquery.
+     *
+     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
+     * @param  list<mixed>  $bindings
+     */
+    public function fromSub(QueryBuilder|callable|string $query, string $as, array $bindings = []): self
+    {
+        if (\is_callable($query)) {
+            $builder = $this->newQuery();
+            $query($builder);
+            $query = $builder;
+        }
+
+        if ($query instanceof self) {
+            $this->from = '(' . $query->toSelectSql() . ') as ' . $as;
+            $this->bindings = \array_merge($this->bindings, $query->getBindings());
+
+            return $this;
+        }
+
+        $this->from = '(' . $query . ') as ' . $as;
+        $this->bindings = \array_merge($this->bindings, $bindings);
+
+        return $this;
+    }
+
+    /**
      * Execute the query and get all results.
      *
      * @return list<array<string,mixed>>
@@ -521,7 +552,7 @@ class QueryBuilder
      */
     public function getBindings(): array
     {
-        return $this->bindings;
+        return \array_merge($this->cteBindings, $this->bindings);
     }
 
     /**
@@ -529,6 +560,7 @@ class QueryBuilder
      *
      * @return array{
      *   type:?string,
+     *   ctes:list<array{name:string,query:string|QueryBuilder,recursive:bool}>,
      *   columns:list<string|Expression>,
      *   distinct:bool,
      *   from:?string,
@@ -547,20 +579,21 @@ class QueryBuilder
     public function getComponents(): array
     {
         return [
-          'type'      => $this->type,
-          'columns'   => $this->columns,
-          'distinct'  => $this->distinct,
-          'from'      => $this->from,
-          'joins'     => $this->joins,
-          'wheres'    => $this->wheres,
-          'groups'    => $this->groups,
-          'havings'   => $this->havings,
-          'orders'    => $this->orders,
-          'limit'     => $this->limit,
-          'offset'    => $this->offset,
-          'unions'    => $this->unions,
-          'lock'      => $this->lock,
-          'aggregate' => $this->aggregate,
+            'type'      => $this->type,
+            'ctes'      => $this->ctes,
+            'columns'   => $this->columns,
+            'distinct'  => $this->distinct,
+            'from'      => $this->from,
+            'joins'     => $this->joins,
+            'wheres'    => $this->wheres,
+            'groups'    => $this->groups,
+            'havings'   => $this->havings,
+            'orders'    => $this->orders,
+            'limit'     => $this->limit,
+            'offset'    => $this->offset,
+            'unions'    => $this->unions,
+            'lock'      => $this->lock,
+            'aggregate' => $this->aggregate,
         ];
     }
 
@@ -597,7 +630,7 @@ class QueryBuilder
         string $column,
         mixed $operator = null,
         mixed $value = null,
-        string $boolean = 'and'
+        string $boolean = 'and',
     ): self {
         if (\func_num_args() === 2) {
             $value    = $operator;
@@ -605,11 +638,11 @@ class QueryBuilder
         }
 
         $this->havings[] = [
-          'type'     => 'basic',
-          'column'   => $column,
-          'operator' => $operator,
-          'value'    => $value,
-          'boolean'  => $boolean,
+            'type'     => 'basic',
+            'column'   => $column,
+            'operator' => $operator,
+            'value'    => $value,
+            'boolean'  => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -684,14 +717,14 @@ class QueryBuilder
         string $first,
         string $operator,
         string $second,
-        string $type = 'inner'
+        string $type = 'inner',
     ): self {
         $this->joins[] = [
-          'type'     => $type,
-          'table'    => $table,
-          'first'    => $first,
-          'operator' => $operator,
-          'second'   => $second,
+            'type'     => $type,
+            'table'    => $table,
+            'first'    => $first,
+            'operator' => $operator,
+            'second'   => $second,
         ];
 
         return $this;
@@ -816,8 +849,8 @@ class QueryBuilder
         }
 
         $this->orders[] = [
-          'column'    => $column,
-          'direction' => $direction,
+            'column'    => $column,
+            'direction' => $direction,
         ];
 
         return $this;
@@ -927,6 +960,51 @@ class QueryBuilder
     }
 
     /**
+     * Add a raw select expression.
+     *
+     * @param  list<mixed>  $bindings
+     */
+    public function selectRaw(string $expression, array $bindings = []): self
+    {
+        if ($this->columns === ['*']) {
+            $this->columns = [];
+        }
+
+        $this->type = 'select';
+        $this->columns[] = new Expression($expression);
+        $this->bindings = \array_merge($this->bindings, $bindings);
+
+        return $this;
+    }
+
+    /**
+     * Add a convenience window-function expression into the SELECT list.
+     *
+     * @param  list<string>  $partitionBy
+     * @param  list<string>  $orderBy
+     */
+    public function selectWindow(
+        string $functionExpression,
+        string $alias,
+        array $partitionBy = [],
+        array $orderBy = [],
+    ): self {
+        $clauses = [];
+
+        if ($partitionBy !== []) {
+            $clauses[] = 'partition by ' . \implode(', ', $partitionBy);
+        }
+
+        if ($orderBy !== []) {
+            $clauses[] = 'order by ' . \implode(', ', $orderBy);
+        }
+
+        $over = $clauses === [] ? 'over ()' : 'over (' . \implode(' ', $clauses) . ')';
+
+        return $this->selectRaw("{$functionExpression} {$over} as {$alias}");
+    }
+
+    /**
      * Lock the selected rows in shared mode.
      */
     public function sharedLock(): self
@@ -1014,12 +1092,11 @@ class QueryBuilder
         $unionPayloads = [];
 
         foreach ($this->unions as $union) {
-            /** @var QueryBuilder $unionQuery */
             $unionQuery = $union['query'];
 
             $unionPayloads[] = [
-              'query' => $unionQuery->toPayload(),
-              'all'   => (bool) $union['all'],
+                'query' => $unionQuery->toPayload(),
+                'all'   => (bool) $union['all'],
             ];
         }
 
@@ -1087,8 +1164,8 @@ class QueryBuilder
         }
 
         $this->unions[] = [
-          'query' => $query,
-          'all'   => $all,
+            'query' => $query,
+            'all'   => $all,
         ];
 
         $this->bindings = \array_merge($this->bindings, $query->getBindings());
@@ -1150,6 +1227,24 @@ class QueryBuilder
     }
 
     /**
+     * Upsert and return affected rows when possible.
+     *
+     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>|null  $update
+     * @param  list<string>  $returning
+     * @return list<array<string,mixed>>
+     */
+    public function upsertReturning(
+        array $values,
+        array $uniqueBy,
+        ?array $update = null,
+        array $returning = ['*'],
+    ): array {
+        return $this->executor->upsertReturning($this, $values, $uniqueBy, $update, $returning);
+    }
+
+    /**
      * Get a single column value from the first result.
      */
     public function value(string $column): mixed
@@ -1190,7 +1285,7 @@ class QueryBuilder
         string|callable $column,
         mixed $operator = null,
         mixed $value = null,
-        string $boolean = 'and'
+        string $boolean = 'and',
     ): self {
         // Handle closure for nested where.
         if (\is_callable($column)) {
@@ -1204,11 +1299,11 @@ class QueryBuilder
         }
 
         $this->wheres[] = [
-          'type'     => 'basic',
-          'column'   => $column,
-          'operator' => $operator,
-          'value'    => $value,
-          'boolean'  => $boolean,
+            'type'     => 'basic',
+            'column'   => $column,
+            'operator' => $operator,
+            'value'    => $value,
+            'boolean'  => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -1224,11 +1319,11 @@ class QueryBuilder
     public function whereBetween(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type'    => 'between',
-          'column'  => $column,
-          'values'  => $values,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type'    => 'between',
+            'column'  => $column,
+            'values'  => $values,
+            'boolean' => $boolean,
+            'not'     => $not,
         ];
 
         $this->bindings = \array_merge($this->bindings, $values);
@@ -1247,10 +1342,10 @@ class QueryBuilder
         $callback($query);
 
         $this->wheres[] = [
-          'type'    => 'exists',
-          'query'   => $query,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type'    => 'exists',
+            'query'   => $query,
+            'boolean' => $boolean,
+            'not'     => $not,
         ];
 
         $this->bindings = \array_merge($this->bindings, $query->getBindings());
@@ -1266,11 +1361,11 @@ class QueryBuilder
     public function whereIn(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type'    => 'in',
-          'column'  => $column,
-          'values'  => $values,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type'    => 'in',
+            'column'  => $column,
+            'values'  => $values,
+            'boolean' => $boolean,
+            'not'     => $not,
         ];
 
         $this->bindings = \array_merge($this->bindings, $values);
@@ -1290,9 +1385,9 @@ class QueryBuilder
 
         if ($query->wheres !== []) {
             $this->wheres[] = [
-              'type'    => 'nested',
-              'query'   => $query,
-              'boolean' => $boolean,
+                'type'    => 'nested',
+                'query'   => $query,
+                'boolean' => $boolean,
             ];
 
             $this->bindings = \array_merge($this->bindings, $query->getBindings());
@@ -1335,10 +1430,10 @@ class QueryBuilder
     public function whereNull(string $column, string $boolean = 'and', bool $not = false): self
     {
         $this->wheres[] = [
-          'type'    => 'null',
-          'column'  => $column,
-          'boolean' => $boolean,
-          'not'     => $not,
+            'type'    => 'null',
+            'column'  => $column,
+            'boolean' => $boolean,
+            'not'     => $not,
         ];
 
         return $this;
@@ -1352,12 +1447,69 @@ class QueryBuilder
     public function whereRaw(string $sql, array $bindings = [], string $boolean = 'and'): self
     {
         $this->wheres[] = [
-          'type'    => 'raw',
-          'sql'     => $sql,
-          'boolean' => $boolean,
+            'type'    => 'raw',
+            'sql'     => $sql,
+            'boolean' => $boolean,
         ];
 
         $this->bindings = \array_merge($this->bindings, $bindings);
+
+        return $this;
+    }
+
+    /**
+     * Add a common table expression.
+     *
+     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
+     * @param  list<mixed>  $bindings
+     */
+    public function with(string $name, QueryBuilder|callable|string $query, array $bindings = []): self
+    {
+        return $this->addCte($name, $query, false, $bindings);
+    }
+
+    /**
+     * Add a recursive common table expression.
+     *
+     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
+     * @param  list<mixed>  $bindings
+     */
+    public function withRecursive(string $name, QueryBuilder|callable|string $query, array $bindings = []): self
+    {
+        return $this->addCte($name, $query, true, $bindings);
+    }
+
+    /**
+     * Register a CTE and preserve placeholder binding order.
+     *
+     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
+     * @param  list<mixed>  $bindings
+     */
+    private function addCte(
+        string $name,
+        QueryBuilder|callable|string $query,
+        bool $recursive,
+        array $bindings,
+    ): self {
+        if (\is_callable($query)) {
+            $builder = $this->newQuery();
+            $query($builder);
+            $query = $builder;
+        }
+
+        $this->ctes[] = [
+            'name' => $name,
+            'query' => $query,
+            'recursive' => $recursive,
+        ];
+
+        if ($query instanceof self) {
+            $this->cteBindings = \array_merge($this->cteBindings, $query->getBindings());
+        }
+
+        if ($bindings !== []) {
+            $this->cteBindings = \array_merge($this->cteBindings, $bindings);
+        }
 
         return $this;
     }
@@ -1397,8 +1549,8 @@ class QueryBuilder
         }
 
         $clone->aggregate = [
-          'function' => \strtoupper($function),
-          'column'   => $column,
+            'function' => \strtoupper($function),
+            'column'   => $column,
         ];
 
         $results = $this->executor->select($clone);

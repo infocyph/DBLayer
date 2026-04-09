@@ -10,22 +10,22 @@ use Infocyph\DBLayer\Query\QueryBuilder;
 require __DIR__ . '/bootstrap.php';
 
 $filters = [
-  'search'     => $_GET['search']    ?? null,
-  'activeOnly' => isset($_GET['only_active']),
-  'role'       => $_GET['role']      ?? null,
+    'search'     => $_GET['search']    ?? null,
+    'activeOnly' => isset($_GET['only_active']),
+    'role'       => $_GET['role']      ?? null,
 ];
 
 // Base query
 $query = DB::table('users')
   ->select(['id', 'name', 'email', 'role', 'active'])
-  ->where('deleted_at', 'is', null);
+  ->whereNull('deleted_at');
 
 // Conditionally add "active" filter
 $query = $query->when(
     $filters['activeOnly'],
     static function (QueryBuilder $q): QueryBuilder {
         return $q->where('active', '=', 1);
-    }
+    },
 );
 
 // Conditionally add "role" filter
@@ -33,14 +33,12 @@ $query = $query->when(
     $filters['role'] !== null,
     static function (QueryBuilder $q) use ($filters): QueryBuilder {
         return $q->where('role', '=', $filters['role']);
-    }
+    },
 );
 
 // Conditionally add full-text-ish search on name/email
 $query = $query->when(
-    static function () use ($filters): bool {
-        return isset($filters['search']) && $filters['search'] !== '';
-    },
+    isset($filters['search']) && $filters['search'] !== '',
     static function (QueryBuilder $q) use ($filters): QueryBuilder {
         $term = '%' . $filters['search'] . '%';
 
@@ -49,7 +47,7 @@ $query = $query->when(
               ->where('name', 'like', $term)
               ->orWhere('email', 'like', $term);
         });
-    }
+    },
 );
 
 // Final ordering + pagination

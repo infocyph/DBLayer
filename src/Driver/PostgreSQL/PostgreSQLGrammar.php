@@ -38,17 +38,18 @@ final class PostgreSQLGrammar extends Grammar
     public function compileInsertGetId(
         QueryBuilder $query,
         array $values,
-        ?string $sequence = null
+        ?string $sequence = null,
     ): string {
         $insert = $this->compileInsert($query, $values);
         $column = $sequence ?? 'id';
 
-        return $insert.' returning '.$this->wrap($column);
+        return $insert . ' returning ' . $this->wrap($column);
     }
 
     /**
      * Compile a truncate table statement (PostgreSQL-specific).
      */
+    #[\Override]
     public function compileTruncate(QueryBuilder $query): string
     {
         $components = $query->getComponents();
@@ -66,7 +67,7 @@ final class PostgreSQLGrammar extends Grammar
     public function compileUpdateReturning(
         QueryBuilder $query,
         array $values,
-        array $returning = ['*']
+        array $returning = ['*'],
     ): string {
         $update  = $this->compileUpdate($query, $values);
         $columns = $this->columnize($returning);
@@ -85,7 +86,7 @@ final class PostgreSQLGrammar extends Grammar
         QueryBuilder $query,
         array $values,
         array $uniqueBy,
-        ?array $update = null
+        ?array $update = null,
     ): string {
         $insert   = $this->compileInsert($query, $values);
         $conflict = $this->columnize($uniqueBy);
@@ -95,18 +96,38 @@ final class PostgreSQLGrammar extends Grammar
         }
 
         $updateColumns = implode(', ', array_map(
-            function (string $key): string {
-                return $this->wrap($key).' = excluded.'.$this->wrap($key);
-            },
-            array_keys($update)
+            fn(string $key): string => $this->wrap($key) . ' = excluded.' . $this->wrap($key),
+            array_keys($update),
         ));
 
         return "{$insert} on conflict ({$conflict}) do update set {$updateColumns}";
     }
 
     /**
+     * Compile an UPSERT statement with RETURNING.
+     *
+     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param  array<int,string>  $uniqueBy
+     * @param  array<string,mixed>|null  $update
+     * @param  array<int,string>  $returning
+     */
+    public function compileUpsertReturning(
+        QueryBuilder $query,
+        array $values,
+        array $uniqueBy,
+        ?array $update = null,
+        array $returning = ['*'],
+    ): string {
+        $upsert = $this->compileUpsert($query, $values, $uniqueBy, $update);
+        $columns = $this->columnize($returning);
+
+        return "{$upsert} returning {$columns}";
+    }
+
+    /**
      * Get the format for database stored dates.
      */
+    #[\Override]
     public function getDateFormat(): string
     {
         return 'Y-m-d H:i:s.uP';
@@ -115,16 +136,18 @@ final class PostgreSQLGrammar extends Grammar
     /**
      * Compile the "limit" portion.
      */
+    #[\Override]
     protected function compileLimit(QueryBuilder $query, int $limit): string
     {
         unset($query);
 
-        return 'limit '.(int) $limit;
+        return 'limit ' . $limit;
     }
 
     /**
      * Compile the lock into SQL (PostgreSQL-specific).
      */
+    #[\Override]
     protected function compileLock(QueryBuilder $query, string $lock): string
     {
         unset($query);
@@ -139,22 +162,24 @@ final class PostgreSQLGrammar extends Grammar
     /**
      * Compile the "offset" portion.
      */
+    #[\Override]
     protected function compileOffset(QueryBuilder $query, int $offset): string
     {
         unset($query);
 
-        return 'offset '.(int) $offset;
+        return 'offset ' . $offset;
     }
 
     /**
      * Wrap a single string in keyword identifiers.
      */
+    #[\Override]
     protected function wrapValue(string $value): string
     {
         if ($value === '*') {
             return $value;
         }
 
-        return '"'.str_replace('"', '""', $value).'"';
+        return '"' . str_replace('"', '""', $value) . '"';
     }
 }
