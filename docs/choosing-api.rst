@@ -232,6 +232,7 @@ DBLayer includes this base class directly:
    $one = User::find(1);
    $recent = User::query()->orderBy('id', 'desc')->limit(20)->get();
    $tenantActive = User::forTenant(10)->get(fn ($q) => $q->where('active', '=', 1));
+   $reportRows = User::query('reporting')->limit(20)->get();
 
 What this gives:
 
@@ -300,6 +301,7 @@ Common Pitfalls
 Related Guides
 --------------
 
+- See ``table-model`` for class-based model-like usage patterns.
 - See ``query-builder`` for SQL composition patterns.
 - See ``repository`` for policy features and lifecycle hooks.
 - See ``transactions`` for retry and nested transaction behavior.

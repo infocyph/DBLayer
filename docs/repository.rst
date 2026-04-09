@@ -148,6 +148,7 @@ on top of DBLayer's built-in ``TableModel``:
 
    $one = User::find(1);
    $active = User::forTenant(10)->get(static fn (QueryBuilder $q) => $q->where('active', '=', 1));
+   $reportRows = User::query('reporting')->limit(20)->get();
 
 This preserves repository semantics and avoids accidental ORM expectations.
 

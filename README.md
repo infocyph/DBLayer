@@ -170,6 +170,7 @@ If the same table rules appear in multiple call sites, move that logic into a re
 
 ```php
 use Infocyph\DBLayer\Model\TableModel;
+use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository;
 
 final class User extends TableModel
@@ -181,11 +182,17 @@ final class User extends TableModel
     {
         return $repository->enableSoftDeletes()->setDefaultOrder('id', 'desc');
     }
+
+    protected static function configureQuery(QueryBuilder $query): QueryBuilder
+    {
+        return $query->where('active', '=', 1);
+    }
 }
 
 $one = User::find(1);                              // Repository method
 $rows = User::where('active', '=', 1)->get();     // QueryBuilder method
 $stats = User::stats();                            // DB facade method
+$reportRows = User::query('reporting')->get();     // Per-call connection override
 ```
 
 ### Transactions
