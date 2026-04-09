@@ -68,6 +68,20 @@ class QueryBuilder
     private array $columns = ['*'];
 
     /**
+     * Bindings from CTE definitions (must be emitted before main-query bindings).
+     *
+     * @var list<mixed>
+     */
+    private array $cteBindings = [];
+
+    /**
+     * Common table expressions.
+     *
+     * @var list<array{name:string,query:string|QueryBuilder,recursive:bool}>
+     */
+    private array $ctes = [];
+
+    /**
      * DISTINCT flag.
      */
     private bool $distinct = false;
@@ -505,6 +519,33 @@ class QueryBuilder
     }
 
     /**
+     * Set table source to a subquery.
+     *
+     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
+     * @param  list<mixed>  $bindings
+     */
+    public function fromSub(QueryBuilder|callable|string $query, string $as, array $bindings = []): self
+    {
+        if (\is_callable($query)) {
+            $builder = $this->newQuery();
+            $query($builder);
+            $query = $builder;
+        }
+
+        if ($query instanceof self) {
+            $this->from = '(' . $query->toSelectSql() . ') as ' . $as;
+            $this->bindings = \array_merge($this->bindings, $query->getBindings());
+
+            return $this;
+        }
+
+        $this->from = '(' . $query . ') as ' . $as;
+        $this->bindings = \array_merge($this->bindings, $bindings);
+
+        return $this;
+    }
+
+    /**
      * Execute the query and get all results.
      *
      * @return list<array<string,mixed>>
@@ -521,7 +562,7 @@ class QueryBuilder
      */
     public function getBindings(): array
     {
-        return $this->bindings;
+        return \array_merge($this->cteBindings, $this->bindings);
     }
 
     /**
@@ -529,6 +570,7 @@ class QueryBuilder
      *
      * @return array{
      *   type:?string,
+     *   ctes:list<array{name:string,query:string|QueryBuilder,recursive:bool}>,
      *   columns:list<string|Expression>,
      *   distinct:bool,
      *   from:?string,
@@ -548,6 +590,7 @@ class QueryBuilder
     {
         return [
             'type'      => $this->type,
+            'ctes'      => $this->ctes,
             'columns'   => $this->columns,
             'distinct'  => $this->distinct,
             'from'      => $this->from,
@@ -927,6 +970,51 @@ class QueryBuilder
     }
 
     /**
+     * Add a raw select expression.
+     *
+     * @param  list<mixed>  $bindings
+     */
+    public function selectRaw(string $expression, array $bindings = []): self
+    {
+        if ($this->columns === ['*']) {
+            $this->columns = [];
+        }
+
+        $this->type = 'select';
+        $this->columns[] = new Expression($expression);
+        $this->bindings = \array_merge($this->bindings, $bindings);
+
+        return $this;
+    }
+
+    /**
+     * Add a convenience window-function expression into the SELECT list.
+     *
+     * @param  list<string>  $partitionBy
+     * @param  list<string>  $orderBy
+     */
+    public function selectWindow(
+        string $functionExpression,
+        string $alias,
+        array $partitionBy = [],
+        array $orderBy = [],
+    ): self {
+        $clauses = [];
+
+        if ($partitionBy !== []) {
+            $clauses[] = 'partition by ' . \implode(', ', $partitionBy);
+        }
+
+        if ($orderBy !== []) {
+            $clauses[] = 'order by ' . \implode(', ', $orderBy);
+        }
+
+        $over = $clauses === [] ? 'over ()' : 'over (' . \implode(' ', $clauses) . ')';
+
+        return $this->selectRaw("{$functionExpression} {$over} as {$alias}");
+    }
+
+    /**
      * Lock the selected rows in shared mode.
      */
     public function sharedLock(): self
@@ -1149,6 +1237,24 @@ class QueryBuilder
     }
 
     /**
+     * Upsert and return affected rows when possible.
+     *
+     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>|null  $update
+     * @param  list<string>  $returning
+     * @return list<array<string,mixed>>
+     */
+    public function upsertReturning(
+        array $values,
+        array $uniqueBy,
+        ?array $update = null,
+        array $returning = ['*'],
+    ): array {
+        return $this->executor->upsertReturning($this, $values, $uniqueBy, $update, $returning);
+    }
+
+    /**
      * Get a single column value from the first result.
      */
     public function value(string $column): mixed
@@ -1357,6 +1463,63 @@ class QueryBuilder
         ];
 
         $this->bindings = \array_merge($this->bindings, $bindings);
+
+        return $this;
+    }
+
+    /**
+     * Add a common table expression.
+     *
+     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
+     * @param  list<mixed>  $bindings
+     */
+    public function with(string $name, QueryBuilder|callable|string $query, array $bindings = []): self
+    {
+        return $this->addCte($name, $query, false, $bindings);
+    }
+
+    /**
+     * Add a recursive common table expression.
+     *
+     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
+     * @param  list<mixed>  $bindings
+     */
+    public function withRecursive(string $name, QueryBuilder|callable|string $query, array $bindings = []): self
+    {
+        return $this->addCte($name, $query, true, $bindings);
+    }
+
+    /**
+     * Register a CTE and preserve placeholder binding order.
+     *
+     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
+     * @param  list<mixed>  $bindings
+     */
+    private function addCte(
+        string $name,
+        QueryBuilder|callable|string $query,
+        bool $recursive,
+        array $bindings,
+    ): self {
+        if (\is_callable($query)) {
+            $builder = $this->newQuery();
+            $query($builder);
+            $query = $builder;
+        }
+
+        $this->ctes[] = [
+            'name' => $name,
+            'query' => $query,
+            'recursive' => $recursive,
+        ];
+
+        if ($query instanceof self) {
+            $this->cteBindings = \array_merge($this->cteBindings, $query->getBindings());
+        }
+
+        if ($bindings !== []) {
+            $this->cteBindings = \array_merge($this->cteBindings, $bindings);
+        }
 
         return $this;
     }

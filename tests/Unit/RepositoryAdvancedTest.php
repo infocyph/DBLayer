@@ -349,3 +349,89 @@ it('throws clear exceptions for invalid repository configuration and DTO mapping
         $repository->firstInto(RepositoryUserDto::class, null, ['name']);
     })->toThrow(InvalidArgumentException::class);
 });
+
+it('supports soft deletes, optimistic locking, casts, and lifecycle hooks', function (): void {
+    setupRepositoryFixture();
+
+    DB::statement(
+        'create table repository_features (
+            id integer primary key autoincrement,
+            name text not null,
+            meta text null,
+            version integer not null default 1,
+            deleted_at text null
+        )',
+    );
+
+    $events = [
+        'before_create' => 0,
+        'after_create' => 0,
+        'before_update' => 0,
+        'after_update' => 0,
+        'before_delete' => 0,
+        'after_delete' => 0,
+    ];
+
+    $repository = DB::repository('repository_features')
+        ->enableSoftDeletes()
+        ->enableOptimisticLocking('version')
+        ->setCasts([
+            'meta' => 'json',
+            'version' => 'int',
+        ])
+        ->beforeCreate(static function (array $payload) use (&$events): array {
+            $events['before_create']++;
+            $payload['name'] = strtoupper((string) ($payload['name'] ?? ''));
+
+            return $payload;
+        })
+        ->afterCreate(static function () use (&$events): void {
+            $events['after_create']++;
+        })
+        ->beforeUpdate(static function (array $payload) use (&$events): array {
+            $events['before_update']++;
+
+            return $payload;
+        })
+        ->afterUpdate(static function () use (&$events): void {
+            $events['after_update']++;
+        })
+        ->beforeDelete(static function () use (&$events): void {
+            $events['before_delete']++;
+        })
+        ->afterDelete(static function () use (&$events): void {
+            $events['after_delete']++;
+        });
+
+    $created = $repository->create([
+        'name' => 'alpha',
+        'meta' => ['flag' => true],
+    ]);
+
+    expect($created['name'] ?? null)->toBe('ALPHA');
+    expect($created['meta'] ?? null)->toBe(['flag' => true]);
+    expect($events['before_create'])->toBeGreaterThan(0);
+    expect($events['after_create'])->toBeGreaterThan(0);
+
+    $id = $created['id'];
+    expect($repository->updateByIdWithVersion($id, ['name' => 'beta'], 1))->toBeTrue();
+    expect($repository->updateByIdWithVersion($id, ['name' => 'gamma'], 1))->toBeFalse();
+
+    $updated = $repository->find($id);
+    expect($updated['version'] ?? null)->toBe(2);
+    expect($events['before_update'])->toBeGreaterThan(0);
+    expect($events['after_update'])->toBeGreaterThan(0);
+
+    expect($repository->deleteById($id))->toBe(1);
+    expect($repository->find($id))->toBeNull();
+    expect($repository->withTrashed()->find($id))->not->toBeNull();
+    expect($repository->onlyTrashed()->count())->toBe(1);
+    expect($events['before_delete'])->toBeGreaterThan(0);
+    expect($events['after_delete'])->toBeGreaterThan(0);
+
+    expect($repository->restoreById($id))->toBe(1);
+    expect($repository->withoutTrashed()->find($id))->not->toBeNull();
+
+    expect($repository->forceDeleteById($id))->toBe(1);
+    expect($repository->withTrashed()->find($id))->toBeNull();
+});

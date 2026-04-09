@@ -29,6 +29,12 @@ use ReflectionParameter;
 abstract class Repository
 {
     /**
+     * Attribute casts.
+     *
+     * @var array<string,string|callable(mixed):mixed>
+     */
+    protected array $casts = [];
+    /**
      * Database connection.
      */
     protected Connection $connection;
@@ -58,9 +64,50 @@ abstract class Repository
     protected Grammar $grammar;
 
     /**
+     * Lifecycle hooks keyed by event name.
+     *
+     * @var array{
+     *   beforeCreate:list<callable>,
+     *   afterCreate:list<callable>,
+     *   beforeUpdate:list<callable>,
+     *   afterUpdate:list<callable>,
+     *   beforeDelete:list<callable>,
+     *   afterDelete:list<callable>
+     * }
+     */
+    protected array $hooks = [
+        'beforeCreate' => [],
+        'afterCreate' => [],
+        'beforeUpdate' => [],
+        'afterUpdate' => [],
+        'beforeDelete' => [],
+        'afterDelete' => [],
+    ];
+
+    /**
+     * Restrict query() results to only soft-deleted rows.
+     */
+    protected bool $onlyTrashed = false;
+
+    /**
+     * Optional optimistic lock column.
+     */
+    protected ?string $optimisticLockColumn = null;
+
+    /**
      * Result processor.
      */
     protected ResultProcessor $results;
+
+    /**
+     * Soft-delete timestamp column.
+     */
+    protected string $softDeleteColumn = 'deleted_at';
+
+    /**
+     * Whether soft deletes are enabled.
+     */
+    protected bool $softDeletes = false;
 
     /**
      * Tenant column name used when tenant scope is enabled.
@@ -71,6 +118,11 @@ abstract class Repository
      * Optional tenant scope: where $tenantColumn = $tenantId.
      */
     protected int|string|null $tenantId = null;
+
+    /**
+     * Include soft-deleted rows in query() results.
+     */
+    protected bool $withTrashed = false;
 
     /**
      * Create a new repository instance.
@@ -122,6 +174,30 @@ abstract class Repository
     }
 
     /**
+     * Register callback after create.
+     */
+    public function afterCreate(callable $callback): static
+    {
+        return $this->on('afterCreate', $callback);
+    }
+
+    /**
+     * Register callback after delete.
+     */
+    public function afterDelete(callable $callback): static
+    {
+        return $this->on('afterDelete', $callback);
+    }
+
+    /**
+     * Register callback after update.
+     */
+    public function afterUpdate(callable $callback): static
+    {
+        return $this->on('afterUpdate', $callback);
+    }
+
+    /**
      * Get all rows for this table as a Collection.
      */
     public function all(array $columns = ['*']): Collection
@@ -129,8 +205,33 @@ abstract class Repository
         $rows = $this->query()
           ->select($columns)
           ->get();
+        $rows = $this->applyReadCastsToRows($rows);
 
         return $this->results->process($rows);
+    }
+
+    /**
+     * Register callback before create.
+     */
+    public function beforeCreate(callable $callback): static
+    {
+        return $this->on('beforeCreate', $callback);
+    }
+
+    /**
+     * Register callback before delete.
+     */
+    public function beforeDelete(callable $callback): static
+    {
+        return $this->on('beforeDelete', $callback);
+    }
+
+    /**
+     * Register callback before update.
+     */
+    public function beforeUpdate(callable $callback): static
+    {
+        return $this->on('beforeUpdate', $callback);
     }
 
     /**
@@ -153,11 +254,23 @@ abstract class Repository
         }
 
         $payload = array_map(
-            fn(array $row): array => $this->applyTenantAttributes($row),
+            function (array $row): array {
+                $prepared = $this->applyWriteCastsToAttributes($this->applyTenantAttributes($row));
+
+                return $this->runPayloadHooks('beforeCreate', $prepared);
+            },
             $rows,
         );
 
-        return $this->query()->insert($payload);
+        $inserted = $this->query()->insert($payload);
+
+        if ($inserted) {
+            foreach ($payload as $row) {
+                $this->runVoidHooks('afterCreate', ['payload' => $row, 'row' => $row, 'bulk' => true]);
+            }
+        }
+
+        return $inserted;
     }
 
     /**
@@ -240,13 +353,18 @@ abstract class Repository
      */
     public function create(array $attributes): array
     {
-        $payload = $this->applyTenantAttributes($attributes);
+        $payload = $this->applyWriteCastsToAttributes($this->applyTenantAttributes($attributes));
+        $payload = $this->runPayloadHooks('beforeCreate', $payload);
 
         $this->query()->insert($payload);
 
         $created = $this->reloadCreatedRow($payload);
+        $created = $created !== null ? $this->applyReadCastsToRow($created) : null;
+        $final = $created ?? $payload;
 
-        return $created ?? $payload;
+        $this->runVoidHooks('afterCreate', ['payload' => $payload, 'row' => $final]);
+
+        return $final;
     }
 
     /**
@@ -290,9 +408,71 @@ abstract class Repository
      */
     public function deleteById(mixed $id): int
     {
-        return $this->query()
+        $this->runVoidHooks('beforeDelete', ['id' => $id, 'soft' => $this->softDeletes]);
+
+        if ($this->softDeletes) {
+            $affected = $this->queryWithoutSoftDeletes()
+              ->where($this->primaryKey(), '=', $id)
+              ->update([$this->softDeleteColumn => $this->freshTimestamp()]);
+
+            $this->runVoidHooks('afterDelete', ['id' => $id, 'affected' => $affected, 'soft' => true]);
+
+            return $affected;
+        }
+
+        $affected = $this->queryWithoutSoftDeletes()
           ->where($this->primaryKey(), '=', $id)
           ->delete();
+
+        $this->runVoidHooks('afterDelete', ['id' => $id, 'affected' => $affected, 'soft' => false]);
+
+        return $affected;
+    }
+
+    /**
+     * Disable optimistic locking.
+     */
+    public function disableOptimisticLocking(): static
+    {
+        $this->optimisticLockColumn = null;
+
+        return $this;
+    }
+
+    /**
+     * Disable soft deletes and clear related read modes.
+     */
+    public function disableSoftDeletes(): static
+    {
+        $this->softDeletes = false;
+        $this->withTrashed = false;
+        $this->onlyTrashed = false;
+        $this->softDeleteColumn = 'deleted_at';
+
+        return $this;
+    }
+
+    /**
+     * Enable optimistic locking using a numeric version column.
+     */
+    public function enableOptimisticLocking(string $column = 'version'): static
+    {
+        $this->optimisticLockColumn = $column;
+
+        return $this;
+    }
+
+    /**
+     * Enable soft deletes on this repository.
+     */
+    public function enableSoftDeletes(string $column = 'deleted_at'): static
+    {
+        $this->softDeletes = true;
+        $this->softDeleteColumn = $column;
+        $this->withTrashed = false;
+        $this->onlyTrashed = false;
+
+        return $this;
     }
 
     /**
@@ -318,11 +498,12 @@ abstract class Repository
     public function find(mixed $id, array $columns = ['*']): ?array
     {
         $key = $this->primaryKey();
-
-        return $this->query()
+        $row = $this->query()
           ->select($columns)
           ->where($key, '=', $id)
           ->first();
+
+        return $this->applyReadCastsToRow($row);
     }
 
     /**
@@ -340,6 +521,7 @@ abstract class Repository
           ->select($columns)
           ->whereIn($key, $ids)
           ->get();
+        $rows = $this->applyReadCastsToRows($rows);
 
         return $this->results->process($rows);
     }
@@ -357,7 +539,7 @@ abstract class Repository
             $scope,
         );
 
-        return $query->first();
+        return $this->applyReadCastsToRow($query->first());
     }
 
     /**
@@ -421,6 +603,22 @@ abstract class Repository
     }
 
     /**
+     * Permanently delete one row by primary key.
+     */
+    public function forceDeleteById(mixed $id): int
+    {
+        $this->runVoidHooks('beforeDelete', ['id' => $id, 'force' => true]);
+
+        $affected = $this->queryWithoutSoftDeletes()
+          ->where($this->primaryKey(), '=', $id)
+          ->delete();
+
+        $this->runVoidHooks('afterDelete', ['id' => $id, 'affected' => $affected, 'force' => true]);
+
+        return $affected;
+    }
+
+    /**
      * Enable tenant filtering (column = tenant id) on every query().
      */
     public function forTenant(int|string $tenantId, string $column = 'tenant_id'): static
@@ -444,6 +642,7 @@ abstract class Repository
         );
 
         $rows = $query->get();
+        $rows = $this->applyReadCastsToRows($rows);
 
         return $this->results->process($rows);
     }
@@ -462,6 +661,7 @@ abstract class Repository
         );
 
         $rows = $query->get();
+        $rows = $this->applyReadCastsToRows($rows);
 
         return $this->results->processGrouped($rows, $column);
     }
@@ -509,6 +709,34 @@ abstract class Repository
     }
 
     /**
+     * Register a lifecycle hook callback.
+     */
+    public function on(string $event, callable $callback): static
+    {
+        if (! array_key_exists($event, $this->hooks)) {
+            throw new InvalidArgumentException(sprintf(
+                'Unsupported repository hook [%s].',
+                $event,
+            ));
+        }
+
+        $this->hooks[$event][] = $callback;
+
+        return $this;
+    }
+
+    /**
+     * Restrict reads to soft-deleted rows only.
+     */
+    public function onlyTrashed(): static
+    {
+        $this->withTrashed = true;
+        $this->onlyTrashed = true;
+
+        return $this;
+    }
+
+    /**
      * Paginate results with total count.
      *
      * @param callable(QueryBuilder):void|null $scope
@@ -537,12 +765,48 @@ abstract class Repository
         );
 
         $rows = $query->get();
+        $rows = $this->applyReadCastsToRows($rows);
 
         if ($keyColumn === null) {
             return $this->results->processColumn($rows, $column);
         }
 
         return $this->results->processKeyValue($rows, $keyColumn, $column);
+    }
+
+    /**
+     * Restore one soft-deleted row by primary key.
+     */
+    public function restoreById(mixed $id): int
+    {
+        if (! $this->softDeletes) {
+            return 0;
+        }
+
+        return $this->queryWithoutSoftDeletes()
+          ->where($this->primaryKey(), '=', $id)
+          ->whereNotNull($this->softDeleteColumn)
+          ->update([$this->softDeleteColumn => null]);
+    }
+
+    /**
+     * Configure attribute casts.
+     *
+     * Built-in casts:
+     *  - int, integer
+     *  - float, double, real
+     *  - bool, boolean
+     *  - string
+     *  - json, array
+     *  - datetime
+     *
+     * @param  array<string,string|callable(mixed):mixed>  $casts
+     */
+    public function setCasts(array $casts): static
+    {
+        $this->casts = $casts;
+
+        return $this;
     }
 
     /**
@@ -581,9 +845,47 @@ abstract class Repository
             return 0;
         }
 
-        return $this->query()
+        $payload = $this->applyWriteCastsToAttributes($values);
+        $payload = $this->runPayloadHooks('beforeUpdate', $payload);
+
+        $affected = $this->queryWithoutSoftDeletes()
           ->where($this->primaryKey(), '=', $id)
-          ->update($values);
+          ->update($payload);
+
+        $this->runVoidHooks('afterUpdate', ['id' => $id, 'payload' => $payload, 'affected' => $affected]);
+
+        return $affected;
+    }
+
+    /**
+     * Update row by id only if expected version matches current version.
+     */
+    public function updateByIdWithVersion(
+        mixed $id,
+        array $values,
+        int|float|string $expectedVersion,
+        ?string $versionColumn = null,
+    ): bool {
+        $column = $versionColumn ?? $this->optimisticLockColumn ?? 'version';
+
+        $payload = $this->applyWriteCastsToAttributes($values);
+        $payload[$column] = (int) $expectedVersion + 1;
+        $payload = $this->runPayloadHooks('beforeUpdate', $payload);
+
+        $affected = $this->queryWithoutSoftDeletes()
+          ->where($this->primaryKey(), '=', $id)
+          ->where($column, '=', $expectedVersion)
+          ->update($payload);
+
+        $this->runVoidHooks('afterUpdate', [
+            'id' => $id,
+            'payload' => $payload,
+            'affected' => $affected,
+            'optimistic' => true,
+            'version_column' => $column,
+        ]);
+
+        return $affected > 0;
     }
 
     /**
@@ -605,9 +907,12 @@ abstract class Repository
             return $existing;
         }
 
+        $payload = $this->applyWriteCastsToAttributes($values);
+        $payload = $this->runPayloadHooks('beforeUpdate', $payload);
+
         $primaryKey = $this->primaryKey();
         if (array_key_exists($primaryKey, $existing)) {
-            $this->updateById($existing[$primaryKey], $values);
+            $this->updateById($existing[$primaryKey], $payload);
 
             $updated = $this->find($existing[$primaryKey]);
 
@@ -615,7 +920,8 @@ abstract class Repository
         }
 
         $query = $this->applyAttributes($this->query(), $attributes);
-        $query->update($values);
+        $affected = $query->update($payload);
+        $this->runVoidHooks('afterUpdate', ['payload' => $payload, 'affected' => $affected]);
 
         $updated = $this->firstByAttributes($attributes);
 
@@ -631,7 +937,7 @@ abstract class Repository
      */
     public function upsert(array $values, array $uniqueBy, ?array $update = null): bool
     {
-        $payload = $this->applyTenantValues($values);
+        $payload = $this->applyWriteCastsToValues($this->applyTenantValues($values));
 
         return $this->query()->upsert($payload, $uniqueBy, $update);
     }
@@ -650,8 +956,9 @@ abstract class Repository
         );
 
         $rows = $query->get();
+        $value = $this->results->processAggregate($rows);
 
-        return $this->results->processAggregate($rows);
+        return $this->applyCastValueForColumn($column, $value);
     }
 
     /**
@@ -661,6 +968,28 @@ abstract class Repository
     {
         $this->tenantId = null;
         $this->tenantColumn = 'tenant_id';
+
+        return $this;
+    }
+
+    /**
+     * Exclude soft-deleted rows from reads.
+     */
+    public function withoutTrashed(): static
+    {
+        $this->withTrashed = false;
+        $this->onlyTrashed = false;
+
+        return $this;
+    }
+
+    /**
+     * Include soft-deleted rows in reads.
+     */
+    public function withTrashed(): static
+    {
+        $this->withTrashed = true;
+        $this->onlyTrashed = false;
 
         return $this;
     }
@@ -694,6 +1023,14 @@ abstract class Repository
 
         foreach ($this->defaultOrders as $order) {
             $query->orderBy($order['column'], $order['direction']);
+        }
+
+        if ($this->softDeletes) {
+            if ($this->onlyTrashed) {
+                $query->whereNotNull($this->softDeleteColumn);
+            } elseif (! $this->withTrashed) {
+                $query->whereNull($this->softDeleteColumn);
+            }
         }
 
         return $query;
@@ -736,9 +1073,62 @@ abstract class Repository
      */
     protected function query(): QueryBuilder
     {
-        $query = $this->newQuery()->from($this->table());
+        return $this->applyRepositoryConstraints(
+            $this->newQuery()->from($this->table()),
+        );
+    }
 
-        return $this->applyRepositoryConstraints($query);
+    /**
+     * Cast a single scalar through configured cast map when column is known.
+     */
+    private function applyCastValueForColumn(string $column, mixed $value): mixed
+    {
+        if (! array_key_exists($column, $this->casts)) {
+            return $value;
+        }
+
+        return $this->castValue($value, $this->casts[$column], false);
+    }
+
+    /**
+     * Apply configured read casts to one row.
+     *
+     * @param  array<string,mixed>|null  $row
+     * @return array<string,mixed>|null
+     */
+    private function applyReadCastsToRow(?array $row): ?array
+    {
+        if ($row === null || $this->casts === []) {
+            return $row;
+        }
+
+        foreach ($this->casts as $column => $cast) {
+            if (! array_key_exists($column, $row)) {
+                continue;
+            }
+
+            $row[$column] = $this->castValue($row[$column], $cast, false);
+        }
+
+        return $row;
+    }
+
+    /**
+     * Apply configured read casts to many rows.
+     *
+     * @param  list<array<string,mixed>>  $rows
+     * @return list<array<string,mixed>>
+     */
+    private function applyReadCastsToRows(array $rows): array
+    {
+        if ($this->casts === [] || $rows === []) {
+            return $rows;
+        }
+
+        return array_map(
+            fn(array $row): array => $this->applyReadCastsToRow($row) ?? $row,
+            $rows,
+        );
     }
 
     /**
@@ -784,6 +1174,103 @@ abstract class Repository
     }
 
     /**
+     * Apply write casts to one payload.
+     *
+     * @param  array<string,mixed>  $attributes
+     * @return array<string,mixed>
+     */
+    private function applyWriteCastsToAttributes(array $attributes): array
+    {
+        if ($this->casts === []) {
+            return $attributes;
+        }
+
+        foreach ($this->casts as $column => $cast) {
+            if (! array_key_exists($column, $attributes)) {
+                continue;
+            }
+
+            $attributes[$column] = $this->castValue($attributes[$column], $cast, true);
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * Apply write casts to one or many payload rows.
+     *
+     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
+     * @return array<string,mixed>|array<int,array<string,mixed>>
+     */
+    private function applyWriteCastsToValues(array $values): array
+    {
+        if ($values === []) {
+            return $values;
+        }
+
+        $first = reset($values);
+
+        if (is_array($first)) {
+            return array_map(
+                fn(array $row): array => $this->applyWriteCastsToAttributes($row),
+                $values,
+            );
+        }
+
+        return $this->applyWriteCastsToAttributes($values);
+    }
+
+    /**
+     * Resolve callable parameter count for lifecycle hook dispatching.
+     */
+    private function callableParameterCount(callable $callable): int
+    {
+        if (\is_array($callable)) {
+            $reflection = new \ReflectionMethod($callable[0], (string) $callable[1]);
+
+            return $reflection->getNumberOfParameters();
+        }
+
+        if (\is_object($callable) && ! $callable instanceof \Closure) {
+            $reflection = new \ReflectionMethod($callable, '__invoke');
+
+            return $reflection->getNumberOfParameters();
+        }
+
+        $reflection = new \ReflectionFunction(\Closure::fromCallable($callable));
+
+        return $reflection->getNumberOfParameters();
+    }
+
+    /**
+     * Apply cast rules for one value.
+     *
+     * @param  string|callable(mixed):mixed  $cast
+     */
+    private function castValue(mixed $value, string|callable $cast, bool $forWrite): mixed
+    {
+        if (\is_callable($cast)) {
+            return $cast($value);
+        }
+
+        $type = strtolower($cast);
+
+        return match ($type) {
+            'int', 'integer' => $value === null ? null : (int) $value,
+            'float', 'double', 'real' => $value === null ? null : (float) $value,
+            'bool', 'boolean' => $value === null ? null : (bool) $value,
+            'string' => $value === null ? null : (string) $value,
+            'json', 'array' => $forWrite
+                ? (is_array($value) || is_object($value) ? json_encode($value, JSON_THROW_ON_ERROR) : $value)
+                : (is_string($value) ? (json_decode($value, true) ?? $value) : $value),
+            'datetime' => $forWrite
+                ? $this->normalizeDateTimeForWrite($value)
+                : $value,
+            default => $value,
+        };
+    }
+
+    /**
      * Find the first row that matches all given attributes.
      *
      * @param array<string,mixed> $attributes
@@ -793,7 +1280,15 @@ abstract class Repository
     {
         $query = $this->applyAttributes($this->query(), $attributes);
 
-        return $query->first();
+        return $this->applyReadCastsToRow($query->first());
+    }
+
+    /**
+     * Generate a DB date-time string for soft deletes.
+     */
+    private function freshTimestamp(): string
+    {
+        return (new \DateTimeImmutable('now'))->format($this->grammar->getDateFormat());
     }
 
     /**
@@ -854,6 +1349,18 @@ abstract class Repository
     }
 
     /**
+     * Convert DateTime values to grammar-aligned SQL date strings.
+     */
+    private function normalizeDateTimeForWrite(mixed $value): mixed
+    {
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format($this->grammar->getDateFormat());
+        }
+
+        return $value;
+    }
+
+    /**
      * Normalize and validate SQL direction.
      */
     private function normalizeDirection(string $direction): string
@@ -868,6 +1375,25 @@ abstract class Repository
         }
 
         return $normalized;
+    }
+
+    /**
+     * Base query without soft-delete visibility constraints.
+     */
+    private function queryWithoutSoftDeletes(): QueryBuilder
+    {
+        $withTrashed = $this->withTrashed;
+        $onlyTrashed = $this->onlyTrashed;
+
+        $this->withTrashed = true;
+        $this->onlyTrashed = false;
+
+        try {
+            return $this->query();
+        } finally {
+            $this->withTrashed = $withTrashed;
+            $this->onlyTrashed = $onlyTrashed;
+        }
     }
 
     /**
@@ -947,5 +1473,52 @@ abstract class Repository
         }
 
         return $reflection;
+    }
+
+    /**
+     * Execute payload hooks that can return a transformed payload.
+     *
+     * @param  array<string,mixed>  $payload
+     * @return array<string,mixed>
+     */
+    private function runPayloadHooks(string $event, array $payload): array
+    {
+        foreach ($this->hooks[$event] ?? [] as $hook) {
+            $params = $this->callableParameterCount($hook);
+
+            if ($params <= 0) {
+                $result = $hook();
+            } elseif ($params === 1) {
+                $result = $hook($payload);
+            } else {
+                $result = $hook($payload, $this);
+            }
+
+            if (is_array($result)) {
+                $payload = $result;
+            }
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Execute fire-and-forget hooks with context payload.
+     *
+     * @param  array<string,mixed>  $context
+     */
+    private function runVoidHooks(string $event, array $context): void
+    {
+        foreach ($this->hooks[$event] ?? [] as $hook) {
+            $params = $this->callableParameterCount($hook);
+
+            if ($params <= 0) {
+                $hook();
+            } elseif ($params === 1) {
+                $hook($context);
+            } else {
+                $hook($context, $this);
+            }
+        }
     }
 }

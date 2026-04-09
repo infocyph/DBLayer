@@ -39,6 +39,7 @@ final class ConnectionConfig
         'write'     => [],
         'read'      => [],
         'read_strategy' => 'random',
+        'read_health_cooldown' => 30,
         'sticky'    => false,
         'security'  => [],
     ];
@@ -193,12 +194,27 @@ final class ConnectionConfig
     }
 
     /**
+     * Get read-replica health cooldown in seconds after a failed probe.
+     */
+    public function getReadHealthCooldown(): int
+    {
+        $seconds = $this->config['read_health_cooldown'] ?? 30;
+
+        if (! is_int($seconds) && ! is_numeric($seconds)) {
+            return 30;
+        }
+
+        return max(0, (int) $seconds);
+    }
+
+    /**
      * Get read-replica selection strategy.
      *
      * Supported values:
      *  - random
      *  - round_robin
      *  - least_latency
+     *  - weighted
      */
     public function getReadStrategy(): string
     {
@@ -213,7 +229,9 @@ final class ConnectionConfig
         return match ($strategy) {
             'round-robin' => 'round_robin',
             'least-latency' => 'least_latency',
-            'random', 'round_robin', 'least_latency' => $strategy,
+            'weighted-random' => 'weighted',
+            'health-aware' => 'weighted',
+            'random', 'round_robin', 'least_latency', 'weighted' => $strategy,
             default => 'random',
         };
     }

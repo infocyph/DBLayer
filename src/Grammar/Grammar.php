@@ -95,9 +95,14 @@ abstract class Grammar
     public function compileSelect(QueryBuilder $query): string
     {
         $components = $query->getComponents();
+        $cteSql = '';
+
+        if (($components['ctes'] ?? []) !== []) {
+            $cteSql = $this->compileCtes($query, $components['ctes']) . ' ';
+        }
 
         if ($components['aggregate'] !== null) {
-            return $this->compileAggregate($query);
+            return $cteSql . $this->compileAggregate($query);
         }
 
         $sql = $this->concatenate($this->compileComponents($query));
@@ -106,7 +111,7 @@ abstract class Grammar
             $sql .= ' ' . $this->compileUnions($query);
         }
 
-        return $sql;
+        return $cteSql . $sql;
     }
 
     /**
@@ -294,6 +299,37 @@ abstract class Grammar
         }
 
         return $sql;
+    }
+
+    /**
+     * Compile common table expressions.
+     *
+     * @param  list<array{name:string,query:string|QueryBuilder,recursive:bool}>  $ctes
+     */
+    protected function compileCtes(QueryBuilder $query, array $ctes): string
+    {
+        unset($query);
+
+        $parts = [];
+        $recursive = false;
+
+        foreach ($ctes as $cte) {
+            $recursive = $recursive || $cte['recursive'];
+            $name = $cte['name'];
+            $cteQuery = $cte['query'];
+
+            if ($cteQuery instanceof QueryBuilder) {
+                $sql = $cteQuery->toSelectSql();
+            } else {
+                $sql = $cteQuery;
+            }
+
+            $parts[] = "{$name} as ({$sql})";
+        }
+
+        $prefix = $recursive ? 'with recursive' : 'with';
+
+        return $prefix . ' ' . \implode(', ', $parts);
     }
 
     /**

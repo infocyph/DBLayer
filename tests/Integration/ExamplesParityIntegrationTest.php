@@ -395,14 +395,14 @@ it('keeps examples and integration coverage in sync', function (): void {
     $coverageMap = [
         'bootstrap.php' => ['ExamplesParityIntegrationTest.php'],
         'chunking.php' => ['ExamplesParityIntegrationTest.php'],
-        'crud.php' => ['CrudIntegrationTest.php'],
+        'crud.php' => ['CrudIntegrationTest.php', 'AdvancedQueryFeaturesIntegrationTest.php'],
         'cross_driver_matrix.php' => ['CrossDriverMatrixIntegrationTest.php'],
         'filtering.php' => ['ExamplesParityIntegrationTest.php'],
         'helpers_and_security.php' => ['ExamplesParityIntegrationTest.php'],
         'locking.php' => ['LockingIntegrationTest.php'],
         'multi_connections.php' => ['ExamplesParityIntegrationTest.php'],
         'observability.php' => ['ObservabilityIntegrationTest.php'],
-        'read_replicas.php' => ['ExamplesParityIntegrationTest.php'],
+        'read_replicas.php' => ['ExamplesParityIntegrationTest.php', 'ReplicaStrategiesIntegrationTest.php'],
         'restored_modules.php' => ['RestoredModulesIntegrationTest.php'],
         'transactions.php' => ['TransactionIntegrationTest.php'],
     ];

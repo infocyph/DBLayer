@@ -106,6 +106,27 @@ final class PostgreSQLGrammar extends Grammar
     }
 
     /**
+     * Compile an UPSERT statement with RETURNING.
+     *
+     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param  array<int,string>  $uniqueBy
+     * @param  array<string,mixed>|null  $update
+     * @param  array<int,string>  $returning
+     */
+    public function compileUpsertReturning(
+        QueryBuilder $query,
+        array $values,
+        array $uniqueBy,
+        ?array $update = null,
+        array $returning = ['*'],
+    ): string {
+        $upsert = $this->compileUpsert($query, $values, $uniqueBy, $update);
+        $columns = $this->columnize($returning);
+
+        return "{$upsert} returning {$columns}";
+    }
+
+    /**
      * Get the format for database stored dates.
      */
     #[\Override]

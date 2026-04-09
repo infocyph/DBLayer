@@ -388,6 +388,19 @@ class DB
     }
 
     /**
+     * Export and clear telemetry buffers as OpenTelemetry-like payload.
+     *
+     * @param  null|callable(array<string,mixed>):void  $exporter
+     * @return array<string,mixed>
+     */
+    public static function flushTelemetryOtel(
+        ?callable $exporter = null,
+        string $serviceName = 'dblayer',
+    ): array {
+        return Telemetry::flushOtel($exporter, $serviceName);
+    }
+
+    /**
      * Convenience shortcut for an uncached Connection instance.
      *
      * Equivalent to connection($name, true).
@@ -854,6 +867,17 @@ class DB
     }
 
     /**
+     * Get percentile report for query durations currently buffered in telemetry.
+     *
+     * @param  list<int|float>  $percentiles
+     * @return array<string,mixed>
+     */
+    public static function slowQueryReport(array $percentiles = [50, 90, 95, 99], ?float $minimumMs = null): array
+    {
+        return Telemetry::slowQueryReport($percentiles, $minimumMs);
+    }
+
+    /**
      * Execute a statement (INSERT/UPDATE/DELETE/DDL).
      *
      * @param  array<int,mixed>  $bindings
@@ -907,6 +931,11 @@ class DB
         return static::connection($connection)->supportsReturning();
     }
 
+    public static function supportsWindowFunctions(?string $connection = null): bool
+    {
+        return static::connection($connection)->supportsWindowFunctions();
+    }
+
     /**
      * Get a query builder for a table.
      *
@@ -925,6 +954,16 @@ class DB
     public static function telemetry(): array
     {
         return Telemetry::snapshot();
+    }
+
+    /**
+     * Get telemetry as OpenTelemetry-like payload without clearing buffers.
+     *
+     * @return array<string,mixed>
+     */
+    public static function telemetryOtel(string $serviceName = 'dblayer'): array
+    {
+        return Telemetry::snapshotOtel($serviceName);
     }
 
     /**

@@ -99,6 +99,25 @@ final class Telemetry
     }
 
     /**
+     * Export OpenTelemetry-like payload and clear local buffers.
+     *
+     * @param  null|callable(array<string,mixed>):void  $exporter
+     * @return array<string,mixed>
+     */
+    public static function flushOtel(?callable $exporter = null, string $serviceName = 'dblayer'): array
+    {
+        $payload = self::snapshotOtel($serviceName);
+
+        if ($exporter !== null) {
+            $exporter($payload);
+        }
+
+        self::clear();
+
+        return $payload;
+    }
+
+    /**
      * Whether telemetry collection is currently enabled.
      */
     public static function isEnabled(): bool
@@ -114,6 +133,70 @@ final class Telemetry
     public static function setExporter(?callable $exporter): void
     {
         self::$exporter = $exporter;
+    }
+
+    /**
+     * Build percentile report for collected query durations.
+     *
+     * @param  list<int|float>  $percentiles
+     * @return array<string,mixed>
+     */
+    public static function slowQueryReport(array $percentiles = [50, 90, 95, 99], ?float $minimumMs = null): array
+    {
+        $durations = array_map(
+            static fn(array $query): float => (float) ($query['duration_ms'] ?? 0.0),
+            self::$queries,
+        );
+
+        if ($durations === []) {
+            return [
+                'count' => 0,
+                'percentiles' => [],
+                'summary' => [
+                    'min_ms' => 0.0,
+                    'max_ms' => 0.0,
+                    'avg_ms' => 0.0,
+                ],
+                'slow_count' => 0,
+                'threshold_ms' => $minimumMs,
+            ];
+        }
+
+        sort($durations);
+        $count = count($durations);
+        $sum = array_sum($durations);
+
+        $pct = [];
+        foreach ($percentiles as $percentile) {
+            if (! is_numeric($percentile)) {
+                continue;
+            }
+
+            $p = max(0.0, min(100.0, (float) $percentile));
+            $pct[(string) $p] = round(self::percentile($durations, $p), 4);
+        }
+
+        $slowCount = 0;
+
+        if ($minimumMs !== null) {
+            foreach ($durations as $duration) {
+                if ($duration >= $minimumMs) {
+                    $slowCount++;
+                }
+            }
+        }
+
+        return [
+            'count' => $count,
+            'percentiles' => $pct,
+            'summary' => [
+                'min_ms' => round($durations[0], 4),
+                'max_ms' => round($durations[$count - 1], 4),
+                'avg_ms' => round($sum / $count, 4),
+            ],
+            'slow_count' => $slowCount,
+            'threshold_ms' => $minimumMs,
+        ];
     }
 
     /**
@@ -137,6 +220,56 @@ final class Telemetry
                 'transaction_event_count' => \count(self::$transactions),
                 'total_query_time_ms' => round($totalQueryTime, 4),
             ],
+        ];
+    }
+
+    /**
+     * Return OpenTelemetry-like spans without clearing buffers.
+     *
+     * @return array<string,mixed>
+     */
+    public static function snapshotOtel(string $serviceName = 'dblayer'): array
+    {
+        $spans = [];
+
+        foreach (self::$queries as $query) {
+            $durationMs = (float) ($query['duration_ms'] ?? 0.0);
+            $end = (float) ($query['timestamp'] ?? microtime(true));
+            $start = max(0.0, $end - ($durationMs / 1_000.0));
+
+            $spans[] = [
+                'traceId' => self::hexHash('trace-' . ($query['span_id'] ?? 'q') . '-' . $end, 32),
+                'spanId' => self::hexHash('span-' . ($query['span_id'] ?? 'q') . '-' . $start, 16),
+                'name' => 'db.query',
+                'kind' => 3, // CLIENT
+                'startTimeUnixNano' => (string) self::toUnixNano($start),
+                'endTimeUnixNano' => (string) self::toUnixNano($end),
+                'attributes' => [
+                    ['key' => 'db.system', 'value' => ['stringValue' => (string) ($query['connection'] ?? 'unknown')]],
+                    ['key' => 'db.statement', 'value' => ['stringValue' => (string) ($query['sql'] ?? '')]],
+                    ['key' => 'db.bindings_count', 'value' => ['intValue' => (int) ($query['bindings_count'] ?? 0)]],
+                    ['key' => 'db.rows_affected', 'value' => ['intValue' => (int) ($query['rows_affected'] ?? 0)]],
+                    ['key' => 'db.duration_ms', 'value' => ['doubleValue' => $durationMs]],
+                ],
+            ];
+        }
+
+        return [
+            'resourceSpans' => [[
+                'resource' => [
+                    'attributes' => [[
+                        'key' => 'service.name',
+                        'value' => ['stringValue' => $serviceName],
+                    ]],
+                ],
+                'scopeSpans' => [[
+                    'scope' => [
+                        'name' => 'infocyph.dblayer',
+                        'version' => '1.0.0',
+                    ],
+                    'spans' => $spans,
+                ]],
+            ]],
         ];
     }
 
@@ -206,5 +339,53 @@ final class Telemetry
                 'timestamp' => microtime(true),
             ];
         });
+    }
+
+    /**
+     * Deterministic hex hash truncated to requested length.
+     */
+    private static function hexHash(string $input, int $length): string
+    {
+        return substr(hash('sha256', $input), 0, $length);
+    }
+
+    /**
+     * @param  list<float>  $sorted
+     */
+    private static function percentile(array $sorted, float $p): float
+    {
+        $count = count($sorted);
+
+        if ($count === 0) {
+            return 0.0;
+        }
+
+        if ($count === 1 || $p <= 0.0) {
+            return (float) $sorted[0];
+        }
+
+        if ($p >= 100.0) {
+            return (float) $sorted[$count - 1];
+        }
+
+        $index = ($p / 100.0) * ($count - 1);
+        $lower = (int) floor($index);
+        $upper = (int) ceil($index);
+
+        if ($lower === $upper) {
+            return (float) $sorted[$lower];
+        }
+
+        $weight = $index - $lower;
+
+        return (1 - $weight) * $sorted[$lower] + $weight * $sorted[$upper];
+    }
+
+    /**
+     * Convert seconds-since-epoch float to unix-nano integer.
+     */
+    private static function toUnixNano(float $seconds): int
+    {
+        return (int) round($seconds * 1_000_000_000);
     }
 }

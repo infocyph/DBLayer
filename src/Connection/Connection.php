@@ -137,6 +137,13 @@ final class Connection
     private array $readReplicaLatenciesMs = [];
 
     /**
+     * Temporary read-replica suppression map: index => unix timestamp when retry is allowed.
+     *
+     * @var array<int,int>
+     */
+    private array $readReplicaUnavailableUntil = [];
+
+    /**
      * Indicates whether a write has occurred on this connection instance.
      *
      * Used by sticky read-after-write behavior.
@@ -258,6 +265,8 @@ final class Connection
         $this->pdo = null;
         $this->readPdo = null;
         $this->readReplicaIndex = null;
+        $this->readReplicaLatenciesMs = [];
+        $this->readReplicaUnavailableUntil = [];
         $this->recordsModified = false;
     }
 
@@ -1066,6 +1075,68 @@ final class Connection
     }
 
     /**
+     * Return healthy read-replica indexes based on cooldown windows.
+     *
+     * @return list<int>
+     */
+    private function availableReadReplicaIndexes(int $count): array
+    {
+        $now = \time();
+        $available = [];
+
+        for ($index = 0; $index < $count; $index++) {
+            $retryAt = $this->readReplicaUnavailableUntil[$index] ?? null;
+
+            if ($retryAt === null || $retryAt <= $now) {
+                unset($this->readReplicaUnavailableUntil[$index]);
+                $available[] = $index;
+            }
+        }
+
+        return $available;
+    }
+
+    /**
+     * Build probe order for read replicas respecting strategy and health suppression.
+     *
+     * @param  list<array<string,mixed>>  $readConfigs
+     * @return list<int>
+     */
+    private function buildReadReplicaProbeOrder(array $readConfigs, string $strategy): array
+    {
+        $count = \count($readConfigs);
+        if ($count <= 1) {
+            return [0];
+        }
+
+        $available = $this->availableReadReplicaIndexes($count);
+        $fallback  = \array_values(\array_diff(\range(0, $count - 1), $available));
+        $pool      = $available !== [] ? $available : \range(0, $count - 1);
+
+        $primary = match ($strategy) {
+            'round_robin' => $this->nextRoundRobinIndexFrom($pool),
+            'weighted' => $this->selectWeightedReadReplicaIndex($pool, $readConfigs),
+            default => $pool[random_int(0, \count($pool) - 1)],
+        };
+
+        $rest = \array_values(\array_diff($pool, [$primary]));
+
+        if (\count($rest) > 1) {
+            \shuffle($rest);
+        }
+
+        if ($fallback !== []) {
+            if (\count($fallback) > 1) {
+                \shuffle($fallback);
+            }
+
+            $rest = \array_merge($rest, $fallback);
+        }
+
+        return \array_values(\array_unique(\array_merge([$primary], $rest)));
+    }
+
+    /**
      * Establish write database connection via the driver.
      */
     private function connect(): void
@@ -1235,6 +1306,38 @@ final class Connection
     }
 
     /**
+     * Mark a read replica as unavailable for a cooldown period.
+     */
+    private function markReadReplicaFailure(int $index): void
+    {
+        $cooldownSeconds = $this->config->getReadHealthCooldown();
+
+        if ($cooldownSeconds <= 0) {
+            return;
+        }
+
+        $this->readReplicaUnavailableUntil[$index] = \time() + $cooldownSeconds;
+    }
+
+    /**
+     * Pick next round-robin replica from an explicit index pool.
+     *
+     * @param  list<int>  $indexes
+     */
+    private function nextRoundRobinIndexFrom(array $indexes): int
+    {
+        $count = \count($indexes);
+        if ($count === 0) {
+            return 0;
+        }
+
+        $slot = $this->readReplicaCursor % $count;
+        $this->readReplicaCursor = ($slot + 1) % $count;
+
+        return $indexes[$slot];
+    }
+
+    /**
      * Record a performance sample into HealthCheck, if attached.
      */
     private function recordPerformanceSample(float $durationMs, bool $success): void
@@ -1303,8 +1406,14 @@ final class Connection
         $bestPdo     = null;
         $bestLatency = \INF;
         $latencies   = [];
+        $indexes     = $this->availableReadReplicaIndexes(\count($readConfigs));
 
-        foreach ($readConfigs as $index => $readConfig) {
+        if ($indexes === []) {
+            $indexes = \range(0, \count($readConfigs) - 1);
+        }
+
+        foreach ($indexes as $index) {
+            $readConfig = $readConfigs[$index];
             try {
                 $probeStart = microtime(true);
                 $pdo        = $this->createReadReplicaPdo($readConfig);
@@ -1312,6 +1421,7 @@ final class Connection
                 $latencyMs = (microtime(true) - $probeStart) * 1_000.0;
 
                 $latencies[$index] = round($latencyMs, 4);
+                unset($this->readReplicaUnavailableUntil[$index]);
 
                 if ($latencyMs < $bestLatency) {
                     $bestLatency = $latencyMs;
@@ -1319,6 +1429,7 @@ final class Connection
                     $bestPdo     = $pdo;
                 }
             } catch (PDOException|ConnectionException) {
+                $this->markReadReplicaFailure($index);
                 continue;
             }
         }
@@ -1350,9 +1461,24 @@ final class Connection
         }
 
         $this->readReplicaLatenciesMs = [];
-        $index = $this->selectReadReplicaIndex(\count($readConfigs), $strategy);
+        $probeOrder = $this->buildReadReplicaProbeOrder($readConfigs, $strategy);
 
-        return [$index, $this->createReadReplicaPdo($readConfigs[$index])];
+        foreach ($probeOrder as $index) {
+            try {
+                $pdo = $this->createReadReplicaPdo($readConfigs[$index]);
+                unset($this->readReplicaUnavailableUntil[$index]);
+
+                return [$index, $pdo];
+            } catch (PDOException|ConnectionException) {
+                $this->markReadReplicaFailure($index);
+                continue;
+            }
+        }
+
+        throw ConnectionException::connectionFailed(
+            $this->config->getDriver(),
+            'No healthy read replica available.',
+        );
     }
 
     /**
@@ -1393,22 +1519,50 @@ final class Connection
     }
 
     /**
-     * Select read replica index based on strategy.
+     * Pick a replica index based on configured weights.
+     *
+     * @param  list<int>  $indexes
+     * @param  list<array<string,mixed>>|null  $readConfigs
      */
-    private function selectReadReplicaIndex(int $count, string $strategy): int
+    private function selectWeightedReadReplicaIndex(array $indexes, ?array $readConfigs = null): int
     {
-        if ($count <= 1) {
+        if ($indexes === []) {
             return 0;
         }
 
-        if ($strategy === 'round_robin') {
-            $index = $this->readReplicaCursor % $count;
-            $this->readReplicaCursor = ($index + 1) % $count;
+        $weights = [];
+        $totalWeight = 0;
 
-            return $index;
+        foreach ($indexes as $index) {
+            $weight = 1;
+
+            if ($readConfigs !== null && isset($readConfigs[$index]['weight'])) {
+                $rawWeight = $readConfigs[$index]['weight'];
+
+                if (\is_numeric($rawWeight)) {
+                    $weight = max(1, (int) $rawWeight);
+                }
+            }
+
+            $weights[$index] = $weight;
+            $totalWeight += $weight;
         }
 
-        return random_int(0, $count - 1);
+        if ($totalWeight <= 0) {
+            return $indexes[random_int(0, \count($indexes) - 1)];
+        }
+
+        $ticket = random_int(1, $totalWeight);
+
+        foreach ($weights as $index => $weight) {
+            $ticket -= $weight;
+
+            if ($ticket <= 0) {
+                return (int) $index;
+            }
+        }
+
+        return $indexes[\count($indexes) - 1];
     }
 
     /**

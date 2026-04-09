@@ -839,6 +839,46 @@ final class Executor
     }
 
     /**
+     * Execute an UPSERT and return affected rows.
+     *
+     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>|null  $update
+     * @param  list<string>  $returning
+     * @return list<array<string,mixed>>
+     */
+    public function upsertReturning(
+        QueryBuilder $query,
+        array $values,
+        array $uniqueBy,
+        ?array $update = null,
+        array $returning = ['*'],
+    ): array {
+        $rows = $this->normalizeInsertValues($values);
+
+        if ($rows === []) {
+            return [];
+        }
+
+        $updateAssoc = $this->resolveUpsertUpdateAssoc($rows[0], $uniqueBy, $update);
+
+        $native = $this->runNativeUpsertReturning($query, $rows, $uniqueBy, $updateAssoc, $returning);
+        if ($native !== null) {
+            return $native;
+        }
+
+        // Portable fallback: run UPSERT, then fetch rows back by unique keys.
+        $this->upsert($query, $rows, $uniqueBy, $update);
+
+        $table = $this->tableFromQuery($query);
+        if ($table === null || $uniqueBy === []) {
+            return [];
+        }
+
+        return $this->fetchRowsByUniqueKeys($table, $rows, $uniqueBy, $returning);
+    }
+
+    /**
      * Append one query-log entry (supports bounded ring-buffer mode).
      *
      * @param  array{
@@ -896,7 +936,12 @@ final class Executor
         $components = $query->getComponents();
 
         // Keep grammar as the canonical path for currently unsupported components.
-        if ($components['distinct'] || $components['unions'] !== [] || $components['lock'] !== null) {
+        if (
+            ($components['ctes'] ?? []) !== []
+            || $components['distinct']
+            || $components['unions'] !== []
+            || $components['lock'] !== null
+        ) {
             return false;
         }
 
@@ -925,6 +970,47 @@ final class Executor
         }
 
         Events::dispatch($event, [$payload]);
+    }
+
+    /**
+     * Fetch rows back using the unique key filters used by UPSERT fallback.
+     *
+     * @param  list<array<string,mixed>>  $rows
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>  $returning
+     * @return list<array<string,mixed>>
+     */
+    private function fetchRowsByUniqueKeys(
+        string $table,
+        array $rows,
+        array $uniqueBy,
+        array $returning,
+    ): array {
+        $fetch = new QueryBuilder($this->connection, $this->grammar, $this);
+        $fetch->from($table)->select($returning);
+
+        $hasAnyFilter = false;
+
+        foreach ($rows as $row) {
+            $subset = $this->uniqueSubsetFromRow($row, $uniqueBy);
+
+            if ($subset === []) {
+                continue;
+            }
+
+            $hasAnyFilter = true;
+            $fetch->orWhere(static function (QueryBuilder $nested) use ($subset): void {
+                foreach ($subset as $column => $value) {
+                    $nested->where($column, '=', $value);
+                }
+            });
+        }
+
+        if (! $hasAnyFilter) {
+            return [];
+        }
+
+        return $fetch->get();
     }
 
     /**
@@ -1042,6 +1128,94 @@ final class Executor
         $this->queryLog = \array_values($ordered);
         $this->queryLogCount = \count($this->queryLog);
         $this->queryLogStart = 0;
+    }
+
+    /**
+     * @param  array<string,mixed>  $firstRow
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>|null  $update
+     * @return array<string,mixed>
+     */
+    private function resolveUpsertUpdateAssoc(array $firstRow, array $uniqueBy, ?array $update): array
+    {
+        if ($update === null) {
+            $allColumns = \array_keys($firstRow);
+            $updateCols = \array_values(\array_diff($allColumns, $uniqueBy));
+        } else {
+            $updateCols = $update;
+        }
+
+        $updateAssoc = [];
+        foreach ($updateCols as $col) {
+            $updateAssoc[$col] = null;
+        }
+
+        return $updateAssoc;
+    }
+
+    /**
+     * Try native UPSERT ... RETURNING when supported by grammar.
+     *
+     * @param  list<array<string,mixed>>  $rows
+     * @param  list<string>  $uniqueBy
+     * @param  array<string,mixed>  $updateAssoc
+     * @param  list<string>  $returning
+     * @return list<array<string,mixed>>|null
+     */
+    private function runNativeUpsertReturning(
+        QueryBuilder $query,
+        array $rows,
+        array $uniqueBy,
+        array $updateAssoc,
+        array $returning,
+    ): ?array {
+        if (! \method_exists($this->grammar, 'compileUpsertReturning')) {
+            return null;
+        }
+
+        $sql = $this->grammar->compileUpsertReturning($query, $rows, $uniqueBy, $updateAssoc, $returning);
+        $bindings = $this->getInsertBindings($rows);
+
+        $this->validateBindingCount($sql, $bindings);
+
+        return $this->raw($sql, $bindings);
+    }
+
+    /**
+     * Resolve table name from query components for fallback fetch.
+     */
+    private function tableFromQuery(QueryBuilder $query): ?string
+    {
+        $components = $query->getComponents();
+        $table = $components['from'] ?? null;
+
+        if (! \is_string($table) || $table === '') {
+            return null;
+        }
+
+        return $table;
+    }
+
+    /**
+     * Build unique-key subset for one row (or return empty when incomplete).
+     *
+     * @param  array<string,mixed>  $row
+     * @param  list<string>  $uniqueBy
+     * @return array<string,mixed>
+     */
+    private function uniqueSubsetFromRow(array $row, array $uniqueBy): array
+    {
+        $subset = [];
+
+        foreach ($uniqueBy as $key) {
+            if (! \array_key_exists($key, $row)) {
+                return [];
+            }
+
+            $subset[$key] = $row[$key];
+        }
+
+        return $subset;
     }
 
     /**

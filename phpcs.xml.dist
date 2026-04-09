@@ -13,6 +13,7 @@
 
     <file>./src</file>
     <file>./tests</file>
+    <file>./examples</file>
 
     <exclude-pattern>*/vendor/*</exclude-pattern>
     <exclude-pattern>*/.git/*</exclude-pattern>
@@ -36,10 +37,17 @@
         <exclude-pattern>*/examples/*</exclude-pattern>
         <properties>
             <property name="forbiddenFunctions" type="array">
+                <element key="echo" value="null"/>
+                <element key="print" value="null"/>
+                <element key="die" value="null"/>
+                <element key="eval" value="null"/>
+                <element key="sleep" value="null"/>
+                <element key="print_r" value="null"/>
                 <element key="d" value="null"/>
                 <element key="dd" value="null"/>
                 <element key="dump" value="null"/>
                 <element key="dump_d" value="null"/>
+                <element key="ray" value="null"/>
                 <element key="var_dump" value="null"/>
             </property>
         </properties>
