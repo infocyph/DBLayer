@@ -7,6 +7,8 @@ Repository wraps a table with reusable constraints and behavior toggles
 (tenant scoping, soft deletes, optimistic locking, casts, hooks). It is useful
 when multiple services share the same data access rules.
 
+For API selection guidance, see ``choosing-api`` and ``api-table-model``.
+
 Read APIs
 ---------
 

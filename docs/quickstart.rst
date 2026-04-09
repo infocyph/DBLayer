@@ -72,9 +72,34 @@ conditions. It uses SQLite in-memory so you can run it without external setup.
    $users = DB::repository('users');
    $one = $users->find(1);
 
+6. Pick the Right API for New Work
+----------------------------------
+
+Use this rule of thumb:
+
+- enter through ``DB`` first, then decide if you stay on facade methods or
+  branch to builder/repository
+- ``DB`` for infrastructure concerns (transactions, retries, telemetry, pooling).
+- ``DB::table()`` / ``QueryBuilder`` for ad-hoc SQL shape.
+- ``DB::repository()`` for reusable table policies.
+
+.. code-block:: php
+
+   DB::transaction(function (): void {
+       $users = DB::repository('users');
+       $firstActive = $users->first(fn ($q) => $q->where('active', '=', 1));
+
+       if ($firstActive !== null) {
+           DB::table('users')
+               ->where('id', '=', $firstActive['id'])
+               ->update(['name' => 'Updated in TX']);
+       }
+   });
+
 What To Do Next
 ---------------
 
+- Move to ``choosing-api`` for a full scenario matrix.
 - Move to ``configuration`` for multi-connection and security options.
 - Move to ``connections`` for replica and pooling behavior.
 - Move to ``query-builder`` and ``repository`` for advanced usage patterns.

@@ -21,9 +21,10 @@ If you are new to the project, follow this order:
 
 1. ``installation`` for environment setup.
 2. ``quickstart`` for a working end-to-end flow.
-3. ``configuration`` and ``connections`` to move from local to production use.
-4. ``query-builder`` and ``repository`` for day-to-day application code.
-5. ``security`` and ``observability`` before deploying.
+3. ``choosing-api`` to choose DB vs QueryBuilder vs Repository.
+4. ``configuration`` and ``connections`` to move from local to production use.
+5. ``query-builder`` and ``repository`` for day-to-day application code.
+6. ``security`` and ``observability`` before deploying.
 
 The API reference sections are intentionally method-oriented and are best used
 as lookup pages after reading the guides.
@@ -42,6 +43,7 @@ as lookup pages after reading the guides.
 
    configuration
    connections
+   choosing-api
    query-builder
    repository
    transactions
@@ -50,12 +52,6 @@ as lookup pages after reading the guides.
    observability
    events-helpers
    benchmarks
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Tooling
-
-   tooling
    ci
 
 .. toctree::
@@ -63,6 +59,7 @@ as lookup pages after reading the guides.
    :caption: API Reference
 
    api-facade
+   api-table-model
    api-query-builder
    api-repository
    api-connection-config

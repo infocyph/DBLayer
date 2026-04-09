@@ -158,6 +158,36 @@ $one = $users->find(1);
 $active = $users->get(fn ($q) => $q->where('active', 1));
 ```
 
+### Choosing APIs (DB vs QueryBuilder vs Repository)
+
+- Use `DB` for infrastructure concerns: connections, transactions, retries, telemetry, pooling.
+- Use `DB::table()` / `QueryBuilder` for ad-hoc SQL shaping: joins, CTEs, dynamic filters, reporting.
+- Use `DB::repository()` for reusable table-level rules: tenant scope, soft deletes, optimistic locking, hooks, casts.
+
+If the same table rules appear in multiple call sites, move that logic into a repository-oriented class.
+
+### TableModel (Model-Like, Non-ORM)
+
+```php
+use Infocyph\DBLayer\Model\TableModel;
+use Infocyph\DBLayer\Query\Repository;
+
+final class User extends TableModel
+{
+    protected static string $table = 'users';
+    protected static ?string $connection = 'main';
+
+    protected static function configureRepository(Repository $repository): Repository
+    {
+        return $repository->enableSoftDeletes()->setDefaultOrder('id', 'desc');
+    }
+}
+
+$one = User::find(1);                              // Repository method
+$rows = User::where('active', '=', 1)->get();     // QueryBuilder method
+$stats = User::stats();                            // DB facade method
+```
+
 ### Transactions
 
 ```php
