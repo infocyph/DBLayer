@@ -12,22 +12,15 @@ use Throwable;
 final class ValidationException extends DBException
 {
     /**
-     * @var array<string, array<int, string>|string>
-     */
-    protected array $errors;
-
-    /**
      * @param array<string, array<int, string>|string> $errors
      */
     public function __construct(
         string $message = 'Validation failed.',
-        array $errors = [],
+        protected array $errors = [],
         int $code = 0,
         ?Throwable $previous = null,
     ) {
         parent::__construct($message, $code, $previous);
-
-        $this->errors = $errors;
     }
 
     /**

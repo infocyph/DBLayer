@@ -24,7 +24,7 @@ final class ConnectionConfig
      *
      * @var array<string,mixed>
      */
-    private const DEFAULTS = [
+    private const array DEFAULTS = [
         'driver'    => 'mysql',
         'host'      => '127.0.0.1',
         'port'      => null,
@@ -49,7 +49,7 @@ final class ConnectionConfig
      *
      * @var array<string,string>
      */
-    private const DRIVER_ALIASES = [
+    private const array DRIVER_ALIASES = [
         'pdo_mysql'  => 'mysql',
         'mysqli'     => 'mysql',
         'mariadb'    => 'mysql',
@@ -66,7 +66,7 @@ final class ConnectionConfig
      *
      * @var array<string,mixed>
      */
-    private const SECURITY_DEFAULT = [
+    private const array SECURITY_DEFAULT = [
         'enabled'         => true,
         'max_sql_length'  => 16_384,
         'max_params'      => 512,

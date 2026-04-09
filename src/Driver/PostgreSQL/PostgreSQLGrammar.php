@@ -96,9 +96,7 @@ final class PostgreSQLGrammar extends Grammar
         }
 
         $updateColumns = implode(', ', array_map(
-            function (string $key): string {
-                return $this->wrap($key) . ' = excluded.' . $this->wrap($key);
-            },
+            fn(string $key): string => $this->wrap($key) . ' = excluded.' . $this->wrap($key),
             array_keys($update),
         ));
 

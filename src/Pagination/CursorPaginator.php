@@ -16,37 +16,27 @@ namespace Infocyph\DBLayer\Pagination;
 final class CursorPaginator extends AbstractPaginator
 {
     /**
-     * Cursor used to generate this page (opaque).
-     */
-    private ?string $cursor;
-
-    /**
-     * Whether there is a next page.
-     */
-    private bool $hasMore;
-
-    /**
-     * Cursor for the next page (opaque).
-     */
-    private ?string $nextCursor;
-
-    /**
      * @param list<mixed> $items
      */
     public function __construct(
         array $items,
         int $perPage,
-        ?string $cursor,
-        ?string $nextCursor,
-        bool $hasMore,
+        /**
+         * Cursor used to generate this page (opaque).
+         */
+        private readonly ?string $cursor,
+        /**
+         * Cursor for the next page (opaque).
+         */
+        private readonly ?string $nextCursor,
+        /**
+         * Whether there is a next page.
+         */
+        private readonly bool $hasMore,
     ) {
         // Page number is mostly meaningless for cursor-based pagination,
         // but we keep it as 1 for interface compatibility.
         parent::__construct($items, $perPage);
-
-        $this->cursor     = $cursor;
-        $this->nextCursor = $nextCursor;
-        $this->hasMore    = $hasMore;
     }
 
     public function cursor(): ?string

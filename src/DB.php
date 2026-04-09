@@ -687,7 +687,7 @@ class DB
      */
     public static function reconnect(?string $name = null): Connection
     {
-        $name = $name ?? static::$defaultConnection;
+        $name ??= static::$defaultConnection;
 
         if ($name === null || ! isset(static::$connectionConfigs[$name])) {
             throw ConnectionException::connectionNotFound($name ?? 'null');
@@ -714,9 +714,7 @@ class DB
         $normalizedTable = static::normalizeTableName($table);
 
         return new class ($conn, $normalizedTable, static::resultProcessor()) extends Repository {
-            private string $table;
-
-            public function __construct(Connection $connection, string $table, ResultProcessor $results)
+            public function __construct(Connection $connection, private readonly string $table, ResultProcessor $results)
             {
                 parent::__construct(
                     $connection,
@@ -724,7 +722,6 @@ class DB
                     $connection->getExecutorInstance(),
                     $results,
                 );
-                $this->table = $table;
             }
 
             #[\Override]

@@ -29,7 +29,7 @@ final class Security
      *
      * NOTE: This is defense-in-depth on top of prepared statements.
      */
-    private const DANGEROUS_PATTERNS = [
+    private const array DANGEROUS_PATTERNS = [
         '/;\s*(drop|truncate|delete)\s+/i',
         '/into\s+(outfile|dumpfile)/i',
         '/load_file\s*\(/i',
@@ -40,23 +40,23 @@ final class Security
         '/execute\s+immediate/i',
     ];
 
-    private const DEFAULT_MAX_IN_ITEMS = 1000;
+    private const int DEFAULT_MAX_IN_ITEMS = 1000;
 
-    private const DEFAULT_MAX_QUERY_LENGTH = 10000;
+    private const int DEFAULT_MAX_QUERY_LENGTH = 10000;
 
     /**
      * Defaults (compatible with old constants).
      */
-    private const DEFAULT_QUERIES_PER_MINUTE = 1000;
+    private const int DEFAULT_QUERIES_PER_MINUTE = 1000;
 
-    private const DEFAULT_QUERIES_PER_SECOND = 100;
+    private const int DEFAULT_QUERIES_PER_SECOND = 100;
 
-    private const STRICT_MAX_IN_ITEMS = 800;
+    private const int STRICT_MAX_IN_ITEMS = 800;
 
     /**
      * STRICT mode can be a bit tighter.
      */
-    private const STRICT_MAX_QUERY_LENGTH = 8000;
+    private const int STRICT_MAX_QUERY_LENGTH = 8000;
 
     /**
      * Global security mode.
@@ -220,7 +220,7 @@ final class Security
             'alter table',
             'create table',
         ];
-        return array_any($dangerous, fn($operation) => str_starts_with($sql, $operation));
+        return array_any($dangerous, fn($operation) => str_starts_with($sql, (string) $operation));
     }
 
     /**

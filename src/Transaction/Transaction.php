@@ -25,17 +25,12 @@ final class Transaction
     /**
      * Base backoff in microseconds for deadlock retries.
      */
-    private const BASE_BACKOFF_US = 100_000;
+    private const int BASE_BACKOFF_US = 100_000;
 
     /**
      * Maximum number of retry attempts for deadlocks.
      */
-    private const MAX_ATTEMPTS = 3;
-
-    /**
-     * Underlying connection.
-     */
-    private Connection $connection;
+    private const int MAX_ATTEMPTS = 3;
 
     /**
      * Current nesting level.
@@ -74,10 +69,12 @@ final class Transaction
         'elapsed_time'    => 0.0,
     ];
 
-    public function __construct(Connection $connection)
-    {
-        $this->connection = $connection;
-    }
+    public function __construct(
+        /**
+         * Underlying connection.
+         */
+        private readonly Connection $connection,
+    ) {}
 
     /**
      * Begin a new transaction or create a savepoint for nested transactions.

@@ -10,20 +10,17 @@ namespace Infocyph\DBLayer\Query;
  * Represents a raw SQL expression that should not be escaped or quoted.
  * Useful for database functions, raw SQL, and complex expressions.
  */
-final class Expression
+final readonly class Expression implements \Stringable
 {
-    /**
-     * The value of the expression.
-     */
-    private string $value;
-
     /**
      * Create a new expression instance.
      */
-    public function __construct(string $value)
-    {
-        $this->value = $value;
-    }
+    public function __construct(
+        /**
+         * The value of the expression.
+         */
+        private string $value,
+    ) {}
 
     /**
      * Get the string representation.

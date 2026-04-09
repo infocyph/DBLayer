@@ -304,7 +304,7 @@ final class Cache
         }
 
         $key = $this->makeKey($key);
-        $ttl = $ttl ?? $this->defaultTtl;
+        $ttl ??= $this->defaultTtl;
 
         if ($ttl < 0) {
             $ttl = 0;

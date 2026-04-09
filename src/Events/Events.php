@@ -192,8 +192,8 @@ final class Events
      */
     public static function getStats(): array
     {
-        $totalListeners = \array_sum(\array_map('count', self::$listeners))
-          + \array_sum(\array_map('count', self::$wildcardListeners));
+        $totalListeners = \array_sum(\array_map(count(...), self::$listeners))
+          + \array_sum(\array_map(count(...), self::$wildcardListeners));
 
         return [
             'dispatched'        => self::$stats['dispatched'],

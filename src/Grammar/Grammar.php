@@ -60,7 +60,7 @@ abstract class Grammar
      */
     public function columnize(array $columns): string
     {
-        return \implode(', ', \array_map([$this, 'wrap'], $columns));
+        return \implode(', ', \array_map($this->wrap(...), $columns));
     }
 
     /**
@@ -402,9 +402,7 @@ abstract class Grammar
         $columns    = $this->columnize(\array_keys($rows[0]));
 
         $parameters = \implode(', ', \array_map(
-            function (array $record): string {
-                return '(' . $this->parameterize($record) . ')';
-            },
+            fn(array $record): string => '(' . $this->parameterize($record) . ')',
             $rows,
         ));
 
@@ -483,7 +481,7 @@ abstract class Grammar
                 }
 
                 $table = $this->wrapTable($join['table']);
-                $type  = \strtoupper($join['type']);
+                $type  = \strtoupper((string) $join['type']);
 
                 if (isset($join['first'])) {
                     return "{$type} join {$table} on {$this->wrap($join['first'])} {$join['operator']} {$this->wrap($join['second'])}";
@@ -535,9 +533,7 @@ abstract class Grammar
         unset($query);
 
         $sql = \implode(', ', \array_map(
-            function (array $order): string {
-                return $this->wrap($order['column']) . ' ' . \strtoupper($order['direction']);
-            },
+            fn(array $order): string => $this->wrap($order['column']) . ' ' . \strtoupper($order['direction']),
             $orders,
         ));
 
@@ -612,7 +608,7 @@ abstract class Grammar
                 $boolean = $i === 0 ? '' : $where['boolean'] . ' ';
 
                 /** @var callable(QueryBuilder,array<string,mixed>):string $handler */
-                $handler = [$this, 'where' . \ucfirst($where['type'])];
+                $handler = [$this, 'where' . \ucfirst((string) $where['type'])];
 
                 return $boolean . $handler($query, $where);
             },
@@ -758,9 +754,7 @@ abstract class Grammar
     protected function wrapSegments(array $segments): string
     {
         return \implode('.', \array_map(
-            function (string $segment): string {
-                return $segment === '*' ? $segment : $this->wrapValue($segment);
-            },
+            fn(string $segment): string => $segment === '*' ? $segment : $this->wrapValue($segment),
             $segments,
         ));
     }

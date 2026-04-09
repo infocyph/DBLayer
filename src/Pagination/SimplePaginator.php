@@ -13,8 +13,6 @@ namespace Infocyph\DBLayer\Pagination;
  */
 final class SimplePaginator extends AbstractPaginator
 {
-    private bool $hasMore;
-
     /**
      * @param list<mixed> $items
      */
@@ -22,11 +20,9 @@ final class SimplePaginator extends AbstractPaginator
         array $items,
         int $perPage,
         int $currentPage = 1,
-        bool $hasMore = false,
+        private readonly bool $hasMore = false,
     ) {
         parent::__construct($items, $perPage, $currentPage);
-
-        $this->hasMore = $hasMore;
     }
 
     #[\Override]

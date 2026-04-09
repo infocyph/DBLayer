@@ -72,7 +72,6 @@ final class SQLiteDriver extends AbstractPdoDriver
         if (! is_string($database) || $database === '') {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                'Missing "database" for SQLite connection. Use a file path or ":memory:".',
             );
         }
 
@@ -80,7 +79,6 @@ final class SQLiteDriver extends AbstractPdoDriver
         if ($database !== ':memory:' && str_ends_with($database, DIRECTORY_SEPARATOR)) {
             throw ConnectionException::invalidConfiguration(
                 $driver,
-                'SQLite "database" looks like a directory path; expected a file path or ":memory:".',
             );
         }
     }

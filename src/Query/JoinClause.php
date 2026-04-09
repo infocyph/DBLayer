@@ -29,23 +29,18 @@ final class JoinClause
     private array $conditions = [];
 
     /**
-     * The table being joined.
-     */
-    private string $table;
-
-    /**
-     * The type of join.
-     */
-    private string $type;
-
-    /**
      * Create a new join clause instance.
      */
-    public function __construct(string $table, string $type = 'inner')
-    {
-        $this->table = $table;
-        $this->type  = $type;
-    }
+    public function __construct(
+        /**
+         * The table being joined.
+         */
+        private readonly string $table,
+        /**
+         * The type of join.
+         */
+        private readonly string $type = 'inner',
+    ) {}
 
     /**
      * Get bindings for this join.

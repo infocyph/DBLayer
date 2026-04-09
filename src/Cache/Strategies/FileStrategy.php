@@ -10,12 +10,12 @@ namespace Infocyph\DBLayer\Cache\Strategies;
  * File-based cache storage for persistent caching.
  * Survives between requests but slower than memory.
  */
-final class FileStrategy implements CacheStrategy
+final readonly class FileStrategy implements CacheStrategy
 {
     /**
      * File extension.
      */
-    private const EXTENSION = '.cache';
+    private const string EXTENSION = '.cache';
 
     /**
      * Cache directory.

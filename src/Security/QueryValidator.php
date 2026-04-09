@@ -24,7 +24,7 @@ final class QueryValidator
      * NOTE: This is intentionally conservative; patterns may be tuned
      * via Security facade mode (NORMAL/STRICT/OFF).
      */
-    private const INJECTION_PATTERNS = [
+    private const array INJECTION_PATTERNS = [
         // UNION-based injections usually chained after boolean bypass payloads.
         '/\b(or|and)\b[\s\S]{0,128}\bunion\b(?:\s+all)?\s+\bselect\b/i',
 

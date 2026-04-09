@@ -16,7 +16,7 @@ final class LengthAwarePaginator extends AbstractPaginator
     /**
      * Total matching items.
      */
-    private int $total;
+    private readonly int $total;
 
     /**
      * @param list<mixed> $items

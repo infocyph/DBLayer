@@ -72,7 +72,7 @@ final class Logger
         ];
 
         if ($exception !== null) {
-            $context['exception'] = get_class($exception);
+            $context['exception'] = $exception::class;
             $context['file']      = $exception->getFile();
             $context['line']      = $exception->getLine();
             $context['trace']     = $exception->getTraceAsString();

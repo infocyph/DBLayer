@@ -22,7 +22,7 @@ final class HealthCheck
      *
      * @var array{check_interval:int,max_latency_ms:int,max_error_rate:float,sample_size:int}
      */
-    private const DEFAULTS = [
+    private const array DEFAULTS = [
         'check_interval' => 30,
         'max_latency_ms' => 1_000,
         'max_error_rate' => 0.1,
@@ -35,11 +35,6 @@ final class HealthCheck
      * @var array{check_interval:int,max_latency_ms:int,max_error_rate:float,sample_size:int}
      */
     private array $config;
-
-    /**
-     * Connection to monitor.
-     */
-    private Connection $connection;
 
     /**
      * Health metrics.
@@ -76,10 +71,12 @@ final class HealthCheck
      *
      * @param  array<string,mixed>  $config
      */
-    public function __construct(Connection $connection, array $config = [])
-    {
-        $this->connection = $connection;
-
+    public function __construct(/**
+     * Connection to monitor.
+     */
+        private readonly Connection $connection,
+        array $config = [],
+    ) {
         $merged = array_merge(self::DEFAULTS, $config);
 
         $this->config = [

@@ -11,18 +11,15 @@ use Infocyph\DBLayer\Connection\Connection;
  *
  * Dispatched when a transaction is starting.
  */
-final class TransactionBeginning
+final readonly class TransactionBeginning
 {
-    public readonly Connection $connection;
-
     /**
      * Event timestamp (microtime(true)).
      */
-    public readonly float $time;
+    public float $time;
 
-    public function __construct(Connection $connection, ?float $time = null)
+    public function __construct(public Connection $connection, ?float $time = null)
     {
-        $this->connection = $connection;
         $this->time       = $time ?? microtime(true);
     }
 

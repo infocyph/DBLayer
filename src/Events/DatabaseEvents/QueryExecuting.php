@@ -11,34 +11,22 @@ use Infocyph\DBLayer\Connection\Connection;
  *
  * Dispatched before a query is executed.
  */
-final class QueryExecuting
+final readonly class QueryExecuting
 {
-    /**
-     * @var array<int|string, mixed>
-     */
-    public readonly array $bindings;
-
-    public readonly Connection $connection;
-
-    public readonly string $sql;
-
     /**
      * Event timestamp (microtime(true)).
      */
-    public readonly float $time;
+    public float $time;
 
     /**
      * @param array<int|string, mixed> $bindings
      */
     public function __construct(
-        string $sql,
-        array $bindings,
-        Connection $connection,
+        public string $sql,
+        public array $bindings,
+        public Connection $connection,
         ?float $time = null,
     ) {
-        $this->sql        = $sql;
-        $this->bindings   = $bindings;
-        $this->connection = $connection;
         $this->time       = $time ?? microtime(true);
     }
 

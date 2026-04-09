@@ -25,15 +25,13 @@ final class PoolManager
      * @var array<int,string>
      */
     private array $connectionNames = [];
-    /**
-     * Underlying pool instance.
-     */
-    private Pool $pool;
 
-    public function __construct(Pool $pool)
-    {
-        $this->pool = $pool;
-    }
+    public function __construct(
+        /**
+         * Underlying pool instance.
+         */
+        private readonly Pool $pool,
+    ) {}
 
     /**
      * Get a pooled connection for the given name.

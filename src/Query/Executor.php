@@ -25,16 +25,6 @@ use Infocyph\DBLayer\Grammar\Grammar;
 final class Executor
 {
     /**
-     * Database connection.
-     */
-    private readonly Connection $connection;
-
-    /**
-     * SQL grammar compiler (legacy path).
-     */
-    private readonly Grammar $grammar;
-
-    /**
      * Whether to dispatch query events.
      */
     private bool $dispatchEvents = true;
@@ -87,11 +77,16 @@ final class Executor
     /**
      * Create a new executor instance.
      */
-    public function __construct(Connection $connection, Grammar $grammar)
-    {
-        $this->connection = $connection;
-        $this->grammar    = $grammar;
-    }
+    public function __construct(
+        /**
+         * Database connection.
+         */
+        private readonly Connection $connection,
+        /**
+         * SQL grammar compiler (legacy path).
+         */
+        private readonly Grammar $grammar,
+    ) {}
 
     /**
      * Clear the query log.

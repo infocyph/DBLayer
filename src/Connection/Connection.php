@@ -41,27 +41,22 @@ final class Connection
     /**
      * Hard upper bound for retry-policy guided query retries.
      */
-    private const MAX_QUERY_RETRY_ATTEMPTS = 5;
+    private const int MAX_QUERY_RETRY_ATTEMPTS = 5;
 
     /**
      * Maximum reconnection attempts for a single failing operation.
      */
-    private const MAX_RECONNECT_ATTEMPTS = 3;
+    private const int MAX_RECONNECT_ATTEMPTS = 3;
 
     /**
      * Query compiler for this connection.
      */
-    private QueryCompilerInterface $compiler;
-
-    /**
-     * Connection configuration.
-     */
-    private ConnectionConfig $config;
+    private readonly QueryCompilerInterface $compiler;
 
     /**
      * Driver for this connection.
      */
-    private DriverInterface $driver;
+    private readonly DriverInterface $driver;
 
     /**
      * Query executor for this connection (legacy path).
@@ -180,14 +175,16 @@ final class Connection
     /**
      * Create a new connection instance.
      */
-    public function __construct(ConnectionConfig $config)
-    {
-        $this->config = $config;
-        $this->tablePrefix = (string) ($config->get('prefix') ?? '');
-        $this->securityChecks = $config->isSecurityEnabled();
+    public function __construct(/**
+     * Connection configuration.
+     */
+        private ConnectionConfig $config,
+    ) {
+        $this->tablePrefix = (string) ($this->config->get('prefix') ?? '');
+        $this->securityChecks = $this->config->isSecurityEnabled();
 
         // Resolve driver and compiler up front; all engines go through DriverRegistry.
-        $this->driver = DriverRegistry::resolve($config->getDriver());
+        $this->driver = DriverRegistry::resolve($this->config->getDriver());
         $this->compiler = $this->driver->createCompiler();
     }
 

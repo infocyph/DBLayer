@@ -30,7 +30,7 @@ final class Pool
      *   health_check_interval:int
      * }
      */
-    private const DEFAULTS = [
+    private const array DEFAULTS = [
         'min_connections'       => 1,
         'max_connections'       => 10,
         'idle_timeout'          => 60,
@@ -41,7 +41,7 @@ final class Pool
     /**
      * Max number of active connections to probe per health-check run.
      */
-    private const HEALTH_CHECK_BATCH_SIZE = 5;
+    private const int HEALTH_CHECK_BATCH_SIZE = 5;
 
     /**
      * Connection configurations.

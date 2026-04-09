@@ -20,13 +20,6 @@ abstract class AbstractPaginator implements PaginatorInterface
     protected int $currentPage;
 
     /**
-     * Current page items.
-     *
-     * @var list<mixed>
-     */
-    protected array $items;
-
-    /**
      * Items per page (>=1).
      */
     protected int $perPage;
@@ -34,9 +27,13 @@ abstract class AbstractPaginator implements PaginatorInterface
     /**
      * @param list<mixed> $items
      */
-    public function __construct(array $items, int $perPage, int $currentPage = 1)
-    {
-        $this->items       = $items;
+    public function __construct(/**
+     * Current page items.
+     */
+        protected array $items,
+        int $perPage,
+        int $currentPage = 1,
+    ) {
         $this->perPage     = max(1, $perPage);
         $this->currentPage = max(1, $currentPage);
     }

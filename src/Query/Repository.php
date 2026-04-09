@@ -34,10 +34,6 @@ abstract class Repository
      * @var array<string,string|callable(mixed):mixed>
      */
     protected array $casts = [];
-    /**
-     * Database connection.
-     */
-    protected Connection $connection;
 
     /**
      * Default ordering rules applied to every query().
@@ -47,21 +43,11 @@ abstract class Repository
     protected array $defaultOrders = [];
 
     /**
-     * Query executor.
-     */
-    protected Executor $executor;
-
-    /**
      * Repository-level query scopes applied to every query().
      *
      * @var list<callable(QueryBuilder):void>
      */
     protected array $globalScopes = [];
-
-    /**
-     * SQL grammar compiler.
-     */
-    protected Grammar $grammar;
 
     /**
      * Lifecycle hooks keyed by event name.
@@ -95,11 +81,6 @@ abstract class Repository
     protected ?string $optimisticLockColumn = null;
 
     /**
-     * Result processor.
-     */
-    protected ResultProcessor $results;
-
-    /**
      * Soft-delete timestamp column.
      */
     protected string $softDeleteColumn = 'deleted_at';
@@ -128,16 +109,23 @@ abstract class Repository
      * Create a new repository instance.
      */
     public function __construct(
-        Connection $connection,
-        Grammar $grammar,
-        Executor $executor,
-        ResultProcessor $results,
-    ) {
-        $this->connection = $connection;
-        $this->grammar    = $grammar;
-        $this->executor   = $executor;
-        $this->results    = $results;
-    }
+        /**
+         * Database connection.
+         */
+        protected Connection $connection,
+        /**
+         * SQL grammar compiler.
+         */
+        protected Grammar $grammar,
+        /**
+         * Query executor.
+         */
+        protected Executor $executor,
+        /**
+         * Result processor.
+         */
+        protected ResultProcessor $results,
+    ) {}
 
     /**
      * The backing table name.
@@ -1165,7 +1153,7 @@ abstract class Repository
         $first = reset($values);
         if (is_array($first)) {
             return array_map(
-                fn(array $row): array => $this->applyTenantAttributes($row),
+                $this->applyTenantAttributes(...),
                 $values,
             );
         }
@@ -1212,7 +1200,7 @@ abstract class Repository
 
         if (is_array($first)) {
             return array_map(
-                fn(array $row): array => $this->applyWriteCastsToAttributes($row),
+                $this->applyWriteCastsToAttributes(...),
                 $values,
             );
         }
@@ -1288,7 +1276,7 @@ abstract class Repository
      */
     private function freshTimestamp(): string
     {
-        return (new \DateTimeImmutable('now'))->format($this->grammar->getDateFormat());
+        return new \DateTimeImmutable('now')->format($this->grammar->getDateFormat());
     }
 
     /**

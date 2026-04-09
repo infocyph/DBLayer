@@ -32,21 +32,6 @@ use Infocyph\DBLayer\Query\Core\QueryType;
 class QueryBuilder
 {
     /**
-     * Database connection.
-     */
-    private readonly Connection $connection;
-
-    /**
-     * Query executor.
-     */
-    private readonly Executor $executor;
-
-    /**
-     * SQL grammar compiler.
-     */
-    private readonly Grammar $grammar;
-
-    /**
      * Aggregate function definition or null.
      *
      * @var array{function:string,column:string}|null
@@ -157,14 +142,19 @@ class QueryBuilder
      * Create a new query builder instance.
      */
     public function __construct(
-        Connection $connection,
-        Grammar $grammar,
-        Executor $executor,
-    ) {
-        $this->connection = $connection;
-        $this->grammar    = $grammar;
-        $this->executor   = $executor;
-    }
+        /**
+         * Database connection.
+         */
+        private readonly Connection $connection,
+        /**
+         * SQL grammar compiler.
+         */
+        private readonly Grammar $grammar,
+        /**
+         * Query executor.
+         */
+        private readonly Executor $executor,
+    ) {}
 
     /**
      * Add a select column (no duplicates).

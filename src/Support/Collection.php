@@ -25,22 +25,14 @@ use JsonSerializable;
  * @implements Iterator<TKey, TValue>
  * @implements JsonSerializable
  */
-final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable
+final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable, \Stringable
 {
-    /**
-     * @var array<TKey, TValue>
-     */
-    protected array $items;
-
     /**
      * Create a new collection.
      *
      * @param array<TKey, TValue> $items Initial items
      */
-    public function __construct(array $items = [])
-    {
-        $this->items = $items;
-    }
+    public function __construct(protected array $items = []) {}
 
     /**
      * Convert collection to JSON string.
