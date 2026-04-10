@@ -8,6 +8,9 @@ use Infocyph\DBLayer\DB;
 putenv('APP_ENV=testing');
 $_ENV['APP_ENV'] = 'testing';
 $_SERVER['APP_ENV'] = 'testing';
+putenv('DBLAYER_ALLOW_INSECURE_TRANSPORT=1');
+$_ENV['DBLAYER_ALLOW_INSECURE_TRANSPORT'] = '1';
+$_SERVER['DBLAYER_ALLOW_INSECURE_TRANSPORT'] = '1';
 
 beforeEach(function (): void {
     DB::purge();
