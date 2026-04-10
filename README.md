@@ -225,6 +225,14 @@ composer test:static
 composer test:security
 ```
 
+Test execution is driver-aware:
+
+- SQLite-only environments run the base test set.
+- If MySQL/PostgreSQL are available (via ``DBLAYER_MYSQL_*`` / ``DBLAYER_PGSQL_*`` env vars),
+  matrix tests automatically run for those drivers too.
+
+So total test count increases when more drivers are available.
+
 ## Benchmarking
 
 ```bash
