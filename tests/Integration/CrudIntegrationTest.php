@@ -3,20 +3,23 @@
 declare(strict_types=1);
 
 use Infocyph\DBLayer\DB;
+use Infocyph\DBLayer\Exceptions\QueryException;
 
-it('covers query builder CRUD operations end-to-end', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ]);
+it('covers query builder CRUD operations end-to-end', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
 
     DB::statement(
-        'create table users (
-            id integer primary key autoincrement,
-            email text unique,
-            name text,
+        sprintf(
+            'create table users (
+            %s,
+            email %s unique,
+            name %s,
             age integer
-        )'
+        )',
+            dblayerAutoIncrementPrimaryKey($driver),
+            dblayerStringType($driver, 191),
+            dblayerStringType($driver),
+        ),
     );
 
     expect(DB::table('users')->insert([
@@ -45,11 +48,22 @@ it('covers query builder CRUD operations end-to-end', function (): void {
     expect($returned)->toBeArray();
     expect((int) ($returned['id'] ?? 0))->toBeGreaterThan(0);
 
-    expect(DB::table('users')->insertIgnore([
-        'email' => 'a@example.com',
-        'name' => 'Duplicate',
-        'age' => 99,
-    ]))->toBeFalse();
+    if (DB::connection()->supportsInsertIgnore()) {
+        expect(DB::table('users')->insertIgnore([
+            'email' => 'a@example.com',
+            'name' => 'Duplicate',
+            'age' => 99,
+        ]))->toBeFalse();
+    } else {
+        expect(static function (): bool {
+            return DB::table('users')->insertIgnore([
+                'email' => 'a@example.com',
+                'name' => 'Duplicate',
+                'age' => 99,
+            ]);
+        })->toThrow(QueryException::class);
+    }
+
     expect((int) DB::table('users')->count())->toBe(5);
 
     $updated = DB::table('users')
@@ -73,4 +87,4 @@ it('covers query builder CRUD operations end-to-end', function (): void {
 
     expect(DB::table('users')->truncate())->toBeTrue();
     expect((int) DB::table('users')->count())->toBe(0);
-});
+})->with('dblayer_drivers');

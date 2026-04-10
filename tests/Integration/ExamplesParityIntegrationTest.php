@@ -9,43 +9,37 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Security\QueryValidator;
 
-it('matches bootstrap example connection setup flow', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
+it('matches bootstrap example connection setup flow', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver, 'primary', [
         'security' => [
             'enabled' => true,
             'max_sql_length' => 8000,
             'max_params' => 500,
             'max_param_bytes' => 4096,
         ],
-    ], 'mysql_main');
-
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'pgsql_reporting');
-
-    DB::setDefaultConnection('mysql_main');
-
-    expect(DB::getDefaultConnection())->toBe('mysql_main');
-    expect(DB::connection()->getDriverName())->toBe('sqlite');
-    expect(DB::connection('pgsql_reporting')->getDriverName())->toBe('sqlite');
-});
-
-it('matches chunking example flow', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
     ]);
+    dblayerAddConnectionForDriver($driver, 'reporting');
 
-    DB::statement(
+    DB::setDefaultConnection('primary');
+
+    expect(DB::getDefaultConnection())->toBe('primary');
+    expect(DB::connection()->getDriverName())->toBe($driver);
+    expect(DB::connection('reporting')->getDriverName())->toBe($driver);
+})->with('dblayer_drivers');
+
+it('matches chunking example flow', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
+
+    DB::statement(sprintf(
         'create table audit_logs (
-            id integer primary key autoincrement,
-            action text,
-            created_at text
+            %s,
+            action %s,
+            created_at %s
         )',
-    );
+        dblayerAutoIncrementPrimaryKey($driver),
+        dblayerStringType($driver),
+        dblayerDateTimeType($driver),
+    ));
 
     $today = date('Y-m-d H:i:s');
 
@@ -89,30 +83,32 @@ it('matches chunking example flow', function (): void {
         2 => [3, 4],
         3 => [5],
     ]);
-});
+})->with('dblayer_drivers');
 
-it('matches filtering example flow', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ]);
+it('matches filtering example flow', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
 
-    DB::statement(
+    DB::statement(sprintf(
         'create table users (
-            id integer primary key autoincrement,
-            name text,
-            email text,
-            role text,
+            %s,
+            name %s,
+            email %s,
+            role %s,
             active integer,
-            deleted_at text
+            deleted_at %s
         )',
-    );
+        dblayerAutoIncrementPrimaryKey($driver),
+        dblayerStringType($driver),
+        dblayerStringType($driver),
+        dblayerStringType($driver),
+        dblayerDateTimeType($driver),
+    ));
 
     DB::table('users')->insert([
-        ['name' => 'Alice', 'email' => 'alice@example.com', 'role' => 'admin', 'active' => 1, 'deleted_at' => null],
-        ['name' => 'Alina', 'email' => 'alina@example.com', 'role' => 'admin', 'active' => 0, 'deleted_at' => null],
-        ['name' => 'Bob', 'email' => 'bob@example.com', 'role' => 'editor', 'active' => 1, 'deleted_at' => null],
-        ['name' => 'Alicia', 'email' => 'alicia@example.com', 'role' => 'admin', 'active' => 1, 'deleted_at' => '2024-01-01 00:00:00'],
+        ['name' => 'alice', 'email' => 'alice@example.com', 'role' => 'admin', 'active' => 1, 'deleted_at' => null],
+        ['name' => 'alina', 'email' => 'alina@example.com', 'role' => 'admin', 'active' => 0, 'deleted_at' => null],
+        ['name' => 'bob', 'email' => 'bob@example.com', 'role' => 'editor', 'active' => 1, 'deleted_at' => null],
+        ['name' => 'alicia', 'email' => 'alicia@example.com', 'role' => 'admin', 'active' => 1, 'deleted_at' => '2024-01-01 00:00:00'],
     ]);
 
     $filters = [
@@ -158,111 +154,110 @@ it('matches filtering example flow', function (): void {
         ->get();
 
     expect(array_column($rows, 'email'))->toBe(['alice@example.com']);
-});
+})->with('dblayer_drivers');
 
-it('matches multi connections example flow', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'mysql_main');
+it('matches multi connections example flow', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver, 'main');
+    dblayerAddConnectionForDriver($driver, 'reporting');
 
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'pgsql_reporting');
+    DB::statement(sprintf(
+        'create table users (%s, email %s)',
+        dblayerAutoIncrementPrimaryKey($driver),
+        dblayerStringType($driver),
+    ), [], 'main');
 
-    DB::statement(
-        'create table users (id integer primary key, email text)',
-        [],
-        'mysql_main',
-    );
-
-    DB::statement(
+    DB::statement(sprintf(
         'create table user_events (
-            id integer primary key,
+            %s,
             user_id integer,
-            event text,
-            occurred_at text
+            event %s,
+            occurred_at %s
         )',
-        [],
-        'pgsql_reporting',
-    );
+        dblayerAutoIncrementPrimaryKey($driver),
+        dblayerStringType($driver),
+        dblayerDateTimeType($driver),
+    ), [], 'reporting');
 
-    DB::table('users', 'mysql_main')->insert([
+    DB::table('users', 'main')->insert([
         'id' => 1,
         'email' => 'hasan@example.com',
     ]);
 
-    DB::table('user_events', 'pgsql_reporting')->insert([
+    DB::table('user_events', 'reporting')->insert([
         ['id' => 1, 'user_id' => 1, 'event' => 'signup', 'occurred_at' => '2025-01-01 00:00:00'],
         ['id' => 2, 'user_id' => 1, 'event' => 'login', 'occurred_at' => '2025-01-02 00:00:00'],
     ]);
 
-    /** @var Connection $mysql */
-    $mysql = DB::connection('mysql_main');
+    /** @var Connection $main */
+    $main = DB::connection('main');
 
-    $user = $mysql->table('users')
+    $user = $main->table('users')
         ->where('email', '=', 'hasan@example.com')
         ->first();
 
     expect($user)->not->toBeNull();
 
-    $events = DB::table('user_events', 'pgsql_reporting')
+    $events = DB::table('user_events', 'reporting')
         ->where('user_id', '=', $user['id'])
         ->orderBy('occurred_at', 'desc')
         ->limit(50)
         ->get();
 
     expect(array_column($events, 'event'))->toBe(['login', 'signup']);
-});
+})->with('dblayer_drivers');
 
-it('matches transactions example flow', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'mysql_main');
+it('matches transactions example flow', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver, 'main');
+    DB::setDefaultConnection('main');
 
-    DB::setDefaultConnection('mysql_main');
-
-    DB::statement(
+    DB::statement(sprintf(
         'create table orders (
-            id integer primary key autoincrement,
+            %s,
             user_id integer,
-            status text,
+            status %s,
             total integer,
-            created_at text
+            created_at %s
         )',
-    );
-    DB::statement(
+        dblayerAutoIncrementPrimaryKey($driver),
+        dblayerStringType($driver),
+        dblayerDateTimeType($driver),
+    ));
+    DB::statement(sprintf(
         'create table order_items (
-            id integer primary key autoincrement,
+            %s,
             order_id integer,
-            sku text,
+            sku %s,
             qty integer,
             unit_price integer
         )',
-    );
-    DB::statement(
+        dblayerAutoIncrementPrimaryKey($driver),
+        dblayerStringType($driver),
+    ));
+    DB::statement(sprintf(
         'create table users (
             id integer primary key,
-            last_order_at text
+            last_order_at %s
         )',
-    );
+        dblayerDateTimeType($driver),
+    ));
     DB::statement(
         'create table wallets (
             user_id integer primary key,
             balance integer
         )',
     );
-    DB::statement(
+    DB::statement(sprintf(
         'create table wallet_movements (
-            id integer primary key autoincrement,
+            %s,
             user_id integer,
             amount integer,
-            reason text,
-            created_at text
+            reason %s,
+            created_at %s
         )',
-    );
+        dblayerAutoIncrementPrimaryKey($driver),
+        dblayerStringType($driver),
+        dblayerDateTimeType($driver),
+    ));
 
     DB::table('users')->insert([
         'id' => 42,
@@ -300,9 +295,9 @@ it('matches transactions example flow', function (): void {
     expect((int) $orderId)->toBeGreaterThan(0);
     expect((int) DB::table('order_items')->count())->toBe(1);
 
-    $mysql = DB::connection('mysql_main');
+    $main = DB::connection('main');
 
-    $walletResult = $mysql->transaction(
+    $walletResult = $main->transaction(
         static function (Connection $conn): bool {
             $currentBalance = (int) $conn->table('wallets')
                 ->where('user_id', '=', 42)
@@ -326,18 +321,31 @@ it('matches transactions example flow', function (): void {
     expect($walletResult)->toBeTrue();
     expect((int) DB::table('wallets')->where('user_id', '=', 42)->value('balance'))->toBe(3001);
     expect((int) DB::table('wallet_movements')->count())->toBe(1);
-});
+})->with('dblayer_drivers');
 
-it('matches read replicas example flow', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-        'read_strategy' => 'round_robin',
-        'read' => [
-            ['database' => ':memory:'],
-            ['database' => ':memory:'],
-        ],
-    ], 'replicas');
+it('matches read replicas example flow', function (string $driver): void {
+    $baseConfig = dblayerRequireDriver($driver);
+
+    if ($driver === 'sqlite') {
+        $connectionConfig = [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'read_strategy' => 'round_robin',
+            'read' => [
+                ['database' => ':memory:'],
+                ['database' => ':memory:'],
+            ],
+        ];
+    } else {
+        $replicaA = $baseConfig;
+        $replicaB = $baseConfig;
+
+        $connectionConfig = $baseConfig;
+        $connectionConfig['read_strategy'] = 'round_robin';
+        $connectionConfig['read'] = [$replicaA, $replicaB];
+    }
+
+    DB::addConnection($connectionConfig, 'replicas');
 
     $connection = DB::connection('replicas');
 
@@ -353,9 +361,14 @@ it('matches read replicas example flow', function (): void {
     expect($info['strategy'] ?? null)->toBe('round_robin');
     expect($first)->not->toBeNull();
     expect($second)->not->toBeNull();
-});
+})->with('dblayer_drivers');
 
-it('matches helpers and security example flow', function (): void {
+it('matches helpers and security example flow', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
+
+    $rows = DB::select('select 1 as ok');
+    expect((int) ($rows[0]['ok'] ?? 0))->toBe(1);
+
     Events::forgetAll();
 
     $payload = new stdClass();
@@ -382,7 +395,7 @@ it('matches helpers and security example flow', function (): void {
             'select * from users where name = "x" or 1=1 union select password from admins',
         );
     })->toThrow(SecurityException::class);
-});
+})->with('dblayer_drivers');
 
 it('keeps examples and integration coverage in sync', function (): void {
     $exampleFiles = glob(__DIR__ . '/../../examples/*.php') ?: [];

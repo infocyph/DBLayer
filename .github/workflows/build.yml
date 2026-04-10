@@ -25,6 +25,45 @@ jobs:
   run:
     needs: prepare
     runs-on: ${{ matrix.operating-system }}
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: dblayer_test
+          MYSQL_USER: dblayer
+          MYSQL_PASSWORD: dblayer
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      pgsql:
+        image: postgres:16
+        env:
+          POSTGRES_DB: dblayer_test
+          POSTGRES_USER: dblayer
+          POSTGRES_PASSWORD: dblayer
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U dblayer -d dblayer_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DBLAYER_MYSQL_HOST: 127.0.0.1
+      DBLAYER_MYSQL_PORT: 3306
+      DBLAYER_MYSQL_DATABASE: dblayer_test
+      DBLAYER_MYSQL_USERNAME: dblayer
+      DBLAYER_MYSQL_PASSWORD: dblayer
+      DBLAYER_PGSQL_HOST: 127.0.0.1
+      DBLAYER_PGSQL_PORT: 5432
+      DBLAYER_PGSQL_DATABASE: dblayer_test
+      DBLAYER_PGSQL_USERNAME: dblayer
+      DBLAYER_PGSQL_PASSWORD: dblayer
     strategy:
       matrix:
         operating-system: [ ubuntu-latest ]

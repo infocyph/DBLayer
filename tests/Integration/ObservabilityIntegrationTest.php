@@ -4,11 +4,8 @@ declare(strict_types=1);
 
 use Infocyph\DBLayer\DB;
 
-it('executes queries successfully when using retry policy wrappers', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ]);
+it('executes queries successfully when using retry policy wrappers', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
 
     $rows = DB::withQueryRetryPolicy(
         static fn (\Throwable $error, int $attempt, string $sql, array $bindings): bool => false,
@@ -17,16 +14,23 @@ it('executes queries successfully when using retry policy wrappers', function ()
 
     expect($rows)->toHaveCount(1);
     expect($rows[0]['ok'])->toBe(1);
-});
+})->with('dblayer_drivers');
 
-it('exports telemetry through a custom exporter callback', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ]);
+it('exports telemetry through a custom exporter callback', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
+    $table = 'telemetry_probe_' . bin2hex(random_bytes(4));
 
     DB::enableTelemetry();
-    DB::table('sqlite_master')->select('name')->limit(1)->get();
+    DB::statement(
+        sprintf(
+            'create table %s (%s, name %s)',
+            $table,
+            dblayerAutoIncrementPrimaryKey($driver),
+            dblayerStringType($driver),
+        ),
+    );
+    DB::table($table)->insert(['name' => 'probe']);
+    DB::table($table)->select('name')->limit(1)->get();
 
     $captured = null;
 
@@ -37,19 +41,26 @@ it('exports telemetry through a custom exporter callback', function (): void {
     expect($payload['summary']['query_count'])->toBeGreaterThan(0);
     expect($captured)->not->toBeNull();
     expect($captured['summary']['query_count'])->toBeGreaterThan(0);
-});
+})->with('dblayer_drivers');
 
-it('builds OpenTelemetry payload and slow-query percentile report', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ]);
+it('builds OpenTelemetry payload and slow-query percentile report', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
+    $table = 'telemetry_probe_' . bin2hex(random_bytes(4));
 
     DB::enableTelemetry();
+    DB::statement(
+        sprintf(
+            'create table %s (%s, name %s)',
+            $table,
+            dblayerAutoIncrementPrimaryKey($driver),
+            dblayerStringType($driver),
+        ),
+    );
+    DB::table($table)->insert(['name' => 'probe']);
 
-    DB::table('sqlite_master')->select('name')->limit(1)->get();
-    DB::table('sqlite_master')->select('name')->limit(1)->get();
-    DB::table('sqlite_master')->select('name')->limit(1)->get();
+    DB::table($table)->select('name')->limit(1)->get();
+    DB::table($table)->select('name')->limit(1)->get();
+    DB::table($table)->select('name')->limit(1)->get();
 
     $otel = DB::telemetryOtel('dblayer-tests');
     $spans = $otel['resourceSpans'][0]['scopeSpans'][0]['spans'] ?? [];
@@ -70,4 +81,4 @@ it('builds OpenTelemetry payload and slow-query percentile report', function ():
 
     expect($flushedSpans)->toBeArray();
     expect(DB::telemetry()['summary']['query_count'] ?? 0)->toBe(0);
-});
+})->with('dblayer_drivers');

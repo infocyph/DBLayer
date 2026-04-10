@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 use Infocyph\DBLayer\DB;
 
-it('supports CTEs and subquery sources', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'advanced_query_features');
+it('supports CTEs and subquery sources', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver, 'advanced_query_features');
 
-    DB::statement('create table orders (id integer primary key autoincrement, amount integer)', [], 'advanced_query_features');
+    DB::statement(
+        sprintf(
+            'create table orders (%s, amount integer)',
+            dblayerAutoIncrementPrimaryKey($driver),
+        ),
+        [],
+        'advanced_query_features',
+    );
     DB::statement('insert into orders (amount) values (5), (15), (25)', [], 'advanced_query_features');
 
     $rows = DB::table('orders', 'advanced_query_features')
@@ -31,21 +35,22 @@ it('supports CTEs and subquery sources', function (): void {
         ->get();
 
     expect((int) ($fromSubRows[0]['c'] ?? 0))->toBe(2);
-});
+})->with('dblayer_drivers');
 
-it('supports window-function select helper', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'advanced_window_features');
+it('supports window-function select helper', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver, 'advanced_window_features');
 
     DB::statement(
-        'create table events (id integer primary key autoincrement, tenant_id integer not null, payload text)',
+        sprintf(
+            'create table events (%s, tenant_id integer not null, payload %s)',
+            dblayerAutoIncrementPrimaryKey($driver),
+            dblayerStringType($driver),
+        ),
         [],
         'advanced_window_features',
     );
     DB::statement(
-        'insert into events (tenant_id, payload) values (1, "a"), (1, "b"), (2, "c")',
+        "insert into events (tenant_id, payload) values (1, 'a'), (1, 'b'), (2, 'c')",
         [],
         'advanced_window_features',
     );
@@ -60,16 +65,18 @@ it('supports window-function select helper', function (): void {
     expect((int) ($rows[0]['row_num'] ?? 0))->toBe(1);
     expect((int) ($rows[1]['row_num'] ?? 0))->toBe(2);
     expect((int) ($rows[2]['row_num'] ?? 0))->toBe(1);
-});
+})->with('dblayer_drivers');
 
-it('supports upsertReturning fallback semantics', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'advanced_upsert_returning');
+it('supports upsertReturning fallback semantics', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver, 'advanced_upsert_returning');
 
     DB::statement(
-        'create table users (id integer primary key autoincrement, email text not null unique, name text not null)',
+        sprintf(
+            'create table users (%s, email %s not null unique, name %s not null)',
+            dblayerAutoIncrementPrimaryKey($driver),
+            dblayerStringType($driver, 191),
+            dblayerStringType($driver),
+        ),
         [],
         'advanced_upsert_returning',
     );
@@ -88,4 +95,4 @@ it('supports upsertReturning fallback semantics', function (): void {
     expect($returned)->toHaveCount(1);
     expect($returned[0]['email'] ?? null)->toBe('alice@example.test');
     expect($returned[0]['name'] ?? null)->toBe('Alice');
-});
+})->with('dblayer_drivers');

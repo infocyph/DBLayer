@@ -87,15 +87,14 @@
         "benchmark": "@bench:run",
         "post-autoload-dump": "captainhook install --only-enabled -nf"
     },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
     "config": {
         "sort-packages": true,
-        "preferred-install": "dist",
         "optimize-autoloader": true,
+        "classmap-authoritative": true,
         "allow-plugins": {
-            "pestphp/pest-plugin": true,
-            "pestphp/pest-plugin-drift": true
+            "pestphp/pest-plugin": true
         }
-    },
-    "minimum-stability": "stable",
-    "prefer-stable": true
+    }
 }

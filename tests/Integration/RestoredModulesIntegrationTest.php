@@ -7,7 +7,9 @@ use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
 
-it('uses file cache strategy through DB facade', function (): void {
+it('uses file cache strategy through DB facade', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
+
     $cacheDir = '/tmp/dblayer-file-cache-' . bin2hex(random_bytes(6));
 
     $cache = DB::useFileCache($cacheDir);
@@ -20,13 +22,10 @@ it('uses file cache strategy through DB facade', function (): void {
 
     $cache->flush();
     @rmdir($cacheDir);
-});
+})->with('dblayer_drivers');
 
-it('reuses pooled connections via pool manager helpers', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'pooled');
+it('reuses pooled connections via pool manager helpers', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver, 'pooled');
 
     $poolManager = DB::poolManager([
         'max_connections' => 2,
@@ -56,19 +55,20 @@ it('reuses pooled connections via pool manager helpers', function (): void {
     expect($firstId)->toBe($secondId);
     expect($stats['created'])->toBeGreaterThanOrEqual(1);
     expect($stats['reused'])->toBeGreaterThanOrEqual(1);
-});
+})->with('dblayer_drivers');
 
-it('records query logs and profiles through logger and profiler services', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ]);
+it('records query logs and profiles through logger and profiler services', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
 
     DB::statement(
-        'create table observability_items (
-            id integer primary key autoincrement,
-            name text
+        sprintf(
+            'create table observability_items (
+            %s,
+            name %s
         )',
+            dblayerAutoIncrementPrimaryKey($driver),
+            dblayerStringType($driver),
+        ),
     );
 
     DB::table('observability_items')->insert([
@@ -93,20 +93,21 @@ it('records query logs and profiles through logger and profiler services', funct
     DB::disableLogger();
     DB::disableProfiler();
     @unlink($logFile);
-});
+})->with('dblayer_drivers');
 
-it('builds table repositories with normalized names and result processing', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ]);
+it('builds table repositories with normalized names and result processing', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
 
     DB::statement(
-        'create table user_profiles (
-            id integer primary key autoincrement,
-            name text,
+        sprintf(
+            'create table user_profiles (
+            %s,
+            name %s,
             active integer
         )',
+            dblayerAutoIncrementPrimaryKey($driver),
+            dblayerStringType($driver),
+        ),
     );
 
     DB::table('user_profiles')->insert([
@@ -123,19 +124,20 @@ it('builds table repositories with normalized names and result processing', func
     expect($repository->value('name', static function (QueryBuilder $query): void {
         $query->where('id', '=', 2);
     }))->toBe('Bob');
-});
+})->with('dblayer_drivers');
 
-it('tracks transaction statistics through transaction manager wiring', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ]);
+it('tracks transaction statistics through transaction manager wiring', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
 
     DB::statement(
-        'create table tx_items (
-            id integer primary key autoincrement,
-            name text
+        sprintf(
+            'create table tx_items (
+            %s,
+            name %s
         )',
+            dblayerAutoIncrementPrimaryKey($driver),
+            dblayerStringType($driver),
+        ),
     );
 
     DB::transaction(static function (Connection $connection): void {
@@ -158,4 +160,4 @@ it('tracks transaction statistics through transaction manager wiring', function 
     expect($stats['committed'] ?? 0)->toBeGreaterThanOrEqual(1);
     expect($stats['rolled_back'] ?? 0)->toBeGreaterThanOrEqual(1);
     expect((int) DB::table('tx_items')->count())->toBe(1);
-});
+})->with('dblayer_drivers');
