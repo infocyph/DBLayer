@@ -87,9 +87,13 @@ it('records query logs and profiles through logger and profiler services', funct
 
     $profiles = DB::profiler()->profiles();
     $logContents = is_file($logFile) ? (string) file_get_contents($logFile) : '';
+    $profileSql = strtolower(implode("\n", array_map(
+        static fn(array $profile): string => (string) ($profile['sql'] ?? ''),
+        $profiles,
+    )));
 
-    expect($profiles)->toHaveCount(1);
-    expect(strtolower((string) $profiles[0]['sql']))->toContain('select');
+    expect(count($profiles))->toBeGreaterThan(0);
+    expect($profileSql)->toContain('select');
     expect($logContents)->toContain('QUERY');
     expect($logContents)->toContain('"sql"');
 

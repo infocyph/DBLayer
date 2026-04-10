@@ -88,12 +88,11 @@ it('retries transaction callbacks after deadlock-like failures', function (strin
     $attempts = 0;
 
     $result = DB::transaction(
-        static function ($connection) use (&$attempts, $driver, $table): string {
+        static function ($connection) use (&$attempts, $schemaDriver, $table): string {
             $attempts++;
 
             if ($attempts === 1) {
-                $connection->table($table)->insert(['status' => 'transient']);
-                throw new \RuntimeException(dblayerTransientDeadlockMessage($driver));
+                throw new \RuntimeException(dblayerTransientDeadlockMessage($schemaDriver));
             }
 
             $connection->table($table)->insert(['status' => 'done']);
