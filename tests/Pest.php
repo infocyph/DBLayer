@@ -139,6 +139,14 @@ function dblayerTable(string $prefix): string
 }
 
 /**
+ * Drop table if it exists for the given connection.
+ */
+function dblayerDropTable(string $table, ?string $connection = null): void
+{
+    DB::statement(sprintf('drop table if exists %s', $table), [], $connection);
+}
+
+/**
  * @return array<string,mixed>|null
  */
 function dblayerConnectionConfig(string $driver): ?array

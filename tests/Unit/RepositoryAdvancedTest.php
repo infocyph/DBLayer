@@ -31,34 +31,40 @@ abstract class RepositoryAbstractDto
 /**
  * @param list<array<string,mixed>> $rows
  */
-function seedRepositoryUsers(array $rows): void
+function seedRepositoryUsers(string $table, array $rows): void
 {
-    DB::table('users')->insert($rows);
+    DB::table($table)->insert($rows);
 }
 
-function setupRepositoryFixture(): void
+function setupRepositoryFixture(string $driver): string
 {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'repo');
+    dblayerAddConnectionForDriver($driver, 'repo');
     DB::setDefaultConnection('repo');
+    $schemaDriver = dblayerConnectionDriver('repo');
+    $table = dblayerTable('repository_users');
 
     DB::statement(
-        'create table users (
-            id integer primary key autoincrement,
+        sprintf('create table %s (
+            %s,
             tenant_id integer not null,
-            email text not null unique,
-            name text not null,
+            email %s not null unique,
+            name %s not null,
             active integer not null default 1
         )',
+            $table,
+            dblayerAutoIncrementPrimaryKey($schemaDriver),
+            dblayerStringType($schemaDriver, 191),
+            dblayerStringType($schemaDriver),
+        ),
     );
+
+    return $table;
 }
 
-it('supports repository write helpers and convenience create-or-update operations', function (): void {
-    setupRepositoryFixture();
+it('supports repository write helpers and convenience create-or-update operations', function (string $driver): void {
+    $table = setupRepositoryFixture($driver);
 
-    $repository = DB::repository('users')->forTenant(10);
+    $repository = DB::repository($table)->forTenant(10);
 
     $created = $repository->create([
         'email' => 'alice@example.test',
@@ -135,16 +141,16 @@ it('supports repository write helpers and convenience create-or-update operation
     $deleted = $repository->deleteById($newlyCreated['id']);
     expect($deleted)->toBe(1);
     expect($repository->count())->toBe(5);
-});
+})->with('dblayer_drivers');
 
-it('supports repository pagination and streaming helpers', function (): void {
-    setupRepositoryFixture();
+it('supports repository pagination and streaming helpers', function (string $driver): void {
+    $table = setupRepositoryFixture($driver);
 
-    $repository = DB::repository('users')
+    $repository = DB::repository($table)
         ->forTenant(20)
         ->setDefaultOrder('id', 'asc');
 
-    seedRepositoryUsers([
+    seedRepositoryUsers($table, [
         ['tenant_id' => 20, 'email' => 'u1@example.test', 'name' => 'U1', 'active' => 1],
         ['tenant_id' => 20, 'email' => 'u2@example.test', 'name' => 'U2', 'active' => 1],
         ['tenant_id' => 20, 'email' => 'u3@example.test', 'name' => 'U3', 'active' => 1],
@@ -198,18 +204,18 @@ it('supports repository pagination and streaming helpers', function (): void {
         $lazyCount++;
     }
     expect($lazyCount)->toBe(6);
-});
+})->with('dblayer_drivers');
 
-it('covers repository read helpers and grouping accessors', function (): void {
-    setupRepositoryFixture();
+it('covers repository read helpers and grouping accessors', function (string $driver): void {
+    $table = setupRepositoryFixture($driver);
 
-    seedRepositoryUsers([
+    seedRepositoryUsers($table, [
         ['tenant_id' => 40, 'email' => 'a1@example.test', 'name' => 'A1', 'active' => 1],
         ['tenant_id' => 40, 'email' => 'a2@example.test', 'name' => 'A2', 'active' => 0],
         ['tenant_id' => 41, 'email' => 'b1@example.test', 'name' => 'B1', 'active' => 1],
     ]);
 
-    $repository = DB::repository('users');
+    $repository = DB::repository($table);
 
     $builder = $repository->builder();
     expect($builder)->toBeInstanceOf(QueryBuilder::class);
@@ -261,19 +267,19 @@ it('covers repository read helpers and grouping accessors', function (): void {
         },
     );
     expect($firstMappedMissing)->toBeNull();
-});
+})->with('dblayer_drivers');
 
-it('supports repository global scopes, default ordering, tenant filtering, and DTO mapping', function (): void {
-    setupRepositoryFixture();
+it('supports repository global scopes, default ordering, tenant filtering, and DTO mapping', function (string $driver): void {
+    $table = setupRepositoryFixture($driver);
 
-    seedRepositoryUsers([
+    seedRepositoryUsers($table, [
         ['tenant_id' => 30, 'email' => 'a@example.test', 'name' => 'Anna', 'active' => 1],
         ['tenant_id' => 30, 'email' => 'b@example.test', 'name' => 'Bella', 'active' => 0],
         ['tenant_id' => 30, 'email' => 'c@example.test', 'name' => 'Cara', 'active' => 1],
         ['tenant_id' => 31, 'email' => 'd@example.test', 'name' => 'Dora', 'active' => 1],
     ]);
 
-    $repository = DB::repository('users')
+    $repository = DB::repository($table)
         ->forTenant(30)
         ->addGlobalScope(static function (QueryBuilder $query): void {
             $query->where('active', '=', 1);
@@ -322,16 +328,16 @@ it('supports repository global scopes, default ordering, tenant filtering, and D
         ->clearDefaultOrders()
         ->count();
     expect($allVisible)->toBe(4);
-});
+})->with('dblayer_drivers');
 
-it('throws clear exceptions for invalid repository configuration and DTO mapping', function (): void {
-    setupRepositoryFixture();
+it('throws clear exceptions for invalid repository configuration and DTO mapping', function (string $driver): void {
+    $table = setupRepositoryFixture($driver);
 
-    seedRepositoryUsers([
+    seedRepositoryUsers($table, [
         ['tenant_id' => 50, 'email' => 'x@example.test', 'name' => 'X', 'active' => 1],
     ]);
 
-    $repository = DB::repository('users');
+    $repository = DB::repository($table);
 
     expect(static function () use ($repository): void {
         $repository->addDefaultOrder('id', 'sideways');
@@ -348,19 +354,27 @@ it('throws clear exceptions for invalid repository configuration and DTO mapping
     expect(static function () use ($repository): void {
         $repository->firstInto(RepositoryUserDto::class, null, ['name']);
     })->toThrow(InvalidArgumentException::class);
-});
+})->with('dblayer_drivers');
 
-it('supports soft deletes, optimistic locking, casts, and lifecycle hooks', function (): void {
-    setupRepositoryFixture();
+it('supports soft deletes, optimistic locking, casts, and lifecycle hooks', function (string $driver): void {
+    setupRepositoryFixture($driver);
+    $schemaDriver = dblayerConnectionDriver('repo');
+    $table = dblayerTable('repository_features');
 
     DB::statement(
-        'create table repository_features (
-            id integer primary key autoincrement,
-            name text not null,
-            meta text null,
+        sprintf('create table %s (
+            %s,
+            name %s not null,
+            meta %s null,
             version integer not null default 1,
-            deleted_at text null
+            deleted_at %s null
         )',
+            $table,
+            dblayerAutoIncrementPrimaryKey($schemaDriver),
+            dblayerStringType($schemaDriver),
+            dblayerStringType($schemaDriver),
+            dblayerDateTimeType($schemaDriver),
+        ),
     );
 
     $events = [
@@ -372,7 +386,7 @@ it('supports soft deletes, optimistic locking, casts, and lifecycle hooks', func
         'after_delete' => 0,
     ];
 
-    $repository = DB::repository('repository_features')
+    $repository = DB::repository($table)
         ->enableSoftDeletes()
         ->enableOptimisticLocking('version')
         ->setCasts([
@@ -434,4 +448,4 @@ it('supports soft deletes, optimistic locking, casts, and lifecycle hooks', func
 
     expect($repository->forceDeleteById($id))->toBe(1);
     expect($repository->withTrashed()->find($id))->toBeNull();
-});
+})->with('dblayer_drivers');
