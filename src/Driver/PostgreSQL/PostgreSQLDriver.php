@@ -92,6 +92,12 @@ final class PostgreSQLDriver extends AbstractPdoDriver
                 $driver,
             );
         }
+
+        if ($this->requiresTls($config) && ! $this->hasTlsConfiguration($config)) {
+            throw ConnectionException::invalidConfiguration(
+                "Driver [{$driver}] requires sslmode=require|verify-ca|verify-full in this environment.",
+            );
+        }
     }
 
     /**
@@ -122,5 +128,63 @@ final class PostgreSQLDriver extends AbstractPdoDriver
         }
 
         return $dsn;
+    }
+
+    /**
+     * Whether TLS config satisfies required transport policy.
+     *
+     * @param  array<string,mixed>  $config
+     */
+    private function hasTlsConfiguration(array $config): bool
+    {
+        $sslMode = $config['sslmode'] ?? null;
+
+        if (! is_string($sslMode)) {
+            return false;
+        }
+
+        $normalized = strtolower(trim($sslMode));
+
+        return \in_array($normalized, ['require', 'verify-ca', 'verify-full'], true);
+    }
+
+    /**
+     * Whether insecure transport override is enabled.
+     */
+    private function isInsecureTransportAllowed(): bool
+    {
+        $override = getenv('DBLAYER_ALLOW_INSECURE_TRANSPORT');
+
+        return $override === '1' || strtolower((string) $override) === 'true';
+    }
+
+    /**
+     * Whether current app environment is production-like.
+     */
+    private function isProductionEnvironment(): bool
+    {
+        $appEnv = strtolower(trim((string) (getenv('APP_ENV') ?: '')));
+
+        return \in_array($appEnv, ['production', 'prod'], true);
+    }
+
+    /**
+     * Whether TLS should be required for this config.
+     *
+     * @param  array<string,mixed>  $config
+     */
+    private function requiresTls(array $config): bool
+    {
+        $security = $config['security'] ?? [];
+
+        if (is_array($security) && array_key_exists('require_tls', $security) && $security['require_tls'] !== null) {
+            return (bool) $security['require_tls'];
+        }
+
+        if ($this->isInsecureTransportAllowed()) {
+            return false;
+        }
+
+        return $this->isProductionEnvironment();
     }
 }

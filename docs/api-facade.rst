@@ -29,6 +29,7 @@ Connection Methods
 
 - ``addConnection()``, ``connection()``, ``freshConnection()``, ``reconnect()``, ``disconnect()``
 - ``setDefaultConnection()``, ``getDefaultConnection()``, ``hasConnection()``, ``getConnections()``, ``purge()``
+- ``setSecurityDefaults()``, ``hardenProduction()``
 
 Raw SQL Methods
 ---------------

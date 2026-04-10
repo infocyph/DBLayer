@@ -97,10 +97,10 @@ final class SQLiteDriver extends AbstractPdoDriver
             return 'sqlite::memory:';
         }
 
-        // SQLite read-only can be expressed via URI with mode=ro.
-        if ($readOnly && ! str_contains($database, 'mode=')) {
-            return sprintf('sqlite:%s?mode=ro', $database);
-        }
+        // Keep a stable DSN target for both read and write handles.
+        // Using "sqlite:<path>?mode=ro" is not portable across runtimes and
+        // may resolve to a different file target, causing schema drift.
+        unset($readOnly);
 
         return 'sqlite:' . $database;
     }

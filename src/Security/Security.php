@@ -21,6 +21,10 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
  */
 final class Security
 {
+    private const string ALLOW_INSECURE_MODE_ENV = 'DBLAYER_ALLOW_INSECURE_SECURITY_MODE';
+
+    private const string APP_ENV_VAR = 'APP_ENV';
+
     /**
      * Dangerous SQL patterns (regex) for STRICT mode.
      *
@@ -69,6 +73,16 @@ final class Security
     private static ?RateLimiter $rateLimiter = null;
 
     /**
+     * Optional distributed rate-limit callback.
+     *
+     * Signature:
+     *  fn(string $identifier, array{queries_per_second:int,queries_per_minute:int} $limits): void
+     *
+     * @var null|callable(string,array{queries_per_second:int,queries_per_minute:int}):void
+     */
+    private static $rateLimitHandler;
+
+    /**
      * Check rate limits (per-second & per-minute) for an identifier.
      *
      * Mode does NOT affect rate limiting; this is orthogonal.
@@ -84,6 +98,15 @@ final class Security
     {
         $perSecond = $limits['queries_per_second'] ?? self::DEFAULT_QUERIES_PER_SECOND;
         $perMinute = $limits['queries_per_minute'] ?? self::DEFAULT_QUERIES_PER_MINUTE;
+
+        if (self::$rateLimitHandler !== null) {
+            (self::$rateLimitHandler)($identifier, [
+                'queries_per_second' => max(0, (int) $perSecond),
+                'queries_per_minute' => max(0, (int) $perMinute),
+            ]);
+
+            return;
+        }
 
         $limiter = self::limiter();
 
@@ -142,7 +165,7 @@ final class Security
                 'injection_attempt',
                 'Possible SQL injection detected',
                 [
-                    'sql' => mb_substr($sql, 0, 512, 'UTF-8'),
+                    'sql' => self::summarizeSqlForLogs($sql),
                     'error' => $e->getMessage(),
                 ],
             );
@@ -224,6 +247,22 @@ final class Security
     }
 
     /**
+     * Whether insecure-mode overrides are currently allowed.
+     */
+    public static function isInsecureModeAllowed(): bool
+    {
+        $override = getenv(self::ALLOW_INSECURE_MODE_ENV);
+
+        if ($override === '1' || strtolower((string) $override) === 'true') {
+            return true;
+        }
+
+        $appEnv = strtolower(trim((string) (getenv(self::APP_ENV_VAR) ?: '')));
+
+        return \in_array($appEnv, ['local', 'development', 'dev', 'testing', 'test'], true);
+    }
+
+    /**
      * Log a security event (kept simple and JSON-structured).
      *
      * @param  array<string,mixed>  $context
@@ -298,7 +337,23 @@ final class Security
      */
     public static function setMode(SecurityMode $mode): void
     {
+        if ($mode === SecurityMode::OFF && ! self::isInsecureModeAllowed()) {
+            throw SecurityException::invalidConfiguration(
+                'SecurityMode::OFF is disabled outside local/testing. Set DBLAYER_ALLOW_INSECURE_SECURITY_MODE=1 to override.',
+            );
+        }
+
         self::$mode = $mode;
+    }
+
+    /**
+     * Set an optional external/distributed rate-limit handler.
+     *
+     * @param  null|callable(string,array{queries_per_second:int,queries_per_minute:int}):void  $handler
+     */
+    public static function setRateLimitHandler(?callable $handler): void
+    {
+        self::$rateLimitHandler = $handler;
     }
 
     /**
@@ -526,7 +581,7 @@ final class Security
                 'dangerous_query',
                 'Query contains dangerous pattern',
                 [
-                    'sql' => mb_substr($sql, 0, 512, 'UTF-8'),
+                    'sql' => self::summarizeSqlForLogs($sql),
                     'pattern' => $pattern,
                 ],
             );
@@ -548,6 +603,31 @@ final class Security
             return false;
         }
 
+        if (! (bool) $config['enabled'] && ! self::isInsecureModeAllowed()) {
+            throw SecurityException::invalidConfiguration(
+                'Disabling SQL security checks is blocked outside local/testing environments.',
+            );
+        }
+
         return ! (bool) $config['enabled'];
+    }
+
+    /**
+     * Build a compact, non-sensitive SQL summary for logs.
+     *
+     * @return array{statement:string,fingerprint:string,length:int}
+     */
+    private static function summarizeSqlForLogs(string $sql): array
+    {
+        $trimmed = ltrim($sql);
+        $statement = strtoupper(substr($trimmed, 0, strcspn($trimmed, " \t\n\r")));
+        $normalized = strtolower(trim(preg_replace('/\s+/', ' ', $sql) ?? $sql));
+        $fingerprint = substr(hash('sha256', $normalized), 0, 16);
+
+        return [
+            'statement' => $statement,
+            'fingerprint' => $fingerprint,
+            'length' => strlen($sql),
+        ];
     }
 }

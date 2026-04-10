@@ -8,6 +8,7 @@ use Infocyph\DBLayer\Driver\AbstractPdoDriver;
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
 use Infocyph\DBLayer\Driver\Support\Capabilities;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
+use PDO;
 
 /**
  * MySQL / MariaDB driver.
@@ -102,6 +103,12 @@ final class MySQLDriver extends AbstractPdoDriver
                 $driver,
             );
         }
+
+        if ($this->requiresTls($config) && ! $this->hasTlsConfiguration($config)) {
+            throw ConnectionException::invalidConfiguration(
+                "Driver [{$driver}] requires TLS in this environment. Configure ssl_ca/ssl_cert/ssl_key or secure sslmode.",
+            );
+        }
     }
 
     /**
@@ -134,5 +141,107 @@ final class MySQLDriver extends AbstractPdoDriver
             $database,
             $charset,
         );
+    }
+
+    /**
+     * @param  array<string,mixed>  $config
+     * @return array<int,mixed>
+     */
+    #[\Override]
+    protected function defaultPdoOptions(array $config): array
+    {
+        $options = parent::defaultPdoOptions($config);
+
+        if (\defined('PDO::MYSQL_ATTR_MULTI_STATEMENTS')) {
+            /** @var int $multiStatementsAttr */
+            $multiStatementsAttr = constant('PDO::MYSQL_ATTR_MULTI_STATEMENTS');
+            $options[$multiStatementsAttr] = false;
+        }
+
+        return $options;
+    }
+
+    /**
+     * Whether enough TLS config is present for secure client/server transport.
+     *
+     * @param  array<string,mixed>  $config
+     */
+    private function hasTlsConfiguration(array $config): bool
+    {
+        foreach (['ssl_ca', 'ssl_cert', 'ssl_key'] as $key) {
+            if (isset($config[$key]) && is_string($config[$key]) && trim($config[$key]) !== '') {
+                return true;
+            }
+        }
+
+        $sslMode = $config['sslmode'] ?? null;
+
+        if (is_string($sslMode)) {
+            $normalized = strtolower(trim($sslMode));
+
+            if (\in_array($normalized, ['require', 'required', 'verify-ca', 'verify-full', 'verify_identity', 'verify_ca'], true)) {
+                return true;
+            }
+        }
+
+        $options = $config['options'] ?? [];
+
+        if (! is_array($options)) {
+            return false;
+        }
+
+        foreach ($options as $key => $value) {
+            unset($value);
+
+            if (is_string($key) && str_contains(strtolower($key), 'ssl')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether insecure transport override is enabled.
+     */
+    private function isInsecureTransportAllowed(): bool
+    {
+        $override = getenv('DBLAYER_ALLOW_INSECURE_TRANSPORT');
+
+        return $override === '1' || strtolower((string) $override) === 'true';
+    }
+
+    /**
+     * Whether current app environment is production-like.
+     */
+    private function isProductionEnvironment(): bool
+    {
+        $appEnv = strtolower(trim((string) (getenv('APP_ENV') ?: '')));
+
+        return \in_array($appEnv, ['production', 'prod'], true);
+    }
+
+    /**
+     * Whether TLS should be required for this config.
+     *
+     * @param  array<string,mixed>  $config
+     */
+    private function requiresTls(array $config): bool
+    {
+        if (! empty($config['unix_socket'])) {
+            return false;
+        }
+
+        $security = $config['security'] ?? [];
+
+        if (is_array($security) && array_key_exists('require_tls', $security) && $security['require_tls'] !== null) {
+            return (bool) $security['require_tls'];
+        }
+
+        if ($this->isInsecureTransportAllowed()) {
+            return false;
+        }
+
+        return $this->isProductionEnvironment();
     }
 }

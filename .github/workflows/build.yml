@@ -99,10 +99,10 @@ jobs:
           composer test:sniff
           composer test:refactor
           if [ "${{ matrix.dependency-version }}" != "prefer-lowest" ]; then
-            composer test:static
+            composer test:static:strict
           fi
           if [ "${{ matrix.dependency-version }}" != "prefer-lowest" ]; then
-            composer test:security
+            composer test:security:strict
           fi
 
   analyze:
@@ -130,8 +130,14 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
-      - name: Composer Audit (CVE check)
-        run: composer audit --no-interaction --abandoned=ignore
+      - name: Composer Audit (Release Guard)
+        run: composer release:audit
+
+      - name: Quality Gate (PHPStan)
+        run: composer test:static:strict
+
+      - name: Security Gate (Psalm)
+        run: composer test:security:strict
 
       - name: Run PHPStan (Code Scanning)
         run: |

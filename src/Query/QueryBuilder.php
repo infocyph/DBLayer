@@ -7,12 +7,14 @@ namespace Infocyph\DBLayer\Query;
 use Generator;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Exceptions\QueryException;
+use Infocyph\DBLayer\Exceptions\SecurityException;
 use Infocyph\DBLayer\Grammar\Grammar;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
 use Infocyph\DBLayer\Query\Core\QueryPayload;
 use Infocyph\DBLayer\Query\Core\QueryType;
+use Infocyph\DBLayer\Security\Security;
 
 /**
  * SQL Query Builder
@@ -31,6 +33,42 @@ use Infocyph\DBLayer\Query\Core\QueryType;
  */
 class QueryBuilder
 {
+    /**
+     * Allowed operators for where/having/join clauses.
+     *
+     * @var list<string>
+     */
+    private const array ALLOWED_OPERATORS = [
+        '=',
+        '!=',
+        '<>',
+        '<',
+        '>',
+        '<=',
+        '>=',
+        '<=>',
+        'like',
+        'not like',
+        'ilike',
+        'not ilike',
+        'regexp',
+        'not regexp',
+        'rlike',
+        'not rlike',
+        '~',
+        '~*',
+        '!~',
+        '!~*',
+        'similar to',
+        'not similar to',
+        'is',
+        'is not',
+        'between',
+        'not between',
+        'in',
+        'not in',
+    ];
+
     /**
      * Aggregate function definition or null.
      *
@@ -161,6 +199,10 @@ class QueryBuilder
      */
     public function addSelect(string|Expression $column): self
     {
+        if (is_string($column)) {
+            $this->validateColumnIdentifier($column, true);
+        }
+
         if (! \in_array($column, $this->columns, true)) {
             $this->columns[] = $column;
         }
@@ -295,6 +337,8 @@ class QueryBuilder
      */
     public function crossJoin(string $table): self
     {
+        $this->validateTableIdentifier($table);
+
         $this->joins[] = [
             'type'  => 'cross',
             'table' => $table,
@@ -503,6 +547,8 @@ class QueryBuilder
      */
     public function from(string $table): self
     {
+        $this->validateTableIdentifier($table);
+
         $this->from = $table;
 
         return $this;
@@ -516,6 +562,8 @@ class QueryBuilder
      */
     public function fromSub(QueryBuilder|callable|string $query, string $as, array $bindings = []): self
     {
+        $this->validateColumnIdentifier($as, false);
+
         if (\is_callable($query)) {
             $builder = $this->newQuery();
             $query($builder);
@@ -529,6 +577,7 @@ class QueryBuilder
             return $this;
         }
 
+        $this->validateRawFragment($query, $bindings);
         $this->from = '(' . $query . ') as ' . $as;
         $this->bindings = \array_merge($this->bindings, $bindings);
 
@@ -618,6 +667,10 @@ class QueryBuilder
      */
     public function groupBy(string ...$groups): self
     {
+        foreach ($groups as $group) {
+            $this->validateColumnIdentifier($group, false);
+        }
+
         $this->groups = \array_merge($this->groups, $groups);
 
         return $this;
@@ -636,6 +689,13 @@ class QueryBuilder
             $value    = $operator;
             $operator = '=';
         }
+
+        if (! is_string($operator)) {
+            throw QueryException::invalidOperator((string) $operator);
+        }
+
+        $operator = $this->assertValidOperator($operator);
+        $this->validateColumnIdentifier($column, false);
 
         $this->havings[] = [
             'type'     => 'basic',
@@ -719,6 +779,11 @@ class QueryBuilder
         string $second,
         string $type = 'inner',
     ): self {
+        $this->validateTableIdentifier($table);
+        $this->validateColumnIdentifier($first, false);
+        $this->validateColumnIdentifier($second, false);
+        $operator = $this->assertValidOperator($operator);
+
         $this->joins[] = [
             'type'     => $type,
             'table'    => $table,
@@ -739,6 +804,8 @@ class QueryBuilder
      */
     public function joinComplex(string $table, callable $callback, string $type = 'inner'): self
     {
+        $this->validateTableIdentifier($table);
+
         $join = new JoinClause($table, $type);
         $callback($join);
 
@@ -842,6 +909,8 @@ class QueryBuilder
      */
     public function orderBy(string $column, string $direction = 'asc'): self
     {
+        $this->validateColumnIdentifier($column, false);
+
         $direction = \strtolower($direction);
 
         if (! \in_array($direction, ['asc', 'desc'], true)) {
@@ -953,8 +1022,18 @@ class QueryBuilder
             return $this;
         }
 
+        $resolvedColumns = \is_array($columns[0]) ? $columns[0] : $columns;
+
+        foreach ($resolvedColumns as $column) {
+            if (! \is_string($column)) {
+                continue;
+            }
+
+            $this->validateColumnIdentifier($column, true);
+        }
+
         $this->type    = 'select';
-        $this->columns = \is_array($columns[0]) ? $columns[0] : $columns;
+        $this->columns = $resolvedColumns;
 
         return $this;
     }
@@ -966,6 +1045,8 @@ class QueryBuilder
      */
     public function selectRaw(string $expression, array $bindings = []): self
     {
+        $this->validateRawFragment($expression, $bindings);
+
         if ($this->columns === ['*']) {
             $this->columns = [];
         }
@@ -1298,6 +1379,14 @@ class QueryBuilder
             $operator = '=';
         }
 
+        $this->validateColumnIdentifier($column, false);
+
+        if (! is_string($operator)) {
+            throw QueryException::invalidOperator((string) $operator);
+        }
+
+        $operator = $this->assertValidOperator($operator);
+
         $this->wheres[] = [
             'type'     => 'basic',
             'column'   => $column,
@@ -1318,6 +1407,8 @@ class QueryBuilder
      */
     public function whereBetween(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
+        $this->validateColumnIdentifier($column, false);
+
         $this->wheres[] = [
             'type'    => 'between',
             'column'  => $column,
@@ -1360,6 +1451,8 @@ class QueryBuilder
      */
     public function whereIn(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
+        $this->validateColumnIdentifier($column, false);
+
         $this->wheres[] = [
             'type'    => 'in',
             'column'  => $column,
@@ -1429,6 +1522,8 @@ class QueryBuilder
      */
     public function whereNull(string $column, string $boolean = 'and', bool $not = false): self
     {
+        $this->validateColumnIdentifier($column, false);
+
         $this->wheres[] = [
             'type'    => 'null',
             'column'  => $column,
@@ -1446,6 +1541,8 @@ class QueryBuilder
      */
     public function whereRaw(string $sql, array $bindings = [], string $boolean = 'and'): self
     {
+        $this->validateRawFragment($sql, $bindings);
+
         $this->wheres[] = [
             'type'    => 'raw',
             'sql'     => $sql,
@@ -1497,6 +1594,10 @@ class QueryBuilder
             $query = $builder;
         }
 
+        if (\is_string($query)) {
+            $this->validateRawFragment($query, $bindings);
+        }
+
         $this->ctes[] = [
             'name' => $name,
             'query' => $query,
@@ -1515,6 +1616,72 @@ class QueryBuilder
     }
 
     /**
+     * Validate and normalize a comparison operator.
+     */
+    private function assertValidOperator(string $operator): string
+    {
+        $normalized = $this->normalizeOperator($operator);
+
+        if (! \in_array($normalized, self::ALLOWED_OPERATORS, true)) {
+            throw QueryException::invalidOperator($operator);
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Enforce connection-level policy for raw SQL fragments.
+     */
+    private function enforceRawSqlPolicy(string $sql): void
+    {
+        $security = $this->connection->getConfig()->securityConfig();
+        $policy = strtolower(trim((string) ($security['raw_sql_policy'] ?? 'allow')));
+
+        if ($policy === 'allow') {
+            return;
+        }
+
+        if ($policy === 'deny') {
+            throw QueryException::buildingFailed(
+                'Raw SQL fragments are disabled by security.raw_sql_policy=deny.',
+            );
+        }
+
+        if ($policy !== 'allowlist') {
+            throw QueryException::buildingFailed(
+                sprintf('Unsupported raw SQL policy [%s].', $policy),
+            );
+        }
+
+        $allowlist = $security['raw_sql_allowlist'] ?? [];
+
+        if (! is_array($allowlist) || $allowlist === []) {
+            throw QueryException::buildingFailed(
+                'Raw SQL allowlist policy requires security.raw_sql_allowlist patterns.',
+            );
+        }
+
+        foreach ($allowlist as $pattern) {
+            if (! is_string($pattern)) {
+                continue;
+            }
+
+            $rule = trim($pattern);
+            if ($rule === '') {
+                continue;
+            }
+
+            if ($this->matchesRawPolicyRule($sql, $rule)) {
+                return;
+            }
+        }
+
+        throw QueryException::buildingFailed(
+            'Raw SQL fragment is not allowlisted by security.raw_sql_allowlist.',
+        );
+    }
+
+    /**
      * Map legacy string type to QueryType enum.
      */
     private function mapTypeToEnum(?string $type): QueryType
@@ -1529,6 +1696,31 @@ class QueryBuilder
             'select', '' => QueryType::SELECT,
             default    => QueryType::SELECT,
         };
+    }
+
+    /**
+     * Match one allowlist rule against a raw SQL fragment.
+     */
+    private function matchesRawPolicyRule(string $sql, string $rule): bool
+    {
+        // Treat /.../modifiers rules as regex patterns.
+        if (strlen($rule) >= 3 && $rule[0] === '/' && strrpos($rule, '/') !== 0) {
+            $matched = @preg_match($rule, $sql);
+
+            return $matched === 1;
+        }
+
+        return str_contains(strtolower($sql), strtolower($rule));
+    }
+
+    /**
+     * Normalize operator token before validation/storage.
+     */
+    private function normalizeOperator(string $operator): string
+    {
+        $normalized = preg_replace('/\s+/', ' ', trim($operator));
+
+        return strtolower($normalized ?? $operator);
     }
 
     /**
@@ -1562,5 +1754,90 @@ class QueryBuilder
         $row = $results[0];
 
         return $row['aggregate'] ?? (\array_values($row)[0] ?? null);
+    }
+
+    /**
+     * Whether strict identifier policy is enabled on this connection.
+     */
+    private function shouldValidateIdentifiers(): bool
+    {
+        if (! $this->connection->getConfig()->isSecurityEnabled()) {
+            return false;
+        }
+
+        $security = $this->connection->getConfig()->securityConfig();
+
+        if (! array_key_exists('strict_identifiers', $security)) {
+            return true;
+        }
+
+        return (bool) $security['strict_identifiers'];
+    }
+
+    /**
+     * Validate a column/alias identifier when strict identifier policy is enabled.
+     */
+    private function validateColumnIdentifier(string $column, bool $allowWildcard): void
+    {
+        if (! $this->shouldValidateIdentifiers()) {
+            return;
+        }
+
+        $trimmed = trim($column);
+
+        if ($trimmed === '') {
+            throw QueryException::invalidParameter('column', 'Column identifier must not be empty.');
+        }
+
+        if ($allowWildcard && $trimmed === '*') {
+            return;
+        }
+
+        if ($allowWildcard && preg_match('/^[a-zA-Z_][a-zA-Z0-9_.]*\.\*$/', $trimmed) === 1) {
+            return;
+        }
+
+        try {
+            Security::validateColumnName($trimmed);
+        } catch (SecurityException $e) {
+            throw QueryException::invalidParameter('column', $e->getMessage());
+        }
+    }
+
+    /**
+     * Validate raw SQL fragment with lightweight security checks.
+     *
+     * @param  list<mixed>  $bindings
+     */
+    private function validateRawFragment(string $sql, array $bindings = []): void
+    {
+        $this->enforceRawSqlPolicy($sql);
+
+        try {
+            Security::validateQuery($sql, $bindings, [
+                'enabled' => true,
+                'max_sql_length' => 8_192,
+                'max_params' => 256,
+                'max_param_bytes' => 2_048,
+            ]);
+        } catch (SecurityException $e) {
+            throw QueryException::buildingFailed('Unsafe raw SQL fragment: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Validate a table identifier when strict identifier policy is enabled.
+     */
+    private function validateTableIdentifier(string $table): void
+    {
+        if (! $this->shouldValidateIdentifiers()) {
+            return;
+        }
+
+        try {
+            Security::validateTableName($table);
+        } catch (SecurityException $e) {
+            throw QueryException::invalidParameter('table', $e->getMessage());
+        }
     }
 }

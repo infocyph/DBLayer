@@ -64,6 +64,8 @@ Security Block
        'max_sql_length' => 16384,
        'max_params' => 512,
        'max_param_bytes' => 1024,
+       'raw_sql_policy' => 'allow', // allow | deny | allowlist
+       'raw_sql_allowlist' => [],
    ]
 
 Production Guidance
@@ -71,6 +73,7 @@ Production Guidance
 
 - Keep ``security.enabled`` true unless you have a controlled benchmark-only use case.
 - Set explicit query limits for multi-tenant workloads.
+- In high-trust production environments, set ``raw_sql_policy`` to ``allowlist`` and explicitly list permitted fragments.
 - Use named connections for operational clarity (``primary``, ``reporting``, etc.).
 
 .. note::

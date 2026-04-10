@@ -221,8 +221,9 @@ try {
 ```bash
 composer tests
 composer test:code
-composer test:static
-composer test:security
+composer test:static:strict
+composer test:security:strict
+composer release:audit
 ```
 
 Test execution is driver-aware:

@@ -8,8 +8,11 @@ use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
+use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Exceptions\SecurityException;
 use Infocyph\DBLayer\Security\QueryValidator;
+use Infocyph\DBLayer\Security\Security;
+use Infocyph\DBLayer\Security\SecurityMode;
 
 beforeEach(function (): void {
     DB::purge();
@@ -339,6 +342,47 @@ it('keeps reads on read pdo when sticky mode is disabled', function (string $dri
     expect(spl_object_id($readPdoAfter))->not->toBe(spl_object_id($connection->getPdo()));
 })->with('dblayer_drivers');
 
+it('enforces read-only sqlite read replica sessions', function (): void {
+    $databaseFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR
+        . 'dblayer-readonly-read-'
+        . bin2hex(random_bytes(8))
+        . '.sqlite';
+
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => $databaseFile,
+        'sticky' => false,
+        'read' => [
+            ['database' => $databaseFile],
+        ],
+    ], 'regression_sqlite_readonly_read');
+
+    $connection = DB::connection('regression_sqlite_readonly_read');
+    $table = dblayerTable('readonly_items');
+
+    $readPdo = $connection->getReadPdo();
+    $writePdo = $connection->getPdo();
+
+    expect(spl_object_id($readPdo))->not->toBe(spl_object_id($writePdo));
+
+    $connection->statement(sprintf('create table %s (id integer primary key autoincrement)', $table));
+    $connection->statement(sprintf('insert into %s (id) values (1)', $table));
+
+    $count = (int) ($readPdo->query(sprintf('select count(*) from %s', $table))->fetchColumn() ?: 0);
+    expect($count)->toBe(1);
+
+    expect(static fn (): int|false => $readPdo->exec(sprintf('insert into %s (id) values (2)', $table)))
+        ->toThrow(\PDOException::class);
+
+    $connection->disconnect();
+    unset($readPdo, $writePdo, $connection);
+
+    if (is_file($databaseFile)) {
+        expect(@unlink($databaseFile))->toBeTrue();
+    }
+});
+
 it('applies write override configuration for write pdo connection', function (): void {
     $databaseFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
         . DIRECTORY_SEPARATOR
@@ -441,6 +485,169 @@ it('supports query cancellation and deadline wrappers', function (string $driver
     ))->toThrow(ConnectionException::class);
 })->with('dblayer_drivers');
 
+it('enforces configured per-connection query rate limits', function (string $driver): void {
+    $connectionName = 'regression_rate_limit_' . $driver;
+    $rateKey = 'rate:' . bin2hex(random_bytes(8));
+
+    dblayerAddConnectionForDriver($driver, $connectionName, [
+        'security' => [
+            'queries_per_second' => 1,
+            'queries_per_minute' => 0,
+            'rate_limit_key' => $rateKey,
+        ],
+    ]);
+
+    DB::select('select 1', [], $connectionName);
+
+    expect(static fn(): array => DB::select('select 1', [], $connectionName))
+        ->toThrow(SecurityException::class);
+
+    Security::resetRateLimit($rateKey);
+})->with('dblayer_drivers');
+
+it('rejects unsafe operators in where clauses early', function (string $driver): void {
+    $connectionName = 'regression_invalid_operator_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+
+    expect(static function () use ($connectionName): void {
+        DB::table('users', $connectionName)->where('id', '; drop table users; --', 1);
+    })->toThrow(QueryException::class);
+})->with('dblayer_drivers');
+
+it('does not execute queries while in pretend mode', function (string $driver): void {
+    $connectionName = 'regression_pretend_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
+    $table = dblayerTable('pretend_items');
+
+    DB::statement(
+        sprintf('create table %s (%s, name %s)', $table, dblayerAutoIncrementPrimaryKey($schemaDriver), dblayerStringType($schemaDriver)),
+        [],
+        $connectionName,
+    );
+
+    $connection = DB::connection($connectionName);
+    $logged = $connection->pretend(static function (Connection $conn) use ($table): void {
+        $conn->statement(sprintf("insert into %s (name) values ('ghost')", $table));
+        $conn->select(sprintf('select * from %s', $table));
+    });
+
+    expect($logged)->toHaveCount(2);
+    expect((int) DB::scalar(sprintf('select count(*) from %s', $table), [], $connectionName))->toBe(0);
+})->with('dblayer_drivers');
+
+it('redacts query bindings in logger output by default', function (string $driver): void {
+    $connectionName = 'regression_logger_redaction_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
+    $table = dblayerTable('logger_items');
+
+    DB::statement(
+        sprintf('create table %s (%s, name %s)', $table, dblayerAutoIncrementPrimaryKey($schemaDriver), dblayerStringType($schemaDriver)),
+        [],
+        $connectionName,
+    );
+    DB::table($table, $connectionName)->insert(['name' => 'seed']);
+
+    $logFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR
+        . 'dblayer-log-redaction-'
+        . bin2hex(random_bytes(8))
+        . '.log';
+
+    DB::enableLogger($logFile);
+    DB::table($table, $connectionName)
+        ->whereRaw('name = ?', ['secret-token'])
+        ->limit(1)
+        ->get();
+
+    $contents = is_file($logFile) ? (string) file_get_contents($logFile) : '';
+
+    expect($contents)->toContain('[redacted:string:12]');
+    expect($contents)->not->toContain('secret-token');
+
+    DB::disableLogger();
+    if (is_file($logFile)) {
+        @unlink($logFile);
+    }
+})->with('dblayer_drivers');
+
+it('caps telemetry and profiler buffers to configured limits', function (string $driver): void {
+    $connectionName = 'regression_buffer_caps_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
+    $table = dblayerTable('buffer_items');
+
+    DB::statement(
+        sprintf('create table %s (%s, name %s)', $table, dblayerAutoIncrementPrimaryKey($schemaDriver), dblayerStringType($schemaDriver)),
+        [],
+        $connectionName,
+    );
+    DB::table($table, $connectionName)->insert(['name' => 'probe']);
+
+    DB::setTelemetryBufferLimits(2, 2);
+    DB::setProfilerMaxProfiles(2);
+    DB::enableTelemetry();
+    DB::enableProfiler();
+
+    DB::table($table, $connectionName)->select('name')->limit(1)->get();
+    DB::table($table, $connectionName)->select('name')->limit(1)->get();
+    DB::table($table, $connectionName)->select('name')->limit(1)->get();
+
+    $snapshot = DB::telemetry();
+    expect((int) ($snapshot['summary']['query_count'] ?? 0))->toBe(2);
+    expect(DB::profiler()->profiles())->toHaveCount(2);
+
+    DB::disableTelemetry();
+    DB::disableProfiler();
+})->with('dblayer_drivers');
+
+it('supports resource bindings via bindParam for LOB values', function (string $driver): void {
+    $connectionName = 'regression_lob_bindings_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
+    $table = dblayerTable('lob_items');
+
+    $payloadType = match ($schemaDriver) {
+        'mysql' => 'blob',
+        'pgsql' => 'bytea',
+        default => 'blob',
+    };
+
+    DB::statement(
+        sprintf('create table %s (%s, payload %s)', $table, dblayerAutoIncrementPrimaryKey($schemaDriver), $payloadType),
+        [],
+        $connectionName,
+    );
+
+    $stream = fopen('php://temp', 'rb+');
+    expect($stream)->not->toBeFalse();
+    fwrite($stream, 'blob-payload');
+    rewind($stream);
+
+    DB::statement(
+        sprintf('insert into %s (payload) values (?)', $table),
+        [$stream],
+        $connectionName,
+    );
+
+    $row = DB::selectOne(sprintf('select payload from %s', $table), [], $connectionName);
+    $payload = $row['payload'] ?? null;
+
+    if (is_resource($payload)) {
+        $payload = stream_get_contents($payload);
+    }
+
+    if (is_string($payload) && str_starts_with($payload, '\\x')) {
+        $decoded = hex2bin(substr($payload, 2));
+        $payload = $decoded === false ? $payload : $decoded;
+    }
+
+    expect($payload)->toBe('blob-payload');
+
+    fclose($stream);
+})->with('dblayer_drivers');
+
 it('collects and flushes telemetry payloads', function (string $driver): void {
     DB::enableTelemetry();
 
@@ -479,4 +686,233 @@ it('does not flag legitimate unions and still catches injected union payloads', 
     expect(fn () => $validator->detectSqlInjection(
         'select * from users where name = "x" or 1=1 union select password from admins'
     ))->toThrow(SecurityException::class);
+});
+
+it('blocks turning global security mode off in production by default', function (): void {
+    $previousAppEnv = getenv('APP_ENV');
+    $previousOverride = getenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
+
+    putenv('APP_ENV=production');
+    putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
+
+    try {
+        expect(static fn() => Security::setMode(SecurityMode::OFF))
+            ->toThrow(SecurityException::class);
+    } finally {
+        if ($previousAppEnv === false) {
+            putenv('APP_ENV');
+        } else {
+            putenv('APP_ENV=' . $previousAppEnv);
+        }
+
+        if ($previousOverride === false) {
+            putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
+        } else {
+            putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE=' . $previousOverride);
+        }
+
+        Security::setMode(SecurityMode::NORMAL);
+    }
+});
+
+it('enforces strict identifier policy by default for safe builder APIs', function (string $driver): void {
+    $connectionName = 'regression_strict_identifiers_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+
+    expect(static function () use ($connectionName): void {
+        DB::table('users', $connectionName)->select('id as injected');
+    })->toThrow(QueryException::class);
+})->with('dblayer_drivers');
+
+it('blocks raw SQL fragments when deny policy is enabled', function (string $driver): void {
+    $connectionName = 'regression_raw_policy_deny_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName, [
+        'security' => [
+            'raw_sql_policy' => 'deny',
+        ],
+    ]);
+
+    expect(static function () use ($connectionName): void {
+        DB::table('users', $connectionName)->whereRaw('id = 1');
+    })->toThrow(QueryException::class);
+})->with('dblayer_drivers');
+
+it('supports allowlist raw SQL policy for explicit fragments only', function (string $driver): void {
+    $connectionName = 'regression_raw_policy_allowlist_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName, [
+        'security' => [
+            'raw_sql_policy' => 'allowlist',
+            'raw_sql_allowlist' => [
+                '/^id\\s*=\\s*\\?$/i',
+                'count(*)',
+            ],
+        ],
+    ]);
+
+    expect(static function () use ($connectionName): void {
+        DB::table('users', $connectionName)->whereRaw('id = ?', [1]);
+        DB::table('users', $connectionName)->selectRaw('count(*) as c');
+    })->not->toThrow(QueryException::class);
+
+    expect(static function () use ($connectionName): void {
+        DB::table('users', $connectionName)->whereRaw('name = ?', ['alice']);
+    })->toThrow(QueryException::class);
+})->with('dblayer_drivers');
+
+it('supports external distributed rate limit callback configuration', function (string $driver): void {
+    $connectionName = 'regression_distributed_rate_limit_' . $driver;
+
+    dblayerAddConnectionForDriver($driver, $connectionName, [
+        'security' => [
+            'queries_per_second' => 1,
+            'queries_per_minute' => 0,
+            'rate_limit_key' => 'distributed:' . $driver,
+            'rate_limit_callback' => static function (string $identifier, array $limits): bool {
+                static $attempts = 0;
+                $attempts++;
+
+                expect($identifier)->toContain('distributed:');
+                expect($limits['queries_per_second'])->toBe(1);
+
+                return $attempts < 2;
+            },
+        ],
+    ]);
+
+    DB::select('select 1', [], $connectionName);
+
+    expect(static fn(): array => DB::select('select 1', [], $connectionName))
+        ->toThrow(SecurityException::class);
+})->with('dblayer_drivers');
+
+it('requires TLS policy when explicitly requested for mysql and pgsql configs', function (): void {
+    expect(static fn(): ConnectionConfig => ConnectionConfig::fromArray([
+        'driver' => 'mysql',
+        'host' => '127.0.0.1',
+        'port' => 3306,
+        'database' => 'app',
+        'username' => 'root',
+        'password' => '',
+        'security' => [
+            'require_tls' => true,
+        ],
+    ]))->toThrow(ConnectionException::class);
+
+    expect(static fn(): ConnectionConfig => ConnectionConfig::fromArray([
+        'driver' => 'pgsql',
+        'host' => '127.0.0.1',
+        'port' => 5432,
+        'database' => 'app',
+        'username' => 'postgres',
+        'password' => '',
+        'security' => [
+            'require_tls' => true,
+        ],
+    ]))->toThrow(ConnectionException::class);
+});
+
+it('blocks security.enabled=false in production config by default', function (): void {
+    $previousAppEnv = getenv('APP_ENV');
+    $previousOverride = getenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
+
+    putenv('APP_ENV=production');
+    putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
+
+    try {
+        expect(static fn(): ConnectionConfig => ConnectionConfig::fromArray([
+            'driver' => 'mysql',
+            'host' => '127.0.0.1',
+            'port' => 3306,
+            'database' => 'app',
+            'username' => 'root',
+            'password' => '',
+            'security' => [
+                'enabled' => false,
+            ],
+        ]))->toThrow(ConnectionException::class);
+    } finally {
+        if ($previousAppEnv === false) {
+            putenv('APP_ENV');
+        } else {
+            putenv('APP_ENV=' . $previousAppEnv);
+        }
+
+        if ($previousOverride === false) {
+            putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
+        } else {
+            putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE=' . $previousOverride);
+        }
+    }
+});
+
+it('validates raw SQL policy configuration values', function (): void {
+    expect(static fn(): ConnectionConfig => ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'security' => [
+            'raw_sql_policy' => 'invalid',
+        ],
+    ]))->toThrow(ConnectionException::class);
+
+    expect(static fn(): ConnectionConfig => ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'security' => [
+            'raw_sql_policy' => 'allowlist',
+            'raw_sql_allowlist' => [],
+        ],
+    ]))->toThrow(ConnectionException::class);
+});
+
+it('applies facade security policy to existing and future connections', function (string $driver): void {
+    $existingConnection = 'regression_security_defaults_existing_' . $driver;
+    $futureConnection = 'regression_security_defaults_future_' . $driver;
+
+    dblayerAddConnectionForDriver($driver, $existingConnection);
+
+    DB::setSecurityDefaults(['queries_per_second' => 1]);
+
+    DB::select('select 1', [], $existingConnection);
+
+    expect(static fn(): array => DB::select('select 1', [], $existingConnection))
+        ->toThrow(SecurityException::class);
+
+    Security::clearAllRateLimits();
+
+    dblayerAddConnectionForDriver($driver, $futureConnection, [
+        'security' => [
+            'queries_per_second' => 0,
+        ],
+    ]);
+
+    DB::select('select 1', [], $futureConnection);
+    expect(static fn(): array => DB::select('select 1', [], $futureConnection))
+        ->toThrow(SecurityException::class);
+})->with('dblayer_drivers');
+
+it('enables production hardening defaults through facade helper', function (): void {
+    $previousAppEnv = getenv('APP_ENV');
+
+    putenv('APP_ENV=production');
+
+    try {
+        DB::hardenProduction();
+
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+        ], 'hardened_sqlite');
+
+        $security = DB::connection('hardened_sqlite')->getConfig()->securityConfig();
+
+        expect($security['enabled'] ?? null)->toBeTrue();
+        expect($security['strict_identifiers'] ?? null)->toBeTrue();
+        expect($security['require_tls'] ?? null)->toBeTrue();
+    } finally {
+        if ($previousAppEnv === false) {
+            putenv('APP_ENV');
+        } else {
+            putenv('APP_ENV=' . $previousAppEnv);
+        }
+    }
 });

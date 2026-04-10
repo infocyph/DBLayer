@@ -14,7 +14,14 @@ namespace Infocyph\DBLayer\Support;
  */
 final class Profiler
 {
+    private const int DEFAULT_MAX_PROFILES = 2_000;
+
     private bool $enabled = false;
+
+    /**
+     * Maximum number of retained profiles.
+     */
+    private int $maxProfiles = self::DEFAULT_MAX_PROFILES;
 
     /**
      * @var array<int, array{sql:string,bindings:array<array-key,mixed>,time:float,memory:int}>
@@ -76,6 +83,10 @@ final class Profiler
             'time'     => round($timeMs, 2),
             'memory'   => $memory,
         ];
+
+        if (\count($this->profiles) > $this->maxProfiles) {
+            array_splice($this->profiles, 0, \count($this->profiles) - $this->maxProfiles);
+        }
 
         // Reset for next measurement.
         $this->startTime   = 0.0;
@@ -159,6 +170,18 @@ final class Profiler
     public function profiles(): array
     {
         return $this->profiles;
+    }
+
+    /**
+     * Configure retained profile limit for long-running workers.
+     */
+    public function setMaxProfiles(?int $maxProfiles): void
+    {
+        $this->maxProfiles = max(1, $maxProfiles ?? self::DEFAULT_MAX_PROFILES);
+
+        if (\count($this->profiles) > $this->maxProfiles) {
+            array_splice($this->profiles, 0, \count($this->profiles) - $this->maxProfiles);
+        }
     }
 
     /**

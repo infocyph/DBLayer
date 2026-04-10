@@ -441,7 +441,11 @@ it('keeps examples and integration coverage in sync', function (): void {
         'locking.php' => ['LockingIntegrationTest.php'],
         'multi_connections.php' => ['ExamplesParityIntegrationTest.php'],
         'observability.php' => ['ObservabilityIntegrationTest.php'],
-        'read_replicas.php' => ['ExamplesParityIntegrationTest.php', 'ReplicaStrategiesIntegrationTest.php'],
+        'read_replicas.php' => [
+            'ExamplesParityIntegrationTest.php',
+            'ReplicaStrategiesIntegrationTest.php',
+            'PoolStickyReplicaStressIntegrationTest.php',
+        ],
         'restored_modules.php' => ['RestoredModulesIntegrationTest.php'],
         'transactions.php' => ['TransactionIntegrationTest.php'],
     ];

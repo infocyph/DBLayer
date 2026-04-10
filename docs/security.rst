@@ -55,7 +55,44 @@ Per-Connection Security Config
        'max_sql_length' => 8000,
        'max_params' => 500,
        'max_param_bytes' => 4096,
+       'raw_sql_policy' => 'allow',
+       'raw_sql_allowlist' => [],
    ]
+
+Raw SQL Fragment Policy
+-----------------------
+
+Raw entry points (for example ``whereRaw()``, ``selectRaw()``, string
+``fromSub()``, and string CTE bodies) are controlled by:
+
+- ``raw_sql_policy = allow``: default behavior.
+- ``raw_sql_policy = deny``: block all raw fragments.
+- ``raw_sql_policy = allowlist``: only allow fragments matching
+  ``raw_sql_allowlist`` patterns.
+
+Allowlist rules support plain substring rules and regex rules such as
+``'/^id\\s*=\\s*\\?$/i'``.
+
+Facade-Level Defaults
+---------------------
+
+For consistent policy across many connections, you can apply global defaults
+through the facade:
+
+.. code-block:: php
+
+   use Infocyph\DBLayer\DB;
+
+   DB::setSecurityDefaults([
+       'strict_identifiers' => true,
+       'queries_per_second' => 250,
+   ]);
+
+   // Convenience profile (enables strict identifiers; requires TLS in production).
+   DB::hardenProduction();
+
+These values are applied as enforced facade policy across registered and future
+connections.
 
 Rate Limiting and Confirmation
 ------------------------------

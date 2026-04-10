@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Query;
 
+use Infocyph\DBLayer\Exceptions\QueryException;
+use Infocyph\DBLayer\Exceptions\SecurityException;
+use Infocyph\DBLayer\Security\Security;
+
 /**
  * JOIN Clause Builder
  *
@@ -14,6 +18,38 @@ namespace Infocyph\DBLayer\Query;
  */
 final class JoinClause
 {
+    /**
+     * Allowed comparison operators for join clauses.
+     *
+     * @var list<string>
+     */
+    private const array ALLOWED_OPERATORS = [
+        '=',
+        '!=',
+        '<>',
+        '<',
+        '>',
+        '<=',
+        '>=',
+        '<=>',
+        'like',
+        'not like',
+        'ilike',
+        'not ilike',
+        'regexp',
+        'not regexp',
+        'rlike',
+        'not rlike',
+        '~',
+        '~*',
+        '!~',
+        '!~*',
+        'similar to',
+        'not similar to',
+        'is',
+        'is not',
+    ];
+
     /**
      * Bound values for where/whereIn conditions.
      *
@@ -40,7 +76,9 @@ final class JoinClause
          * The type of join.
          */
         private readonly string $type = 'inner',
-    ) {}
+    ) {
+        $this->validateTableIdentifier($table);
+    }
 
     /**
      * Get bindings for this join.
@@ -91,6 +129,10 @@ final class JoinClause
      */
     public function on(string $first, string $operator, string $second, string $boolean = 'and'): self
     {
+        $this->validateColumnIdentifier($first);
+        $this->validateColumnIdentifier($second);
+        $operator = $this->assertValidOperator($operator);
+
         $this->conditions[] = [
             'type'     => 'basic',
             'first'    => $first,
@@ -123,6 +165,9 @@ final class JoinClause
      */
     public function where(string $column, string $operator, mixed $value, string $boolean = 'and'): self
     {
+        $this->validateColumnIdentifier($column);
+        $operator = $this->assertValidOperator($operator);
+
         $this->conditions[] = [
             'type'     => 'where',
             'column'   => $column,
@@ -143,6 +188,8 @@ final class JoinClause
      */
     public function whereIn(string $column, array $values, string $boolean = 'and'): self
     {
+        $this->validateColumnIdentifier($column);
+
         $this->conditions[] = [
             'type'    => 'whereIn',
             'column'  => $column,
@@ -162,6 +209,8 @@ final class JoinClause
      */
     public function whereNotNull(string $column, string $boolean = 'and'): self
     {
+        $this->validateColumnIdentifier($column);
+
         $this->conditions[] = [
             'type'    => 'whereNotNull',
             'column'  => $column,
@@ -176,6 +225,8 @@ final class JoinClause
      */
     public function whereNull(string $column, string $boolean = 'and'): self
     {
+        $this->validateColumnIdentifier($column);
+
         $this->conditions[] = [
             'type'    => 'whereNull',
             'column'  => $column,
@@ -183,5 +234,44 @@ final class JoinClause
         ];
 
         return $this;
+    }
+
+    /**
+     * Validate and normalize a comparison operator.
+     */
+    private function assertValidOperator(string $operator): string
+    {
+        $normalized = preg_replace('/\s+/', ' ', trim($operator));
+        $normalized = strtolower($normalized ?? $operator);
+
+        if (! \in_array($normalized, self::ALLOWED_OPERATORS, true)) {
+            throw QueryException::invalidOperator($operator);
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Validate join column identifier.
+     */
+    private function validateColumnIdentifier(string $column): void
+    {
+        try {
+            Security::validateColumnName($column);
+        } catch (SecurityException $e) {
+            throw QueryException::invalidParameter('column', $e->getMessage());
+        }
+    }
+
+    /**
+     * Validate join table identifier.
+     */
+    private function validateTableIdentifier(string $table): void
+    {
+        try {
+            Security::validateTableName($table);
+        } catch (SecurityException $e) {
+            throw QueryException::invalidParameter('table', $e->getMessage());
+        }
     }
 }
