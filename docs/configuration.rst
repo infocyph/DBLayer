@@ -41,7 +41,7 @@ Important Keys
 - ``driver``, ``host``, ``port``, ``database``, ``username``, ``password``
 - ``read`` / ``write`` split
 - ``read_strategy``, ``read_health_cooldown``, ``sticky``
-- ``security`` limits
+- ``security`` limits and transport policy
 
 Read/Write Config Shape
 -----------------------
@@ -64,9 +64,32 @@ Security Block
        'max_sql_length' => 16384,
        'max_params' => 512,
        'max_param_bytes' => 1024,
+       'queries_per_second' => 0,
+       'queries_per_minute' => 0,
+       'rate_limit_key' => null,
+       'rate_limit_callback' => null,
+       'strict_identifiers' => true,
+       'require_tls' => null,
        'raw_sql_policy' => 'allow', // allow | deny | allowlist
        'raw_sql_allowlist' => [],
    ]
+
+Environment-Sensitive Hardening
+-------------------------------
+
+- ``APP_ENV=production`` (or ``prod``) activates production transport rules.
+- For MySQL/PostgreSQL, TLS is required by default in production-like environments.
+- ``security.require_tls=true`` forces TLS in every environment.
+- ``security.require_tls=false`` is blocked in production unless
+  ``DBLAYER_ALLOW_INSECURE_TRANSPORT=1`` is set.
+- ``security.enabled=false`` is blocked outside local/testing unless
+  ``DBLAYER_ALLOW_INSECURE_SECURITY_MODE=1`` is set.
+
+Facade helpers:
+
+- ``DB::setSecurityDefaults([...])`` enforces defaults over connection-level values.
+- ``DB::hardenProduction()`` applies production-oriented defaults (strict identifiers,
+  and TLS requirement when running in production-like environment).
 
 Production Guidance
 -------------------
@@ -74,6 +97,7 @@ Production Guidance
 - Keep ``security.enabled`` true unless you have a controlled benchmark-only use case.
 - Set explicit query limits for multi-tenant workloads.
 - In high-trust production environments, set ``raw_sql_policy`` to ``allowlist`` and explicitly list permitted fragments.
+- Set explicit TLS parameters (``sslmode`` and/or driver TLS keys) for all remote MySQL/PostgreSQL links.
 - Use named connections for operational clarity (``primary``, ``reporting``, etc.).
 
 .. note::

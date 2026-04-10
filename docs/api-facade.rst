@@ -65,6 +65,7 @@ Observability and Utility
 - ``enableProfiler()``, ``disableProfiler()``, ``profiler()``
 - ``enableTelemetry()``, ``disableTelemetry()``, ``telemetry()``, ``telemetryOtel()``
 - ``flushTelemetry()``, ``flushTelemetryOtel()``, ``slowQueryReport()``
+- ``setMaxQueryLogEntries()``, ``setProfilerMaxProfiles()``, ``setTelemetryBufferLimits()``
 - ``listen()``, ``whenQueryingForLongerThan()``
 - ``stats()``, ``health()``, ``capabilities()``, ``supportsReturning()``, ``supportsJson()``, ``supportsWindowFunctions()``
 - ``pool()``, ``poolManager()``, ``withPooledConnection()``

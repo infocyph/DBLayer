@@ -28,6 +28,7 @@ A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with 
 - Identifier validation & escaping
 - Operator whitelist
 - SQL injection pattern detection
+- Environment-aware hardening (`APP_ENV`) with TLS policy controls
 - Rate limiting
 - Audit logging
 
@@ -265,6 +266,13 @@ DBLayer implements multiple layers of security:
 4. **Injection Detection** - Scans for suspicious patterns
 5. **Rate Limiting** - Prevents query flooding
 6. **Audit Logging** - Tracks all queries
+
+Environment-aware controls:
+
+- `APP_ENV=production|prod` enables production transport hardening for MySQL/PostgreSQL.
+- `SecurityMode::OFF` and `security.enabled=false` are blocked outside local/testing by default.
+- `security.require_tls=false` is blocked in production unless `DBLAYER_ALLOW_INSECURE_TRANSPORT=1`.
+- Override unsafe-mode guard only when needed: `DBLAYER_ALLOW_INSECURE_SECURITY_MODE=1`.
 
 ## Requirements
 

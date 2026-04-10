@@ -21,7 +21,13 @@ Logger
    DB::disableLogger();
 
 Logger writes structured entries to file and is intended for operational
-troubleshooting.
+troubleshooting. Binding values are redacted by default.
+
+.. code-block:: php
+
+   DB::enableLogger('/tmp/dblayer.log');
+   DB::logger()->setRedactBindings(true); // default
+   // DB::logger()->setRedactBindings(false); // only for controlled local debugging
 
 Profiler
 --------
@@ -57,6 +63,14 @@ Telemetry
    $report = DB::slowQueryReport([50, 90, 95, 99], 1.0);
    $flushed = DB::flushTelemetry();
 
+Buffers are bounded by default (query and transaction events), and can be
+adjusted:
+
+.. code-block:: php
+
+   DB::setTelemetryBufferLimits(queryEvents: 2000, transactionEvents: 2000);
+   DB::setProfilerMaxProfiles(2000);
+
 Telemetry Exports
 -----------------
 
@@ -77,5 +91,5 @@ Register a callback once cumulative query time exceeds a threshold:
 
 .. note::
 
-   For production pipelines, prefer exporting and clearing telemetry buffers on
-   a regular cadence to avoid unbounded in-memory growth.
+   For production pipelines, export and clear telemetry buffers on a regular
+   cadence to keep in-memory diagnostic data tight and recent.

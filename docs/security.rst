@@ -5,7 +5,7 @@ Introduction
 ------------
 
 DBLayer includes layered SQL safety checks for query text and bindings. Security
-is configured globally by mode and optionally overridden per connection.
+is configured globally by mode and can be hardened or tuned per connection.
 
 .. contents:: On This Page
    :depth: 2
@@ -34,6 +34,15 @@ Mode Semantics
 - ``NORMAL``: injection/binding validation with practical defaults.
 - ``STRICT``: adds more aggressive pattern checks and tighter policies.
 
+Environment Guardrails
+----------------------
+
+- ``SecurityMode::OFF`` is blocked outside local/testing environments.
+- ``security.enabled = false`` is also blocked outside local/testing.
+- Override for controlled cases: ``DBLAYER_ALLOW_INSECURE_SECURITY_MODE=1``.
+
+DBLayer treats ``APP_ENV=production`` and ``APP_ENV=prod`` as production-like.
+
 Validation Coverage
 -------------------
 
@@ -55,9 +64,28 @@ Per-Connection Security Config
        'max_sql_length' => 8000,
        'max_params' => 500,
        'max_param_bytes' => 4096,
+       'queries_per_second' => 0,
+       'queries_per_minute' => 0,
+       'rate_limit_key' => null,
+       'rate_limit_callback' => null,
+       'strict_identifiers' => true,
+       'require_tls' => null,
        'raw_sql_policy' => 'allow',
        'raw_sql_allowlist' => [],
    ]
+
+Transport / TLS Policy
+----------------------
+
+- In production-like environments, MySQL and PostgreSQL connections require TLS by default.
+- ``security.require_tls = true`` enforces TLS in any environment.
+- ``security.require_tls = false`` is blocked in production unless
+  ``DBLAYER_ALLOW_INSECURE_TRANSPORT=1`` is set.
+
+Driver requirements:
+
+- MySQL: provide secure transport via ``ssl_ca`` / ``ssl_cert`` / ``ssl_key`` or a secure ``sslmode``.
+- PostgreSQL: set ``sslmode`` to ``require``, ``verify-ca``, or ``verify-full``.
 
 Raw SQL Fragment Policy
 -----------------------
@@ -104,6 +132,18 @@ confirmation gates:
 
    Security::checkRateLimit('tenant:42');
    Security::requireConfirmation('drop table users', confirmed: true);
+
+Error and Log Hygiene
+---------------------
+
+- Query failure exceptions expose statement type and SQL fingerprint, not full SQL text.
+- Logger redacts binding values by default.
+
+.. code-block:: php
+
+   DB::enableLogger('/tmp/dblayer.log');
+   DB::logger()->setRedactBindings(true); // default
+   // DB::logger()->setRedactBindings(false); // opt out only for controlled local debugging
 
 .. warning::
 

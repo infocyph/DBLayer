@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 use Infocyph\DBLayer\DB;
 
+// Keep test behavior deterministic and isolated from host shell environment.
+putenv('APP_ENV=testing');
+$_ENV['APP_ENV'] = 'testing';
+$_SERVER['APP_ENV'] = 'testing';
+
 beforeEach(function (): void {
     DB::purge();
 });
