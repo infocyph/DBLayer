@@ -71,6 +71,15 @@ final class ConnectionConfig
         'max_sql_length'  => 16_384,
         'max_params'      => 512,
         'max_param_bytes' => 1_024,
+        'queries_per_second' => 0,
+        'queries_per_minute' => 0,
+        'rate_limit_key' => null,
+        'rate_limit_callback' => null,
+        'strict_identifiers' => true,
+        'require_tls' => null,
+        'allow_insecure' => false,
+        'raw_sql_policy' => 'allow',
+        'raw_sql_allowlist' => [],
     ];
 
     /**
@@ -102,6 +111,7 @@ final class ConnectionConfig
         }
 
         $config['security'] = array_replace(self::SECURITY_DEFAULT, $security);
+        $this->validateSecurityConfig($config['security']);
 
         // Apply driver-specific connection defaults via DriverProfile.
         $config = DriverProfile::applyConnectionDefaults($config);
@@ -151,7 +161,7 @@ final class ConnectionConfig
         $driver = $this->config['driver'] ?? '';
 
         if (! is_string($driver) || $driver === '') {
-            throw ConnectionException::invalidConfig('Database driver is required.');
+            throw ConnectionException::invalidConfiguration('Database driver is required.');
         }
 
         return $driver;
@@ -380,6 +390,7 @@ final class ConnectionConfig
         return $expanded;
     }
 
+
     /**
      * Normalize a driver name (aliases → canonical).
      */
@@ -431,7 +442,7 @@ final class ConnectionConfig
         $driver = $config['driver'] ?? null;
 
         if (! is_string($driver) || $driver === '') {
-            throw ConnectionException::invalidConfig('Database driver must be a non-empty string.');
+            throw ConnectionException::invalidConfiguration('Database driver must be a non-empty string.');
         }
 
         // Built-in relational engines: require database name.
@@ -441,7 +452,7 @@ final class ConnectionConfig
                 || ! is_string($config['database'])
                 || $config['database'] === ''
             ) {
-                throw ConnectionException::invalidConfig(
+                throw ConnectionException::invalidConfiguration(
                     sprintf("Config key 'database' is required for driver '%s'.", $driver),
                 );
             }
@@ -455,12 +466,147 @@ final class ConnectionConfig
                     || ! is_string($config[$key])
                     || $config[$key] === ''
                 ) {
-                    throw ConnectionException::invalidConfig(
+                    throw ConnectionException::invalidConfiguration(
                         sprintf("Config key '%s' is required for driver '%s'.", $key, $driver),
                     );
                 }
             }
         }
+    }
+
+    /**
+     * @param  array<string,mixed>  $security
+     */
+    private function validateRawSqlPolicy(array $security): void
+    {
+        $rawSqlPolicy = $security['raw_sql_policy'] ?? 'allow';
+
+        if (! is_string($rawSqlPolicy)) {
+            throw ConnectionException::invalidConfiguration("Security config key 'raw_sql_policy' must be a string.");
+        }
+
+        $rawSqlPolicy = strtolower(trim($rawSqlPolicy));
+
+        if (! \in_array($rawSqlPolicy, ['allow', 'deny', 'allowlist'], true)) {
+            throw ConnectionException::invalidConfiguration(
+                "Security config key 'raw_sql_policy' must be one of: allow, deny, allowlist.",
+            );
+        }
+
+        $rawSqlAllowlist = $security['raw_sql_allowlist'] ?? [];
+
+        if (! is_array($rawSqlAllowlist)) {
+            throw ConnectionException::invalidConfiguration(
+                "Security config key 'raw_sql_allowlist' must be an array of patterns.",
+            );
+        }
+
+        foreach ($rawSqlAllowlist as $pattern) {
+            if (! is_string($pattern) || trim($pattern) === '') {
+                throw ConnectionException::invalidConfiguration(
+                    "Security config key 'raw_sql_allowlist' must contain only non-empty string patterns.",
+                );
+            }
+        }
+
+        if ($rawSqlPolicy === 'allowlist' && $rawSqlAllowlist === []) {
+            throw ConnectionException::invalidConfiguration(
+                "Security config key 'raw_sql_allowlist' cannot be empty when 'raw_sql_policy' is set to 'allowlist'.",
+            );
+        }
+    }
+
+    /**
+     * Validate normalized security configuration values.
+     *
+     * @param  array<string,mixed>  $security
+     */
+    private function validateSecurityConfig(array $security): void
+    {
+        $this->validateSecurityEnabled($security);
+        $this->validateSecurityNumericLimits($security);
+        $this->validateSecurityScalarTypes($security);
+        $this->validateRawSqlPolicy($security);
+        $this->validateSecurityTlsPolicy($security);
+    }
+
+    /**
+     * @param  array<string,mixed>  $security
+     */
+    private function validateSecurityEnabled(array $security): void
+    {
+        $enabled = $security['enabled'] ?? true;
+        $allowInsecure = (bool) ($security['allow_insecure'] ?? false);
+
+        if (! is_bool($enabled)) {
+            throw ConnectionException::invalidConfiguration("Security config key 'enabled' must be a boolean.");
+        }
+
+        if ($enabled === false && ! $allowInsecure) {
+            throw ConnectionException::invalidConfiguration(
+                "Security config key 'enabled=false' requires 'allow_insecure=true' in the same security block.",
+            );
+        }
+    }
+
+    /**
+     * @param  array<string,mixed>  $security
+     */
+    private function validateSecurityNumericLimits(array $security): void
+    {
+        foreach (['max_sql_length', 'max_params', 'max_param_bytes', 'queries_per_second', 'queries_per_minute'] as $key) {
+            $value = $security[$key] ?? null;
+
+            if ($value !== null && ! is_int($value) && ! is_numeric($value)) {
+                throw ConnectionException::invalidConfiguration(
+                    sprintf("Security config key '%s' must be numeric.", $key),
+                );
+            }
+        }
+    }
+
+    /**
+     * @param  array<string,mixed>  $security
+     */
+    private function validateSecurityScalarTypes(array $security): void
+    {
+        if (isset($security['rate_limit_key']) && ! is_string($security['rate_limit_key'])) {
+            throw ConnectionException::invalidConfiguration("Security config key 'rate_limit_key' must be a string or null.");
+        }
+
+        if (isset($security['rate_limit_callback']) && ! is_callable($security['rate_limit_callback'])) {
+            throw ConnectionException::invalidConfiguration("Security config key 'rate_limit_callback' must be callable or null.");
+        }
+
+        if (array_key_exists('strict_identifiers', $security) && ! is_bool($security['strict_identifiers'])) {
+            throw ConnectionException::invalidConfiguration("Security config key 'strict_identifiers' must be a boolean.");
+        }
+
+        if (isset($security['require_tls']) && ! is_bool($security['require_tls'])) {
+            throw ConnectionException::invalidConfiguration("Security config key 'require_tls' must be a boolean or null.");
+        }
+
+        if (array_key_exists('allow_insecure', $security) && ! is_bool($security['allow_insecure'])) {
+            throw ConnectionException::invalidConfiguration("Security config key 'allow_insecure' must be a boolean.");
+        }
+    }
+
+    /**
+     * @param  array<string,mixed>  $security
+     */
+    private function validateSecurityTlsPolicy(array $security): void
+    {
+        if (($security['require_tls'] ?? null) !== false) {
+            return;
+        }
+
+        if ((bool) ($security['allow_insecure'] ?? false)) {
+            return;
+        }
+
+        throw ConnectionException::invalidConfiguration(
+            "Security config key 'require_tls=false' requires 'allow_insecure=true' in the same security block.",
+        );
     }
 
     /**

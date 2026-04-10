@@ -49,6 +49,8 @@ In this setup:
 - Reads use replicas when available.
 - With ``sticky=true``, reads switch to write PDO after a write on that
   connection to reduce read-after-write inconsistency windows.
+- For SQLite read replicas, DBLayer applies ``PRAGMA query_only = ON`` on read
+  handles to prevent accidental writes through read PDO.
 
 .. note::
 

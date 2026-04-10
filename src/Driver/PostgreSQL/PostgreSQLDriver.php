@@ -92,6 +92,12 @@ final class PostgreSQLDriver extends AbstractPdoDriver
                 $driver,
             );
         }
+
+        if ($this->requiresTls($config) && ! $this->hasTlsConfiguration($config)) {
+            throw ConnectionException::invalidConfiguration(
+                "Driver [{$driver}] requires sslmode=require|verify-ca|verify-full in this environment.",
+            );
+        }
     }
 
     /**
@@ -122,5 +128,43 @@ final class PostgreSQLDriver extends AbstractPdoDriver
         }
 
         return $dsn;
+    }
+
+    /**
+     * Whether TLS config satisfies required transport policy.
+     *
+     * @param  array<string,mixed>  $config
+     */
+    private function hasTlsConfiguration(array $config): bool
+    {
+        $sslMode = $config['sslmode'] ?? null;
+
+        if (! is_string($sslMode)) {
+            return false;
+        }
+
+        $normalized = strtolower(trim($sslMode));
+
+        return \in_array($normalized, ['require', 'verify-ca', 'verify-full'], true);
+    }
+
+    /**
+     * Whether TLS should be required for this config.
+     *
+     * @param  array<string,mixed>  $config
+     */
+    private function requiresTls(array $config): bool
+    {
+        $security = $config['security'] ?? [];
+
+        if (! is_array($security)) {
+            return false;
+        }
+
+        if (! isset($security['require_tls'])) {
+            return false;
+        }
+
+        return (bool) $security['require_tls'];
     }
 }

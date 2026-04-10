@@ -10,6 +10,7 @@ use Infocyph\DBLayer\Driver\Support\Capabilities;
 use Infocyph\DBLayer\Driver\Support\DriverProfile;
 use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
+use Infocyph\DBLayer\Exceptions\SecurityException;
 use Infocyph\DBLayer\Grammar\Grammar;
 use Infocyph\DBLayer\Query\Core\CompiledQuery;
 use Infocyph\DBLayer\Query\Core\DriverResult;
@@ -49,6 +50,11 @@ final class Connection
     private const int MAX_RECONNECT_ATTEMPTS = 3;
 
     /**
+     * Shared in-memory PDO used to build empty statement handles in pretend mode.
+     */
+    private static ?PDO $pretendPdo = null;
+
+    /**
      * Query compiler for this connection.
      */
     private readonly QueryCompilerInterface $compiler;
@@ -77,6 +83,11 @@ final class Connection
      * Write PDO connection.
      */
     private ?PDO $pdo = null;
+
+    /**
+     * Whether connection is in non-executing "pretend" mode.
+     */
+    private bool $pretending = false;
 
     /**
      * Optional cancellation checker called before query attempts.
@@ -251,6 +262,12 @@ final class Connection
      */
     public function disableSecurityChecks(): void
     {
+        if (! Security::isInsecureModeAllowed()) {
+            throw SecurityException::unsafeOperation(
+                'Disabling connection-level SQL security checks is blocked outside local/testing environments.',
+            );
+        }
+
         $this->securityChecks = false;
     }
 
@@ -282,18 +299,31 @@ final class Connection
      */
     public function execute(string $sql, array $bindings = []): PDOStatement
     {
+        $securityConfig = $this->config->securityConfig();
+
         if ($this->securityChecks) {
             // Will be a no-op when SecurityMode::OFF is set globally.
-            Security::validateQuery($sql, $bindings, $this->config->securityConfig());
+            Security::validateQuery($sql, $bindings, $securityConfig);
         }
 
-        $isWrite = $this->isWriteQuery($sql);
-        $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
+        $this->enforceRateLimitIfConfigured($securityConfig);
 
+        $isWrite = $this->isWriteQuery($sql);
         $start = microtime(true);
         $success = false;
 
         try {
+            if ($this->pretending) {
+                $this->assertNotCancelled();
+                $this->assertWithinQueryBudget($start);
+                $this->recordQuery($isWrite);
+                $this->recordPretend($sql, $bindings);
+                $success = true;
+
+                return $this->createPretendStatement($isWrite);
+            }
+
+            $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
             $attempt = 0;
 
             while (true) {
@@ -551,8 +581,8 @@ final class Connection
     /**
      * "Pretend" to execute queries and return the list of queries that would run.
      *
-     * Note: for now this still executes queries; it only records them.
-     * It is primarily useful for inspecting generated SQL.
+     * The callback runs in non-executing mode; queries are recorded but not sent
+     * to the configured database connection.
      *
      * @param  callable(self):void  $callback
      * @return array<int,array{sql:string,bindings:array<int|string,mixed>}>
@@ -561,6 +591,7 @@ final class Connection
     {
         $logged = [];
         $previousRecorder = $this->queryRecorder;
+        $previousPretending = $this->pretending;
 
         $this->queryRecorder = static function (string $sql, array $bindings) use (&$logged): void {
             $logged[] = [
@@ -568,10 +599,12 @@ final class Connection
                 'bindings' => $bindings,
             ];
         };
+        $this->pretending = true;
 
         try {
             $callback($this);
         } finally {
+            $this->pretending = $previousPretending;
             $this->queryRecorder = $previousRecorder;
         }
 
@@ -788,7 +821,14 @@ final class Connection
      */
     public function setQueryTimeoutMs(?int $timeoutMs): self
     {
-        $this->queryTimeoutMs = $timeoutMs !== null && $timeoutMs > 0 ? $timeoutMs : null;
+        $next = $timeoutMs !== null && $timeoutMs > 0 ? $timeoutMs : null;
+
+        if ($this->queryTimeoutMs === $next) {
+            return $this;
+        }
+
+        $this->queryTimeoutMs = $next;
+        $this->syncServerSideStatementTimeouts();
 
         return $this;
     }
@@ -912,17 +952,31 @@ final class Connection
      */
     public function unprepared(string $sql): bool
     {
+        $securityConfig = $this->config->securityConfig();
+
         if ($this->securityChecks) {
-            Security::validateQuery($sql, [], $this->config->securityConfig());
+            Security::validateQuery($sql, [], $securityConfig);
         }
 
+        $this->enforceRateLimitIfConfigured($securityConfig);
+
         $isWrite = $this->isWriteQuery($sql);
-        $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
 
         $start = microtime(true);
         $success = false;
 
         try {
+            if ($this->pretending) {
+                $this->assertNotCancelled();
+                $this->assertWithinQueryBudget($start);
+                $this->recordQuery($isWrite);
+                $this->recordPretend($sql, []);
+                $success = true;
+
+                return true;
+            }
+
+            $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
             $attempt = 0;
 
             while (true) {
@@ -1035,7 +1089,104 @@ final class Connection
         try {
             return $callback();
         } finally {
-            $this->queryTimeoutMs = $previous;
+            $this->setQueryTimeoutMs($previous);
+        }
+    }
+
+    /**
+     * Shared PDO used only to fabricate PDOStatement instances in pretend mode.
+     */
+    private static function pretendPdo(): PDO
+    {
+        if (self::$pretendPdo === null) {
+            self::$pretendPdo = new PDO('sqlite::memory:', '', '', [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ]);
+        }
+
+        return self::$pretendPdo;
+    }
+
+    /**
+     * Apply MySQL/MariaDB statement timeout (best effort, version-dependent).
+     */
+    private function applyMySqlStatementTimeout(PDO $pdo, int $timeoutMs): void
+    {
+        $value = max(0, $timeoutMs);
+
+        try {
+            $pdo->exec('set session max_execution_time = ' . $value);
+
+            return;
+        } catch (PDOException) {
+            // MariaDB fallback.
+        }
+
+        $seconds = max(0.0, $value / 1_000.0);
+        $secondsLiteral = number_format($seconds, 3, '.', '');
+
+        try {
+            $pdo->exec('set session max_statement_time = ' . $secondsLiteral);
+        } catch (PDOException) {
+            // Ignore unsupported server variables.
+        }
+    }
+
+    /**
+     * Apply PostgreSQL statement timeout (milliseconds).
+     */
+    private function applyPgSqlStatementTimeout(PDO $pdo, int $timeoutMs): void
+    {
+        $value = max(0, $timeoutMs);
+
+        try {
+            $pdo->exec('set statement_timeout = ' . $value);
+        } catch (PDOException) {
+            // Ignore when not supported by server role/config.
+        }
+    }
+
+    /**
+     * Apply best-effort driver-native statement timeout for one PDO handle.
+     */
+    private function applyServerSideTimeoutToPdo(?PDO $pdo): void
+    {
+        if (! $pdo instanceof PDO) {
+            return;
+        }
+
+        $timeoutMs = $this->queryTimeoutMs;
+        $driver = $this->config->getDriver();
+
+        if ($driver === 'mysql') {
+            $this->applyMySqlStatementTimeout($pdo, $timeoutMs ?? 0);
+
+            return;
+        }
+
+        if ($driver === 'pgsql') {
+            $this->applyPgSqlStatementTimeout($pdo, $timeoutMs ?? 0);
+
+            return;
+        }
+
+        if ($driver === 'sqlite') {
+            $this->applySqliteBusyTimeout($pdo, $timeoutMs ?? 0);
+        }
+    }
+
+    /**
+     * Apply SQLite busy timeout (lock-wait timeout, best effort).
+     */
+    private function applySqliteBusyTimeout(PDO $pdo, int $timeoutMs): void
+    {
+        $value = max(0, $timeoutMs);
+
+        try {
+            $pdo->exec('pragma busy_timeout = ' . $value);
+        } catch (PDOException) {
+            // Ignore.
         }
     }
 
@@ -1141,6 +1292,7 @@ final class Connection
         try {
             $config = $this->resolveWriteConnectionConfig();
             $this->pdo = $this->driver->createPdo($config, false);
+            $this->applyServerSideTimeoutToPdo($this->pdo);
         } catch (PDOException $e) {
             throw ConnectionException::connectionFailed(
                 $this->config->getDriver(),
@@ -1168,11 +1320,25 @@ final class Connection
             [$index, $pdo] = $this->resolveReadReplicaPdo($readConfigs);
             $this->readReplicaIndex = $index;
             $this->readPdo = $pdo;
+            $this->applyServerSideTimeoutToPdo($this->readPdo);
+            ReadReplicaSessionPolicy::apply($this->config->getDriver(), $this->readPdo);
         } catch (PDOException|ConnectionException) {
             // Silent fallback to write connection; readPdo stays null.
             $this->readPdo = null;
             $this->readReplicaIndex = null;
         }
+    }
+
+    /**
+     * Create an inert statement handle used in pretend mode.
+     */
+    private function createPretendStatement(bool $isWrite): PDOStatement
+    {
+        $sql = $isWrite ? 'select 0 as affected' : 'select 1 where 0 = 1';
+        $statement = self::pretendPdo()->prepare($sql);
+        $statement->execute();
+
+        return $statement;
     }
 
     /**
@@ -1187,6 +1353,53 @@ final class Connection
         $config = ConnectionConfig::fromArray($merged);
 
         return $this->driver->createPdo($config, true);
+    }
+
+    /**
+     * Apply configured query-rate limits when limits are enabled for this connection.
+     *
+     * @param  array<string,mixed>  $securityConfig
+     */
+    private function enforceRateLimitIfConfigured(array $securityConfig): void
+    {
+        $perSecond = isset($securityConfig['queries_per_second']) && is_numeric($securityConfig['queries_per_second'])
+            ? (int) $securityConfig['queries_per_second']
+            : 0;
+        $perMinute = isset($securityConfig['queries_per_minute']) && is_numeric($securityConfig['queries_per_minute'])
+            ? (int) $securityConfig['queries_per_minute']
+            : 0;
+
+        if ($perSecond <= 0 && $perMinute <= 0) {
+            return;
+        }
+
+        $identifier = $this->resolveRateLimitIdentifier($securityConfig);
+
+        $customLimiter = $securityConfig['rate_limit_callback'] ?? null;
+
+        if (is_callable($customLimiter)) {
+            $allowed = $customLimiter($identifier, [
+                'queries_per_second' => max(0, $perSecond),
+                'queries_per_minute' => max(0, $perMinute),
+            ]);
+
+            if ($allowed === false) {
+                $ttl = $perSecond > 0 ? 1 : 60;
+                $max = $perSecond > 0 ? $perSecond : $perMinute;
+
+                throw SecurityException::rateLimitExceeded($identifier, max(1, $max), $ttl);
+            }
+
+            return;
+        }
+
+        Security::checkRateLimit(
+            $identifier,
+            [
+                'queries_per_second' => max(0, $perSecond),
+                'queries_per_minute' => max(0, $perMinute),
+            ],
+        );
     }
 
     /**
@@ -1231,6 +1444,7 @@ final class Connection
             is_int($value) => PDO::PARAM_INT,
             is_bool($value) => PDO::PARAM_BOOL,
             $value === null => PDO::PARAM_NULL,
+            is_resource($value) => PDO::PARAM_LOB,
             default => PDO::PARAM_STR,
         };
     }
@@ -1292,8 +1506,11 @@ final class Connection
      */
     private function isWriteQuery(string $sql): bool
     {
-        $sql = ltrim($sql);
-        $firstWord = strtoupper(substr($sql, 0, strcspn($sql, " \t\n\r")));
+        $firstWord = SqlStatementInspector::leadingStatementKeyword($sql);
+
+        if ($firstWord === '') {
+            return false;
+        }
 
         return in_array(
             $firstWord,
@@ -1444,6 +1661,33 @@ final class Connection
     }
 
     /**
+     * Resolve logical rate-limit identifier for this connection.
+     *
+     * @param  array<string,mixed>  $securityConfig
+     */
+    private function resolveRateLimitIdentifier(array $securityConfig): string
+    {
+        $custom = $securityConfig['rate_limit_key'] ?? null;
+        if (is_string($custom) && trim($custom) !== '') {
+            return trim($custom);
+        }
+
+        $host = (string) ($this->config->get('host') ?? 'local');
+        $database = $this->config->getDatabase();
+        $pid = (string) (\getmypid() ?: '0');
+
+        return strtolower(
+            implode(':', [
+                'dblayer',
+                $this->config->getDriver(),
+                $host,
+                $database,
+                $pid,
+            ]),
+        );
+    }
+
+    /**
      * Resolve one read-replica PDO using configured read strategy.
      *
      * @param  list<array<string,mixed>>  $readConfigs
@@ -1504,9 +1748,19 @@ final class Connection
     private function runStatement(PDO $pdo, string $sql, array $bindings): PDOStatement
     {
         $statement = $pdo->prepare($sql);
+        $resourceBindings = [];
 
         foreach ($bindings as $key => $value) {
             $parameter = is_int($key) ? $key + 1 : $key;
+
+            if (is_resource($value)) {
+                $resourceBindings[] = $value;
+                $resourceIndex = \count($resourceBindings) - 1;
+                $statement->bindParam($parameter, $resourceBindings[$resourceIndex], PDO::PARAM_LOB);
+
+                continue;
+            }
+
             $statement->bindValue($parameter, $value, $this->getParameterType($value));
         }
 
@@ -1595,5 +1849,14 @@ final class Connection
         }
 
         return $this->recordsModified;
+    }
+
+    /**
+     * Synchronize server-side statement timeout for already-open PDO handles.
+     */
+    private function syncServerSideStatementTimeouts(): void
+    {
+        $this->applyServerSideTimeoutToPdo($this->pdo);
+        $this->applyServerSideTimeoutToPdo($this->readPdo);
     }
 }

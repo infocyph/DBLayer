@@ -59,6 +59,11 @@ final class Security
     private const int STRICT_MAX_QUERY_LENGTH = 8000;
 
     /**
+     * Explicit override for allowing insecure mode operations.
+     */
+    private static bool $allowInsecureMode = false;
+
+    /**
      * Global security mode.
      */
     private static SecurityMode $mode = SecurityMode::NORMAL;
@@ -67,6 +72,24 @@ final class Security
      * Shared rate limiter instance.
      */
     private static ?RateLimiter $rateLimiter = null;
+
+    /**
+     * Optional distributed rate-limit callback.
+     *
+     * Signature:
+     *  fn(string $identifier, array{queries_per_second:int,queries_per_minute:int} $limits): void
+     *
+     * @var null|callable(string,array{queries_per_second:int,queries_per_minute:int}):void
+     */
+    private static $rateLimitHandler;
+
+    /**
+     * Explicitly allow/disallow insecure-mode behavior.
+     */
+    public static function allowInsecureMode(bool $allow = true): void
+    {
+        self::$allowInsecureMode = $allow;
+    }
 
     /**
      * Check rate limits (per-second & per-minute) for an identifier.
@@ -84,6 +107,15 @@ final class Security
     {
         $perSecond = $limits['queries_per_second'] ?? self::DEFAULT_QUERIES_PER_SECOND;
         $perMinute = $limits['queries_per_minute'] ?? self::DEFAULT_QUERIES_PER_MINUTE;
+
+        if (self::$rateLimitHandler !== null) {
+            (self::$rateLimitHandler)($identifier, [
+                'queries_per_second' => max(0, (int) $perSecond),
+                'queries_per_minute' => max(0, (int) $perMinute),
+            ]);
+
+            return;
+        }
 
         $limiter = self::limiter();
 
@@ -142,7 +174,7 @@ final class Security
                 'injection_attempt',
                 'Possible SQL injection detected',
                 [
-                    'sql' => mb_substr($sql, 0, 512, 'UTF-8'),
+                    'sql' => self::summarizeSqlForLogs($sql),
                     'error' => $e->getMessage(),
                 ],
             );
@@ -224,6 +256,14 @@ final class Security
     }
 
     /**
+     * Whether insecure-mode overrides are currently allowed.
+     */
+    public static function isInsecureModeAllowed(): bool
+    {
+        return self::$allowInsecureMode;
+    }
+
+    /**
      * Log a security event (kept simple and JSON-structured).
      *
      * @param  array<string,mixed>  $context
@@ -298,7 +338,23 @@ final class Security
      */
     public static function setMode(SecurityMode $mode): void
     {
+        if ($mode === SecurityMode::OFF && ! self::isInsecureModeAllowed()) {
+            throw SecurityException::invalidConfiguration(
+                'SecurityMode::OFF is disabled by default. Call Security::allowInsecureMode(true) to override intentionally.',
+            );
+        }
+
         self::$mode = $mode;
+    }
+
+    /**
+     * Set an optional external/distributed rate-limit handler.
+     *
+     * @param  null|callable(string,array{queries_per_second:int,queries_per_minute:int}):void  $handler
+     */
+    public static function setRateLimitHandler(?callable $handler): void
+    {
+        self::$rateLimitHandler = $handler;
     }
 
     /**
@@ -526,7 +582,7 @@ final class Security
                 'dangerous_query',
                 'Query contains dangerous pattern',
                 [
-                    'sql' => mb_substr($sql, 0, 512, 'UTF-8'),
+                    'sql' => self::summarizeSqlForLogs($sql),
                     'pattern' => $pattern,
                 ],
             );
@@ -548,6 +604,33 @@ final class Security
             return false;
         }
 
+        $allowInsecure = (bool) ($config['allow_insecure'] ?? false);
+
+        if (! (bool) $config['enabled'] && ! $allowInsecure && ! self::isInsecureModeAllowed()) {
+            throw SecurityException::invalidConfiguration(
+                'Disabling SQL security checks requires security.allow_insecure=true or Security::allowInsecureMode(true).',
+            );
+        }
+
         return ! (bool) $config['enabled'];
+    }
+
+    /**
+     * Build a compact, non-sensitive SQL summary for logs.
+     *
+     * @return array{statement:string,fingerprint:string,length:int}
+     */
+    private static function summarizeSqlForLogs(string $sql): array
+    {
+        $trimmed = ltrim($sql);
+        $statement = strtoupper(substr($trimmed, 0, strcspn($trimmed, " \t\n\r")));
+        $normalized = strtolower(trim(preg_replace('/\s+/', ' ', $sql) ?? $sql));
+        $fingerprint = substr(hash('sha256', $normalized), 0, 16);
+
+        return [
+            'statement' => $statement,
+            'fingerprint' => $fingerprint,
+            'length' => strlen($sql),
+        ];
     }
 }

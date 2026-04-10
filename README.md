@@ -28,6 +28,7 @@ A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with 
 - Identifier validation & escaping
 - Operator whitelist
 - SQL injection pattern detection
+- Config-driven hardening with TLS policy controls
 - Rate limiting
 - Audit logging
 
@@ -221,8 +222,9 @@ try {
 ```bash
 composer tests
 composer test:code
-composer test:static
-composer test:security
+composer test:static:strict
+composer test:security:strict
+composer release:audit
 ```
 
 Test execution is driver-aware:
@@ -264,6 +266,12 @@ DBLayer implements multiple layers of security:
 4. **Injection Detection** - Scans for suspicious patterns
 5. **Rate Limiting** - Prevents query flooding
 6. **Audit Logging** - Tracks all queries
+
+Hardening controls:
+
+- `DB::hardenProduction()` sets `enabled=true`, `strict_identifiers=true`, `require_tls=true`.
+- `SecurityMode::OFF` is blocked by default (allow explicitly with `Security::allowInsecureMode(true)`).
+- `security.enabled=false` and `security.require_tls=false` require `security.allow_insecure=true`.
 
 ## Requirements
 

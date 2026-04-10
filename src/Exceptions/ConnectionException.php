@@ -120,7 +120,12 @@ final class ConnectionException extends DBException
      */
     public static function queryFailed(string $sql, string $error): self
     {
-        return new self("Database query failed: {$error}. SQL: {$sql}");
+        $statement = strtoupper(substr(ltrim($sql), 0, strcspn(ltrim($sql), " \t\n\r")));
+        $fingerprint = substr(hash('sha256', strtolower(trim(preg_replace('/\s+/', ' ', $sql) ?? $sql))), 0, 16);
+
+        return new self(
+            "Database query failed: {$error}. Statement: {$statement}. Fingerprint: {$fingerprint}.",
+        );
     }
 
     public static function queryTimeout(float $seconds): self

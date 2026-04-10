@@ -10,9 +10,8 @@ use Infocyph\DBLayer\Support\Collection;
 
 final class TableModelUser extends TableModel
 {
-    protected static string $table = 'users';
-
     protected static ?string $connection = 'table_model_conn';
+    protected static string $table = 'users';
 
     protected static function configureRepository(Repository $repository): Repository
     {
@@ -27,12 +26,15 @@ final class BrokenTableModel extends TableModel {}
 
 function setupTableModelFixture(string $driver): void
 {
+    // Keep model fixtures independent from facade-level hardening defaults.
+    DB::setSecurityDefaults([], false);
     dblayerAddConnectionForDriver($driver, 'table_model_conn');
     $schemaDriver = dblayerConnectionDriver('table_model_conn');
     dblayerDropTable('users', 'table_model_conn');
 
     DB::statement(
-        sprintf('create table users (
+        sprintf(
+            'create table users (
             %s,
             tenant_id integer not null,
             email %s not null unique,

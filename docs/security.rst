@@ -5,7 +5,7 @@ Introduction
 ------------
 
 DBLayer includes layered SQL safety checks for query text and bindings. Security
-is configured globally by mode and optionally overridden per connection.
+is configured globally by mode and can be hardened or tuned per connection.
 
 .. contents:: On This Page
    :depth: 2
@@ -34,6 +34,20 @@ Mode Semantics
 - ``NORMAL``: injection/binding validation with practical defaults.
 - ``STRICT``: adds more aggressive pattern checks and tighter policies.
 
+Policy Guardrails
+-----------------
+
+- ``SecurityMode::OFF`` is blocked by default.
+- ``security.enabled = false`` is blocked unless you set
+  ``security.allow_insecure = true``.
+- Intentional global override for advanced local diagnostics:
+
+.. code-block:: php
+
+   use Infocyph\DBLayer\Security\Security;
+
+   Security::allowInsecureMode(true);
+
 Validation Coverage
 -------------------
 
@@ -55,7 +69,63 @@ Per-Connection Security Config
        'max_sql_length' => 8000,
        'max_params' => 500,
        'max_param_bytes' => 4096,
+       'queries_per_second' => 0,
+       'queries_per_minute' => 0,
+       'rate_limit_key' => null,
+       'rate_limit_callback' => null,
+       'strict_identifiers' => true,
+       'require_tls' => null,
+       'allow_insecure' => false,
+       'raw_sql_policy' => 'allow',
+       'raw_sql_allowlist' => [],
    ]
+
+Transport / TLS Policy
+----------------------
+
+- ``security.require_tls = true`` enforces TLS for MySQL/PostgreSQL.
+- ``security.require_tls = false`` requires ``security.allow_insecure = true``.
+- ``DB::hardenProduction()`` sets ``require_tls = true`` for hardened defaults.
+
+Driver requirements:
+
+- MySQL: provide secure transport via ``ssl_ca`` / ``ssl_cert`` / ``ssl_key`` or a secure ``sslmode``.
+- PostgreSQL: set ``sslmode`` to ``require``, ``verify-ca``, or ``verify-full``.
+
+Raw SQL Fragment Policy
+-----------------------
+
+Raw entry points (for example ``whereRaw()``, ``selectRaw()``, string
+``fromSub()``, and string CTE bodies) are controlled by:
+
+- ``raw_sql_policy = allow``: default behavior.
+- ``raw_sql_policy = deny``: block all raw fragments.
+- ``raw_sql_policy = allowlist``: only allow fragments matching
+  ``raw_sql_allowlist`` patterns.
+
+Allowlist rules support plain substring rules and regex rules such as
+``'/^id\\s*=\\s*\\?$/i'``.
+
+Facade-Level Defaults
+---------------------
+
+For consistent policy across many connections, you can apply global defaults
+through the facade:
+
+.. code-block:: php
+
+   use Infocyph\DBLayer\DB;
+
+   DB::setSecurityDefaults([
+       'strict_identifiers' => true,
+       'queries_per_second' => 250,
+   ]);
+
+   // Convenience profile (enables strict identifiers and require_tls=true).
+   DB::hardenProduction();
+
+These values are applied as enforced facade policy across registered and future
+connections.
 
 Rate Limiting and Confirmation
 ------------------------------
@@ -67,6 +137,18 @@ confirmation gates:
 
    Security::checkRateLimit('tenant:42');
    Security::requireConfirmation('drop table users', confirmed: true);
+
+Error and Log Hygiene
+---------------------
+
+- Query failure exceptions expose statement type and SQL fingerprint, not full SQL text.
+- Logger redacts binding values by default.
+
+.. code-block:: php
+
+   DB::enableLogger('/tmp/dblayer.log');
+   DB::logger()->setRedactBindings(true); // default
+   // DB::logger()->setRedactBindings(false); // opt out only for controlled local debugging
 
 .. warning::
 

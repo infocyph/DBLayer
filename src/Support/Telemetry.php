@@ -15,6 +15,10 @@ use Infocyph\DBLayer\Events\Events;
  */
 final class Telemetry
 {
+    private const int DEFAULT_MAX_QUERY_EVENTS = 2_000;
+
+    private const int DEFAULT_MAX_TRANSACTION_EVENTS = 2_000;
+
     /**
      * Whether collection is enabled.
      */
@@ -31,6 +35,16 @@ final class Telemetry
      * Whether event listeners are already registered.
      */
     private static bool $hooked = false;
+
+    /**
+     * Maximum retained query events in memory.
+     */
+    private static int $maxQueryEvents = self::DEFAULT_MAX_QUERY_EVENTS;
+
+    /**
+     * Maximum retained transaction events in memory.
+     */
+    private static int $maxTransactionEvents = self::DEFAULT_MAX_TRANSACTION_EVENTS;
     /**
      * @var list<array<string,mixed>>
      */
@@ -123,6 +137,22 @@ final class Telemetry
     public static function isEnabled(): bool
     {
         return self::$enabled;
+    }
+
+    /**
+     * Configure in-memory telemetry buffer limits.
+     */
+    public static function setBufferLimits(?int $queryEvents = null, ?int $transactionEvents = null): void
+    {
+        if ($queryEvents !== null) {
+            self::$maxQueryEvents = max(1, $queryEvents);
+            self::trimQueryBuffer();
+        }
+
+        if ($transactionEvents !== null) {
+            self::$maxTransactionEvents = max(1, $transactionEvents);
+            self::trimTransactionBuffer();
+        }
     }
 
     /**
@@ -299,6 +329,7 @@ final class Telemetry
                 'connection' => $event->connection->getDriverName(),
                 'timestamp' => microtime(true),
             ];
+            self::trimQueryBuffer();
         });
 
         Events::listen('db.transaction.beginning', static function (TransactionBeginning $event): void {
@@ -312,6 +343,7 @@ final class Telemetry
                 'duration_ms' => 0.0,
                 'timestamp' => $event->time,
             ];
+            self::trimTransactionBuffer();
         });
 
         Events::listen('db.transaction.committed', static function (TransactionCommitted $event): void {
@@ -325,6 +357,7 @@ final class Telemetry
                 'duration_ms' => $event->duration,
                 'timestamp' => microtime(true),
             ];
+            self::trimTransactionBuffer();
         });
 
         Events::listen('db.transaction.rolled_back', static function (TransactionRolledBack $event): void {
@@ -338,6 +371,7 @@ final class Telemetry
                 'duration_ms' => $event->duration,
                 'timestamp' => microtime(true),
             ];
+            self::trimTransactionBuffer();
         });
     }
 
@@ -387,5 +421,29 @@ final class Telemetry
     private static function toUnixNano(float $seconds): int
     {
         return (int) round($seconds * 1_000_000_000);
+    }
+
+    /**
+     * Keep query buffer size within configured max.
+     */
+    private static function trimQueryBuffer(): void
+    {
+        $overflow = \count(self::$queries) - self::$maxQueryEvents;
+
+        if ($overflow > 0) {
+            array_splice(self::$queries, 0, $overflow);
+        }
+    }
+
+    /**
+     * Keep transaction buffer size within configured max.
+     */
+    private static function trimTransactionBuffer(): void
+    {
+        $overflow = \count(self::$transactions) - self::$maxTransactionEvents;
+
+        if ($overflow > 0) {
+            array_splice(self::$transactions, 0, $overflow);
+        }
     }
 }

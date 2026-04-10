@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\DB;
 
 beforeEach(function (): void {
@@ -245,6 +246,12 @@ function dblayerCanConnect(array $config): bool
 
     if ($driver === 'sqlite') {
         return true;
+    }
+
+    try {
+        ConnectionConfig::fromArray($config);
+    } catch (Throwable) {
+        return false;
     }
 
     try {

@@ -18,9 +18,8 @@ final class RepositoryUserDto
 
 final class RepositoryHydratedDto
 {
-    public int $id = 0;
-
     public string $email = '';
+    public int $id = 0;
 }
 
 abstract class RepositoryAbstractDto
@@ -38,13 +37,16 @@ function seedRepositoryUsers(string $table, array $rows): void
 
 function setupRepositoryFixture(string $driver): string
 {
+    // Keep repository fixtures independent from facade-level hardening defaults.
+    DB::setSecurityDefaults([], false);
     dblayerAddConnectionForDriver($driver, 'repo');
     DB::setDefaultConnection('repo');
     $schemaDriver = dblayerConnectionDriver('repo');
     $table = dblayerTable('repository_users');
 
     DB::statement(
-        sprintf('create table %s (
+        sprintf(
+            'create table %s (
             %s,
             tenant_id integer not null,
             email %s not null unique,
@@ -362,7 +364,8 @@ it('supports soft deletes, optimistic locking, casts, and lifecycle hooks', func
     $table = dblayerTable('repository_features');
 
     DB::statement(
-        sprintf('create table %s (
+        sprintf(
+            'create table %s (
             %s,
             name %s not null,
             meta %s null,

@@ -149,6 +149,13 @@ class DB
     protected static ?ResultProcessor $resultProcessor = null;
 
     /**
+     * Global security defaults merged into every connection config.
+     *
+     * @var array<string,mixed>|null
+     */
+    protected static ?array $securityDefaults = null;
+
+    /**
      * Dynamically pass methods to the default connection.
      */
     public static function __callStatic(string $method, array $parameters): mixed
@@ -481,6 +488,25 @@ class DB
     }
 
     /**
+     * Apply production-safe security defaults quickly.
+     *
+     * @param  array<string,mixed>  $securityOverrides
+     */
+    public static function hardenProduction(array $securityOverrides = [], bool $refreshExisting = true): void
+    {
+        $defaults = [
+            'enabled' => true,
+            'strict_identifiers' => true,
+            'require_tls' => true,
+        ];
+
+        static::setSecurityDefaults(
+            array_replace($defaults, $securityOverrides),
+            $refreshExisting,
+        );
+    }
+
+    /**
      * Determine if a connection configuration has been registered.
      */
     public static function hasConnection(string $name): bool
@@ -651,6 +677,7 @@ class DB
         static::$poolManager        = null;
         static::$profiler           = null;
         static::$resultProcessor    = null;
+        static::$securityDefaults   = null;
         static::$queryTimeMonitors  = [];
         Telemetry::clear();
     }
@@ -854,6 +881,34 @@ class DB
     }
 
     /**
+     * Set profiler buffer limit.
+     */
+    public static function setProfilerMaxProfiles(?int $maxProfiles): void
+    {
+        static::profiler()->setMaxProfiles($maxProfiles);
+    }
+
+    /**
+     * Set global security policy values for current and future connections.
+     *
+     * Values set here are enforced over per-connection security settings.
+     *
+     * @param  array<string,mixed>  $security
+     */
+    public static function setSecurityDefaults(array $security, bool $refreshExisting = true): void
+    {
+        // Validate shape/types against ConnectionConfig security rules.
+        ConnectionConfig::fromArray([
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'security' => $security,
+        ]);
+
+        static::$securityDefaults = $security;
+        static::applySecurityDefaultsToRegisteredConnections($refreshExisting);
+    }
+
+    /**
      * Set the table prefix.
      *
      * @throws ConnectionException
@@ -861,6 +916,14 @@ class DB
     public static function setTablePrefix(string $prefix, ?string $connection = null): Connection
     {
         return static::connection($connection)->setTablePrefix($prefix);
+    }
+
+    /**
+     * Set in-memory telemetry buffer limits.
+     */
+    public static function setTelemetryBufferLimits(?int $queryEvents = null, ?int $transactionEvents = null): void
+    {
+        Telemetry::setBufferLimits($queryEvents, $transactionEvents);
     }
 
     /**
@@ -1159,9 +1222,25 @@ class DB
      */
     protected static function normalizeConfig(array|ConnectionConfig $config): ConnectionConfig
     {
-        return $config instanceof ConnectionConfig
-          ? $config
-          : ConnectionConfig::fromArray($config);
+        if ($config instanceof ConnectionConfig) {
+            if (static::$securityDefaults === null) {
+                return $config;
+            }
+
+            return $config->with(
+                'security',
+                static::mergeSecurityDefaults($config->securityConfig()),
+            );
+        }
+
+        if (static::$securityDefaults !== null) {
+            $security = isset($config['security']) && is_array($config['security'])
+                ? $config['security']
+                : [];
+            $config['security'] = static::mergeSecurityDefaults($security);
+        }
+
+        return ConnectionConfig::fromArray($config);
     }
 
     /**
@@ -1194,6 +1273,26 @@ class DB
 
         static::$queryLog[static::$queryLogStart] = $entry;
         static::$queryLogStart = (static::$queryLogStart + 1) % $max;
+    }
+
+    /**
+     * Rebuild stored configs/connections so new security defaults take effect.
+     */
+    private static function applySecurityDefaultsToRegisteredConnections(bool $refreshExisting): void
+    {
+        foreach (static::$connectionConfigs as $name => $config) {
+            $normalized = $config->with(
+                'security',
+                static::mergeSecurityDefaults($config->securityConfig()),
+            );
+
+            static::$connectionConfigs[$name] = $normalized;
+            static::$pool?->addConfig($name, $normalized);
+
+            if ($refreshExisting || ! isset(static::$connections[$name])) {
+                static::$connections[$name] = new Connection($normalized);
+            }
+        }
     }
 
     /**
@@ -1345,6 +1444,21 @@ class DB
         }
 
         $callback($event->connection, $event);
+    }
+
+    /**
+     * Merge global security defaults with connection-level security settings.
+     *
+     * @param  array<string,mixed>  $security
+     * @return array<string,mixed>
+     */
+    private static function mergeSecurityDefaults(array $security): array
+    {
+        if (static::$securityDefaults === null) {
+            return $security;
+        }
+
+        return array_replace($security, static::$securityDefaults);
     }
 
     /**

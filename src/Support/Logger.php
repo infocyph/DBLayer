@@ -21,6 +21,11 @@ final class Logger
     private bool $enabled = false;
 
     /**
+     * Whether to redact binding values in logs.
+     */
+    private bool $redactBindings = true;
+
+    /**
      * Create a new logger instance.
      *
      * @param string|null $logFile Log file path (default: system temp directory)
@@ -116,7 +121,7 @@ final class Logger
         ];
 
         if ($bindings !== []) {
-            $context['bindings'] = $bindings;
+            $context['bindings'] = $this->normalizeBindingsForLog($bindings);
         }
 
         if ($time > 0.0) {
@@ -124,6 +129,67 @@ final class Logger
         }
 
         $this->write($context);
+    }
+
+    /**
+     * Control whether binding values are redacted in query logs.
+     */
+    public function setRedactBindings(bool $redact): void
+    {
+        $this->redactBindings = $redact;
+    }
+
+    /**
+     * Normalize bindings before writing them to logs.
+     *
+     * @param  array<int|string,mixed>  $bindings
+     * @return array<int|string,mixed>
+     */
+    private function normalizeBindingsForLog(array $bindings): array
+    {
+        if (! $this->redactBindings) {
+            return $bindings;
+        }
+
+        $sanitized = [];
+
+        foreach ($bindings as $key => $value) {
+            $sanitized[$key] = $this->redactBindingValue($value);
+        }
+
+        return $sanitized;
+    }
+
+    /**
+     * Redact one binding value while preserving debugging shape.
+     */
+    private function redactBindingValue(mixed $value): mixed
+    {
+        if ($value === null || is_bool($value) || is_int($value) || is_float($value)) {
+            return $value;
+        }
+
+        if (is_resource($value)) {
+            return '[resource]';
+        }
+
+        if (is_string($value)) {
+            return '[redacted:string:' . strlen($value) . ']';
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return '[datetime]';
+        }
+
+        if (is_array($value)) {
+            return '[array:' . count($value) . ']';
+        }
+
+        if (is_object($value)) {
+            return '[object:' . $value::class . ']';
+        }
+
+        return '[redacted]';
     }
 
     /**

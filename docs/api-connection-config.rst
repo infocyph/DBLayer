@@ -31,6 +31,19 @@ Security
 - ``isSecurityEnabled()``
 - ``securityConfig()``
 
+Security config keys currently supported:
+
+- ``enabled``
+- ``max_sql_length``
+- ``max_params``
+- ``max_param_bytes``
+- ``queries_per_second``, ``queries_per_minute``
+- ``rate_limit_key``, ``rate_limit_callback``
+- ``strict_identifiers``
+- ``require_tls``
+- ``allow_insecure``
+- ``raw_sql_policy``, ``raw_sql_allowlist``
+
 Core
 ----
 

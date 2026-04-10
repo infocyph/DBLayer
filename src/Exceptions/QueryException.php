@@ -42,7 +42,11 @@ final class QueryException extends DBException
         string $error,
         ?string $code = null,
     ): self {
-        $message = 'Query execution failed: ' . $error . ' [SQL: ' . $sql . ']';
+        $statement = strtoupper(substr(ltrim($sql), 0, strcspn(ltrim($sql), " \t\n\r")));
+        $fingerprint = substr(hash('sha256', strtolower(trim(preg_replace('/\s+/', ' ', $sql) ?? $sql))), 0, 16);
+        $message = 'Query execution failed: ' . $error
+            . ' [statement: ' . $statement . ']'
+            . ' [fingerprint: ' . $fingerprint . ']';
 
         if ($code !== null && $code !== '') {
             $message .= ' [code: ' . $code . ']';
@@ -72,6 +76,16 @@ final class QueryException extends DBException
     {
         return new self(
             "Invalid OFFSET value [{$offset}]. OFFSET must be a non-negative integer.",
+        );
+    }
+
+    /**
+     * Invalid SQL operator.
+     */
+    public static function invalidOperator(string $operator): self
+    {
+        return new self(
+            "Invalid SQL operator [{$operator}].",
         );
     }
 
