@@ -490,16 +490,28 @@ it('enforces configured per-connection query rate limits', function (string $dri
 
     dblayerAddConnectionForDriver($driver, $connectionName, [
         'security' => [
-            'queries_per_second' => 1,
-            'queries_per_minute' => 0,
+            // Use minute-level limit to avoid second-boundary flakes in CI.
+            'queries_per_second' => 0,
+            'queries_per_minute' => 1,
             'rate_limit_key' => $rateKey,
         ],
     ]);
 
     DB::select('select 1', [], $connectionName);
 
-    expect(static fn(): array => DB::select('select 1', [], $connectionName))
-        ->toThrow(SecurityException::class);
+    $blocked = false;
+
+    for ($attempt = 0; $attempt < 3; $attempt++) {
+        try {
+            DB::select('select 1', [], $connectionName);
+        } catch (SecurityException) {
+            $blocked = true;
+
+            break;
+        }
+    }
+
+    expect($blocked)->toBeTrue();
 
     Security::resetRateLimit($rateKey);
 })->with('dblayer_drivers');

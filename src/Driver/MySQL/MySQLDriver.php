@@ -152,9 +152,17 @@ final class MySQLDriver extends AbstractPdoDriver
     {
         $options = parent::defaultPdoOptions($config);
 
-        if (\defined('PDO::MYSQL_ATTR_MULTI_STATEMENTS')) {
+        $multiStatementsAttr = null;
+
+        if (class_exists(\Pdo\Mysql::class) && \defined(\Pdo\Mysql::class . '::ATTR_MULTI_STATEMENTS')) {
+            /** @var int $multiStatementsAttr */
+            $multiStatementsAttr = \Pdo\Mysql::ATTR_MULTI_STATEMENTS;
+        } elseif (\defined('PDO::MYSQL_ATTR_MULTI_STATEMENTS')) {
             /** @var int $multiStatementsAttr */
             $multiStatementsAttr = constant('PDO::MYSQL_ATTR_MULTI_STATEMENTS');
+        }
+
+        if ($multiStatementsAttr !== null) {
             $options[$multiStatementsAttr] = false;
         }
 
