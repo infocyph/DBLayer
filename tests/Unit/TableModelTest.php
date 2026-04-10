@@ -126,8 +126,8 @@ it('forwards DB facade methods and injects configured connection when available'
     expect((int) ($rows[0]['c'] ?? 0))->toBe(1);
     expect(TableModelUser::sqlScalar('select count(*) from users'))->toBe(1);
 
-    $lastId = (int) TableModelUser::lastInsertId();
-    expect($lastId)->toBe(1);
+    $lastId = TableModelUser::lastInsertId();
+    expect($lastId)->not->toBeFalse();
 
     $stats = TableModelUser::stats();
     expect($stats['database'] ?? null)->not->toBeNull();

@@ -67,7 +67,9 @@ it('executes union queries correctly', function (string $driver): void {
         ->get();
 
     expect($rows)->toHaveCount(2);
-    expect(array_column($rows, 'id'))->toBe([1, 2]);
+    $ids = array_map('intval', array_column($rows, 'id'));
+    sort($ids);
+    expect($ids)->toBe([1, 2]);
 })->with('dblayer_drivers');
 
 it('tracks nested transactions for manual facade api', function (string $driver): void {
