@@ -5,88 +5,146 @@ declare(strict_types=1);
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 
-it('compiles lock clauses according to each SQL dialect', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'sqlite_conn');
+it('compiles lock clauses according to each SQL dialect', function (string $driver): void {
+    $connectionName = 'lock_compile_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
 
-    DB::addConnection([
-        'driver' => 'mysql',
-        'host' => 'localhost',
-        'database' => 'app',
-        'username' => 'root',
-        'password' => '',
-    ], 'mysql_conn');
+    $updateSql = strtolower(DB::table('users', $connectionName)->lockForUpdate()->toSql());
+    $sharedSql = strtolower(DB::table('users', $connectionName)->sharedLock()->toSql());
 
-    DB::addConnection([
-        'driver' => 'pgsql',
-        'host' => 'localhost',
-        'database' => 'app',
-        'username' => 'postgres',
-        'password' => '',
-    ], 'pgsql_conn');
+    if ($schemaDriver === 'sqlite') {
+        expect($updateSql)->not->toContain('for update');
+        expect($updateSql)->not->toContain('share');
+        expect($sharedSql)->not->toContain('for share');
+        expect($sharedSql)->not->toContain('share mode');
 
-    $sqliteUpdateSql = strtolower(DB::table('users', 'sqlite_conn')->lockForUpdate()->toSql());
-    $sqliteSharedSql = strtolower(DB::table('users', 'sqlite_conn')->sharedLock()->toSql());
-    expect($sqliteUpdateSql)->not->toContain('for update');
-    expect($sqliteUpdateSql)->not->toContain('share');
-    expect($sqliteSharedSql)->not->toContain('for share');
-    expect($sqliteSharedSql)->not->toContain('share mode');
+        return;
+    }
 
-    $mysqlUpdateSql = strtolower(DB::table('users', 'mysql_conn')->lockForUpdate()->toSql());
-    $mysqlSharedSql = strtolower(DB::table('users', 'mysql_conn')->sharedLock()->toSql());
-    expect($mysqlUpdateSql)->toContain('for update');
-    expect($mysqlSharedSql)->toContain('lock in share mode');
+    expect($updateSql)->toContain('for update');
 
-    $pgsqlUpdateSql = strtolower(DB::table('users', 'pgsql_conn')->lockForUpdate()->toSql());
-    $pgsqlSharedSql = strtolower(DB::table('users', 'pgsql_conn')->sharedLock()->toSql());
-    expect($pgsqlUpdateSql)->toContain('for update');
-    expect($pgsqlSharedSql)->toContain('for share');
-});
+    if ($schemaDriver === 'mysql') {
+        expect($sharedSql)->toContain('lock in share mode');
 
-it('surfaces sqlite write-lock contention across concurrent connections', function (): void {
-    $databaseFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
-        . DIRECTORY_SEPARATOR
-        . 'dblayer-lock-'
-        . bin2hex(random_bytes(8))
-        . '.sqlite';
+        return;
+    }
 
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => $databaseFile,
-        'options' => [PDO::ATTR_TIMEOUT => 1],
-    ], 'writer_one');
+    expect($sharedSql)->toContain('for share');
+})->with('dblayer_drivers');
 
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => $databaseFile,
-        'options' => [PDO::ATTR_TIMEOUT => 1],
-    ], 'writer_two');
+it('executes lockForUpdate flows inside transactions on available drivers', function (string $driver): void {
+    $connectionName = 'lock_runtime_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
 
-    DB::statement(
-        'create table locks (
-            id integer primary key autoincrement,
-            value integer
-        )',
-        [],
-        'writer_one',
-    );
+    DB::statement(sprintf(
+        'create table locked_rows (%s, value integer)',
+        dblayerAutoIncrementPrimaryKey($schemaDriver),
+    ), [], $connectionName);
+
+    DB::table('locked_rows', $connectionName)->insert([
+        'id' => 1,
+        'value' => 10,
+    ]);
+
+    DB::transaction(static function ($connection): void {
+        $row = $connection->table('locked_rows')
+            ->where('id', '=', 1)
+            ->lockForUpdate()
+            ->first();
+
+        expect((int) ($row['value'] ?? 0))->toBe(10);
+    }, 1, $connectionName);
+})->with('dblayer_drivers');
+
+it('surfaces write-lock contention across concurrent connections', function (string $driver): void {
+    $table = 'lock_contention_' . bin2hex(random_bytes(4));
+
+    if ($driver === 'sqlite') {
+        $databaseFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+            . DIRECTORY_SEPARATOR
+            . 'dblayer-lock-'
+            . bin2hex(random_bytes(8))
+            . '.sqlite';
+
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => $databaseFile,
+            'options' => [PDO::ATTR_TIMEOUT => 1],
+        ], 'writer_one');
+
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => $databaseFile,
+            'options' => [PDO::ATTR_TIMEOUT => 1],
+        ], 'writer_two');
+
+        DB::statement(sprintf(
+            'create table %s (%s, value integer)',
+            $table,
+            dblayerAutoIncrementPrimaryKey('sqlite'),
+        ), [], 'writer_one');
+
+        DB::beginTransaction('writer_one');
+        DB::statement(sprintf('insert into %s (value) values (1)', $table), [], 'writer_one');
+
+        try {
+            expect(static function () use ($table): bool {
+                return DB::statement(sprintf('insert into %s (value) values (2)', $table), [], 'writer_two');
+            })->toThrow(ConnectionException::class);
+        } finally {
+            DB::rollBack('writer_one');
+            DB::connection('writer_one')->disconnect();
+            DB::connection('writer_two')->disconnect();
+
+            if (is_file($databaseFile)) {
+                @unlink($databaseFile);
+            }
+        }
+
+        return;
+    }
+
+    $config = dblayerRequireDriver($driver);
+    DB::addConnection($config, 'writer_one');
+    DB::addConnection($config, 'writer_two');
+    $schemaDriver = dblayerConnectionDriver('writer_one');
+
+    DB::statement(sprintf('drop table if exists %s', $table), [], 'writer_one');
+    DB::statement(sprintf(
+        'create table %s (%s, value integer)',
+        $table,
+        dblayerAutoIncrementPrimaryKey($schemaDriver),
+    ), [], 'writer_one');
+    DB::table($table, 'writer_one')->insert([
+        'id' => 1,
+        'value' => 1,
+    ]);
 
     DB::beginTransaction('writer_one');
-    DB::statement('insert into locks (value) values (1)', [], 'writer_one');
 
     try {
-        expect(static function (): bool {
-            return DB::statement('insert into locks (value) values (2)', [], 'writer_two');
+        DB::table($table, 'writer_one')
+            ->where('id', '=', 1)
+            ->lockForUpdate()
+            ->first();
+
+        if ($schemaDriver === 'mysql') {
+            DB::statement('set innodb_lock_wait_timeout = 1', [], 'writer_two');
+        } else {
+            DB::statement("set lock_timeout = '250ms'", [], 'writer_two');
+        }
+
+        expect(static function () use ($table): bool {
+            return DB::statement(
+                sprintf('update %s set value = value + 1 where id = 1', $table),
+                [],
+                'writer_two',
+            );
         })->toThrow(ConnectionException::class);
     } finally {
         DB::rollBack('writer_one');
-        DB::connection('writer_one')->disconnect();
-        DB::connection('writer_two')->disconnect();
-
-        if (is_file($databaseFile)) {
-            @unlink($databaseFile);
-        }
+        DB::statement(sprintf('drop table if exists %s', $table), [], 'writer_one');
     }
-});
+})->with('dblayer_drivers');

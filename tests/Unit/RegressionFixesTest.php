@@ -23,80 +23,90 @@ it('creates exception instances without signature fatals', function (): void {
         ->toBeInstanceOf(SecurityException::class);
 });
 
-it('applies distinct correctly', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'regression_distinct');
+it('applies distinct correctly', function (string $driver): void {
+    $connection = 'regression_distinct_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connection);
+    $schemaDriver = dblayerConnectionDriver($connection);
+    $table = dblayerTable('users');
 
-    DB::statement('create table users (id integer primary key autoincrement, email text)', [], 'regression_distinct');
-    DB::statement('insert into users (email) values ("a@example.com")', [], 'regression_distinct');
-    DB::statement('insert into users (email) values ("a@example.com")', [], 'regression_distinct');
+    DB::statement(
+        sprintf('create table %s (%s, email %s)', $table, dblayerAutoIncrementPrimaryKey($schemaDriver), dblayerStringType($schemaDriver)),
+        [],
+        $connection,
+    );
+    DB::table($table, $connection)->insert([
+        ['email' => 'a@example.com'],
+        ['email' => 'a@example.com'],
+    ]);
 
-    $rows = DB::table('users', 'regression_distinct')
+    $rows = DB::table($table, $connection)
         ->distinct()
         ->select('email')
         ->get();
 
     expect($rows)->toHaveCount(1);
     expect($rows[0]['email'])->toBe('a@example.com');
-});
+})->with('dblayer_drivers');
 
-it('executes union queries correctly', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'regression_union');
+it('executes union queries correctly', function (string $driver): void {
+    $connection = 'regression_union_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connection);
+    $tableOne = dblayerTable('t1');
+    $tableTwo = dblayerTable('t2');
 
-    DB::statement('create table t1 (id integer)', [], 'regression_union');
-    DB::statement('create table t2 (id integer)', [], 'regression_union');
-    DB::statement('insert into t1 (id) values (1)', [], 'regression_union');
-    DB::statement('insert into t2 (id) values (2)', [], 'regression_union');
+    DB::statement(sprintf('create table %s (id integer)', $tableOne), [], $connection);
+    DB::statement(sprintf('create table %s (id integer)', $tableTwo), [], $connection);
+    DB::statement(sprintf('insert into %s (id) values (1)', $tableOne), [], $connection);
+    DB::statement(sprintf('insert into %s (id) values (2)', $tableTwo), [], $connection);
 
-    $rows = DB::table('t1', 'regression_union')
+    $rows = DB::table($tableOne, $connection)
         ->select('id')
-        ->union(function ($query): void {
-            $query->from('t2')->select('id');
+        ->union(static function ($query) use ($tableTwo): void {
+            $query->from($tableTwo)->select('id');
         })
         ->get();
 
     expect($rows)->toHaveCount(2);
-    expect(array_column($rows, 'id'))->toBe([1, 2]);
-});
+    $ids = array_map('intval', array_column($rows, 'id'));
+    sort($ids);
+    expect($ids)->toBe([1, 2]);
+})->with('dblayer_drivers');
 
-it('tracks nested transactions for manual facade api', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'regression_nested_tx');
+it('tracks nested transactions for manual facade api', function (string $driver): void {
+    $connection = 'regression_nested_tx_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connection);
 
-    expect(DB::transactionLevel('regression_nested_tx'))->toBe(0);
+    expect(DB::transactionLevel($connection))->toBe(0);
 
-    DB::beginTransaction('regression_nested_tx');
-    expect(DB::transactionLevel('regression_nested_tx'))->toBe(1);
+    DB::beginTransaction($connection);
+    expect(DB::transactionLevel($connection))->toBe(1);
 
-    DB::beginTransaction('regression_nested_tx');
-    expect(DB::transactionLevel('regression_nested_tx'))->toBe(2);
+    DB::beginTransaction($connection);
+    expect(DB::transactionLevel($connection))->toBe(2);
 
-    DB::rollBack('regression_nested_tx');
-    expect(DB::transactionLevel('regression_nested_tx'))->toBe(1);
+    DB::rollBack($connection);
+    expect(DB::transactionLevel($connection))->toBe(1);
 
-    DB::rollBack('regression_nested_tx');
-    expect(DB::transactionLevel('regression_nested_tx'))->toBe(0);
-});
+    DB::rollBack($connection);
+    expect(DB::transactionLevel($connection))->toBe(0);
+})->with('dblayer_drivers');
 
-it('chunks by non-integer keys without repeating pages', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'regression_chunk');
+it('chunks by non-integer keys without repeating pages', function (string $driver): void {
+    $connection = 'regression_chunk_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connection);
+    $schemaDriver = dblayerConnectionDriver($connection);
+    $table = dblayerTable('items');
 
-    DB::statement('create table items (uuid text primary key)', [], 'regression_chunk');
-    DB::statement('insert into items (uuid) values ("a1"), ("b2"), ("c3")', [], 'regression_chunk');
+    DB::statement(
+        sprintf('create table %s (uuid %s primary key)', $table, dblayerStringType($schemaDriver, 36)),
+        [],
+        $connection,
+    );
+    DB::statement(sprintf("insert into %s (uuid) values ('a1'), ('b2'), ('c3')", $table), [], $connection);
 
     $pages = [];
 
-    DB::table('items', 'regression_chunk')->chunkById(
+    DB::table($table, $connection)->chunkById(
         2,
         function (array $rows, int $page) use (&$pages): bool {
             $pages[] = array_column($rows, 'uuid');
@@ -110,7 +120,7 @@ it('chunks by non-integer keys without repeating pages', function (): void {
         ['a1', 'b2'],
         ['c3'],
     ]);
-});
+})->with('dblayer_drivers');
 
 it('supports list-based read replica configuration', function (): void {
     $config = ConnectionConfig::fromArray([
@@ -196,16 +206,26 @@ it('removes empty event buckets when forgetting listeners', function (): void {
     expect(Events::getStats()['registered_events'])->toBe($beforeCount);
 });
 
-it('supports round_robin read replica strategy across reconnects', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-        'read_strategy' => 'round_robin',
-        'read' => [
-            ['database' => ':memory:'],
-            ['database' => ':memory:'],
-        ],
-    ], 'regression_round_robin');
+it('supports round_robin read replica strategy across reconnects', function (string $driver): void {
+    $baseConfig = dblayerRequireDriver($driver);
+
+    if ($driver === 'sqlite') {
+        $config = [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'read_strategy' => 'round_robin',
+            'read' => [
+                ['database' => ':memory:'],
+                ['database' => ':memory:'],
+            ],
+        ];
+    } else {
+        $config = $baseConfig;
+        $config['read_strategy'] = 'round_robin';
+        $config['read'] = [$baseConfig, $baseConfig];
+    }
+
+    DB::addConnection($config, 'regression_round_robin');
 
     $connection = DB::connection('regression_round_robin');
     $connection->select('select 1');
@@ -216,18 +236,28 @@ it('supports round_robin read replica strategy across reconnects', function (): 
     $second = $connection->getReadReplicaInfo()['selected_index'];
 
     expect([$first, $second])->toBe([0, 1]);
-});
+})->with('dblayer_drivers');
 
-it('captures latency probes when least_latency read strategy is used', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-        'read_strategy' => 'least_latency',
-        'read' => [
-            ['database' => ':memory:'],
-            ['database' => ':memory:'],
-        ],
-    ], 'regression_least_latency');
+it('captures latency probes when least_latency read strategy is used', function (string $driver): void {
+    $baseConfig = dblayerRequireDriver($driver);
+
+    if ($driver === 'sqlite') {
+        $config = [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'read_strategy' => 'least_latency',
+            'read' => [
+                ['database' => ':memory:'],
+                ['database' => ':memory:'],
+            ],
+        ];
+    } else {
+        $config = $baseConfig;
+        $config['read_strategy'] = 'least_latency';
+        $config['read'] = [$baseConfig, $baseConfig];
+    }
+
+    DB::addConnection($config, 'regression_least_latency');
 
     $connection = DB::connection('regression_least_latency');
     $connection->select('select 1');
@@ -237,17 +267,27 @@ it('captures latency probes when least_latency read strategy is used', function 
     expect($info['strategy'])->toBe('least_latency');
     expect($info['selected_index'])->toBeInt();
     expect($info['latencies_ms'])->toHaveCount(2);
-});
+})->with('dblayer_drivers');
 
-it('routes subsequent reads to write pdo when sticky mode is enabled', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-        'sticky' => true,
-        'read' => [
-            ['database' => ':memory:'],
-        ],
-    ], 'regression_sticky_on');
+it('routes subsequent reads to write pdo when sticky mode is enabled', function (string $driver): void {
+    $baseConfig = dblayerRequireDriver($driver);
+
+    if ($driver === 'sqlite') {
+        $config = [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'sticky' => true,
+            'read' => [
+                ['database' => ':memory:'],
+            ],
+        ];
+    } else {
+        $config = $baseConfig;
+        $config['sticky'] = true;
+        $config['read'] = [$baseConfig];
+    }
+
+    DB::addConnection($config, 'regression_sticky_on');
 
     $connection = DB::connection('regression_sticky_on');
 
@@ -256,22 +296,33 @@ it('routes subsequent reads to write pdo when sticky mode is enabled', function 
 
     expect(spl_object_id($readPdoBefore))->not->toBe(spl_object_id($writePdo));
 
-    $connection->statement('create table sticky_items (id integer)');
-    $connection->statement('insert into sticky_items (id) values (1)');
+    $table = dblayerTable('sticky_items');
+    $connection->statement(sprintf('create table %s (id integer)', $table));
+    $connection->statement(sprintf('insert into %s (id) values (1)', $table));
 
     $readPdoAfter = $connection->getReadPdo();
     expect(spl_object_id($readPdoAfter))->toBe(spl_object_id($connection->getPdo()));
-});
+})->with('dblayer_drivers');
 
-it('keeps reads on read pdo when sticky mode is disabled', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-        'sticky' => false,
-        'read' => [
-            ['database' => ':memory:'],
-        ],
-    ], 'regression_sticky_off');
+it('keeps reads on read pdo when sticky mode is disabled', function (string $driver): void {
+    $baseConfig = dblayerRequireDriver($driver);
+
+    if ($driver === 'sqlite') {
+        $config = [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'sticky' => false,
+            'read' => [
+                ['database' => ':memory:'],
+            ],
+        ];
+    } else {
+        $config = $baseConfig;
+        $config['sticky'] = false;
+        $config['read'] = [$baseConfig];
+    }
+
+    DB::addConnection($config, 'regression_sticky_off');
 
     $connection = DB::connection('regression_sticky_off');
 
@@ -280,12 +331,13 @@ it('keeps reads on read pdo when sticky mode is disabled', function (): void {
 
     expect(spl_object_id($readPdoBefore))->not->toBe(spl_object_id($writePdo));
 
-    $connection->statement('create table sticky_items (id integer)');
-    $connection->statement('insert into sticky_items (id) values (1)');
+    $table = dblayerTable('sticky_items');
+    $connection->statement(sprintf('create table %s (id integer)', $table));
+    $connection->statement(sprintf('insert into %s (id) values (1)', $table));
 
     $readPdoAfter = $connection->getReadPdo();
     expect(spl_object_id($readPdoAfter))->not->toBe(spl_object_id($connection->getPdo()));
-});
+})->with('dblayer_drivers');
 
 it('applies write override configuration for write pdo connection', function (): void {
     $databaseFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
@@ -319,28 +371,25 @@ it('applies write override configuration for write pdo connection', function ():
     }
 });
 
-it('supports scalar and selectResultSets query helpers', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'regression_scalar');
+it('supports scalar and selectResultSets query helpers', function (string $driver): void {
+    $connection = 'regression_scalar_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connection);
+    $table = dblayerTable('numbers');
 
-    DB::statement('create table numbers (value integer)', [], 'regression_scalar');
-    DB::statement('insert into numbers (value) values (1), (2), (3)', [], 'regression_scalar');
+    DB::statement(sprintf('create table %s (value integer)', $table), [], $connection);
+    DB::statement(sprintf('insert into %s (value) values (1), (2), (3)', $table), [], $connection);
 
-    $sum = DB::scalar('select sum(value) as total from numbers', [], 'regression_scalar');
+    $sum = DB::scalar(sprintf('select sum(value) as total from %s', $table), [], $connection);
     expect((int) $sum)->toBe(6);
 
-    $resultSets = DB::selectResultSets('select 1 as one', [], 'regression_scalar');
+    $resultSets = DB::selectResultSets('select 1 as one', [], $connection);
     expect($resultSets)->toHaveCount(1);
     expect($resultSets[0][0]['one'] ?? null)->toBe(1);
-});
+})->with('dblayer_drivers');
 
-it('fires cumulative query-time threshold callback once', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'regression_query_time');
+it('fires cumulative query-time threshold callback once', function (string $driver): void {
+    $connectionName = 'regression_query_time_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
 
     $fired = 0;
     $lastSql = null;
@@ -352,19 +401,17 @@ it('fires cumulative query-time threshold callback once', function (): void {
         $lastConnection = $connection;
     });
 
-    DB::select('select 1', [], 'regression_query_time');
-    DB::select('select 1', [], 'regression_query_time');
+    DB::select('select 1', [], $connectionName);
+    DB::select('select 1', [], $connectionName);
 
     expect($fired)->toBe(1);
     expect(strtolower((string) $lastSql))->toContain('select 1');
     expect($lastConnection)->toBeInstanceOf(Connection::class);
-});
+})->with('dblayer_drivers');
 
-it('supports one-argument cumulative query-time callback signature', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'regression_query_time_single_arg');
+it('supports one-argument cumulative query-time callback signature', function (string $driver): void {
+    $connectionName = 'regression_query_time_single_arg_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
 
     $capturedEvent = null;
 
@@ -372,41 +419,45 @@ it('supports one-argument cumulative query-time callback signature', function ()
         $capturedEvent = $event;
     });
 
-    DB::select('select 1', [], 'regression_query_time_single_arg');
+    DB::select('select 1', [], $connectionName);
 
     expect($capturedEvent)->toBeInstanceOf(QueryExecuted::class);
-});
+})->with('dblayer_drivers');
 
-it('supports query cancellation and deadline wrappers', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'regression_query_controls');
+it('supports query cancellation and deadline wrappers', function (string $driver): void {
+    $connectionName = 'regression_query_controls_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
 
     expect(fn (): mixed => DB::withQueryCancellation(
         static fn (): bool => true,
-        static fn (): mixed => DB::select('select 1', [], 'regression_query_controls'),
-        'regression_query_controls',
+        static fn (): mixed => DB::select('select 1', [], $connectionName),
+        $connectionName,
     ))->toThrow(ConnectionException::class);
 
     expect(fn (): mixed => DB::withQueryDeadline(
         0.0,
-        static fn (): mixed => DB::select('select 1', [], 'regression_query_controls'),
-        'regression_query_controls',
+        static fn (): mixed => DB::select('select 1', [], $connectionName),
+        $connectionName,
     ))->toThrow(ConnectionException::class);
-});
+})->with('dblayer_drivers');
 
-it('collects and flushes telemetry payloads', function (): void {
+it('collects and flushes telemetry payloads', function (string $driver): void {
     DB::enableTelemetry();
 
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'regression_telemetry');
+    $connectionName = 'regression_telemetry_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
+    $table = dblayerTable('telemetry_items');
 
-    DB::table('sqlite_master', 'regression_telemetry')->select('name')->limit(1)->get();
-    DB::beginTransaction('regression_telemetry');
-    DB::rollBack('regression_telemetry');
+    DB::statement(
+        sprintf('create table %s (%s, name %s)', $table, dblayerAutoIncrementPrimaryKey($schemaDriver), dblayerStringType($schemaDriver)),
+        [],
+        $connectionName,
+    );
+    DB::table($table, $connectionName)->insert(['name' => 'probe']);
+    DB::table($table, $connectionName)->select('name')->limit(1)->get();
+    DB::beginTransaction($connectionName);
+    DB::rollBack($connectionName);
 
     $snapshot = DB::telemetry();
     expect($snapshot['summary']['query_count'])->toBeGreaterThan(0);
@@ -417,7 +468,7 @@ it('collects and flushes telemetry payloads', function (): void {
     expect(DB::telemetry()['summary']['query_count'])->toBe(0);
 
     DB::disableTelemetry();
-});
+})->with('dblayer_drivers');
 
 it('does not flag legitimate unions and still catches injected union payloads', function (): void {
     $validator = new QueryValidator();

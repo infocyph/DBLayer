@@ -5,86 +5,97 @@ declare(strict_types=1);
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Exceptions\TransactionException;
 
-it('commits successful transactions and rolls back failed ones', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ]);
+it('commits successful transactions and rolls back failed ones', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
+    $schemaDriver = dblayerConnectionDriver();
+    $table = dblayerTable('payments');
 
     DB::statement(
-        'create table payments (
-            id integer primary key autoincrement,
-            ref text
-        )'
+        sprintf(
+            'create table %s (
+            %s,
+            ref %s
+        )',
+            $table,
+            dblayerAutoIncrementPrimaryKey($schemaDriver),
+            dblayerStringType($schemaDriver),
+        ),
     );
 
-    DB::transaction(static function ($connection): void {
-        $connection->table('payments')->insert(['ref' => 'committed']);
+    DB::transaction(static function ($connection) use ($table): void {
+        $connection->table($table)->insert(['ref' => 'committed']);
     });
 
-    expect((int) DB::table('payments')->count())->toBe(1);
+    expect((int) DB::table($table)->count())->toBe(1);
 
-    expect(static function (): mixed {
-        return DB::transaction(static function ($connection): void {
-            $connection->table('payments')->insert(['ref' => 'rolled-back']);
+    expect(static function () use ($table): mixed {
+        return DB::transaction(static function ($connection) use ($table): void {
+            $connection->table($table)->insert(['ref' => 'rolled-back']);
             throw new \RuntimeException('force rollback');
         });
     })->toThrow(TransactionException::class);
 
-    expect((int) DB::table('payments')->count())->toBe(1);
-    expect(DB::table('payments')->value('ref'))->toBe('committed');
-});
+    expect((int) DB::table($table)->count())->toBe(1);
+    expect(DB::table($table)->value('ref'))->toBe('committed');
+})->with('dblayer_drivers');
 
-it('supports nested transactions with savepoint rollbacks', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ]);
+it('supports nested transactions with savepoint rollbacks', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
+    $schemaDriver = dblayerConnectionDriver();
+    $table = dblayerTable('events');
 
     DB::statement(
-        'create table events (
-            id integer primary key autoincrement,
-            name text
-        )'
+        sprintf(
+            'create table %s (
+            %s,
+            name %s
+        )',
+            $table,
+            dblayerAutoIncrementPrimaryKey($schemaDriver),
+            dblayerStringType($schemaDriver),
+        ),
     );
 
     DB::beginTransaction();
-    DB::table('events')->insert(['name' => 'outer']);
+    DB::table($table)->insert(['name' => 'outer']);
 
     DB::beginTransaction();
-    DB::table('events')->insert(['name' => 'inner']);
+    DB::table($table)->insert(['name' => 'inner']);
     DB::rollBack();
 
     DB::commit();
 
-    expect(DB::table('events')->pluck('name'))->toBe(['outer']);
-});
+    expect(DB::table($table)->pluck('name'))->toBe(['outer']);
+})->with('dblayer_drivers');
 
-it('retries transaction callbacks after deadlock-like failures', function (): void {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ]);
+it('retries transaction callbacks after deadlock-like failures', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
+    $schemaDriver = dblayerConnectionDriver();
+    $table = dblayerTable('jobs');
 
     DB::statement(
-        'create table jobs (
-            id integer primary key autoincrement,
-            status text
-        )'
+        sprintf(
+            'create table %s (
+            %s,
+            status %s
+        )',
+            $table,
+            dblayerAutoIncrementPrimaryKey($schemaDriver),
+            dblayerStringType($schemaDriver),
+        ),
     );
 
     $attempts = 0;
 
     $result = DB::transaction(
-        static function ($connection) use (&$attempts): string {
+        static function ($connection) use (&$attempts, $schemaDriver, $table): string {
             $attempts++;
 
             if ($attempts === 1) {
-                $connection->table('jobs')->insert(['status' => 'transient']);
-                throw new \RuntimeException('database is locked');
+                throw new \RuntimeException(dblayerTransientDeadlockMessage($schemaDriver));
             }
 
-            $connection->table('jobs')->insert(['status' => 'done']);
+            $connection->table($table)->insert(['status' => 'done']);
 
             return 'ok';
         },
@@ -93,5 +104,5 @@ it('retries transaction callbacks after deadlock-like failures', function (): vo
 
     expect($result)->toBe('ok');
     expect($attempts)->toBe(2);
-    expect(DB::table('jobs')->pluck('status'))->toBe(['done']);
-});
+    expect(DB::table($table)->pluck('status'))->toBe(['done']);
+})->with('dblayer_drivers');

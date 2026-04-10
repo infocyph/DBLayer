@@ -57,6 +57,96 @@ function dblayerAvailableDrivers(): array
 }
 
 /**
+ * Add a connection for the requested driver and return the effective config.
+ *
+ * @param  array<string,mixed>  $overrides
+ * @return array<string,mixed>
+ */
+function dblayerAddConnectionForDriver(
+    string $driver,
+    string $name = 'default',
+    array $overrides = [],
+): array {
+    $config = dblayerRequireDriver($driver);
+    $config = array_replace_recursive($config, $overrides);
+
+    DB::addConnection($config, $name);
+
+    return $config;
+}
+
+/**
+ * Return a driver-specific auto-increment primary key column definition.
+ */
+function dblayerAutoIncrementPrimaryKey(string $driver, string $column = 'id'): string
+{
+    return match ($driver) {
+        'mysql' => "{$column} bigint unsigned not null auto_increment primary key",
+        'pgsql' => "{$column} bigserial primary key",
+        default => "{$column} integer primary key autoincrement",
+    };
+}
+
+/**
+ * Return a driver-compatible text/varchar definition.
+ */
+function dblayerStringType(string $driver, int $length = 255): string
+{
+    return match ($driver) {
+        'mysql', 'pgsql' => "varchar({$length})",
+        default => 'text',
+    };
+}
+
+/**
+ * Return a driver-compatible datetime/timestamp definition.
+ */
+function dblayerDateTimeType(string $driver): string
+{
+    return match ($driver) {
+        'mysql' => 'datetime',
+        'pgsql' => 'timestamp',
+        default => 'text',
+    };
+}
+
+/**
+ * Return a deadlock-like message that driver profile classifies as transient.
+ */
+function dblayerTransientDeadlockMessage(string $driver): string
+{
+    return match ($driver) {
+        'mysql' => 'deadlock found when trying to get lock',
+        'pgsql' => 'deadlock detected',
+        default => 'database is locked',
+    };
+}
+
+/**
+ * Return the effective driver for a configured connection.
+ */
+function dblayerConnectionDriver(?string $connection = null): string
+{
+    return DB::connection($connection)->getDriverName();
+}
+
+/**
+ * Generate a collision-resistant test table name.
+ */
+function dblayerTable(string $prefix): string
+{
+    return strtolower($prefix . '_' . bin2hex(random_bytes(4)));
+}
+
+/**
+ * Drop table if it exists for the given connection.
+ */
+function dblayerDropTable(string $table, ?string $connection = null): void
+{
+    DB::statement(sprintf('drop table if exists %s', $table), [], $connection);
+}
+
+/**
  * @return array<string,mixed>|null
  */
 function dblayerConnectionConfig(string $driver): ?array
@@ -231,3 +321,5 @@ function dblayerEnvFirst(array $keys): ?string
 
     return null;
 }
+
+dataset('dblayer_drivers', static fn(): array => dblayerAvailableDrivers());

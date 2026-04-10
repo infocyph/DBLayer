@@ -56,7 +56,6 @@ as lookup pages after reading the guides.
    observability
    events-helpers
    benchmarks
-   ci
 
 .. toctree::
    :maxdepth: 2

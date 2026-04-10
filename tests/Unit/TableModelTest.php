@@ -25,22 +25,26 @@ final class TableModelUser extends TableModel
 
 final class BrokenTableModel extends TableModel {}
 
-function setupTableModelFixture(): void
+function setupTableModelFixture(string $driver): void
 {
-    DB::addConnection([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
-    ], 'table_model_conn');
+    dblayerAddConnectionForDriver($driver, 'table_model_conn');
+    $schemaDriver = dblayerConnectionDriver('table_model_conn');
+    dblayerDropTable('users', 'table_model_conn');
 
     DB::statement(
-        'create table users (
-            id integer primary key autoincrement,
+        sprintf('create table users (
+            %s,
             tenant_id integer not null,
-            email text not null unique,
-            name text not null,
+            email %s not null unique,
+            name %s not null,
             active integer not null default 1,
-            deleted_at text null
+            deleted_at %s null
         )',
+            dblayerAutoIncrementPrimaryKey($schemaDriver),
+            dblayerStringType($schemaDriver, 191),
+            dblayerStringType($schemaDriver),
+            dblayerDateTimeType($schemaDriver),
+        ),
         [],
         'table_model_conn',
     );
@@ -67,8 +71,8 @@ function setupTableModelAltFixture(): void
     );
 }
 
-it('delegates to repository API with model-level repository defaults', function (): void {
-    setupTableModelFixture();
+it('delegates to repository API with model-level repository defaults', function (string $driver): void {
+    setupTableModelFixture($driver);
 
     DB::table('users', 'table_model_conn')->insert([
         ['tenant_id' => 10, 'email' => 'visible@example.test', 'name' => 'Visible', 'active' => 1, 'deleted_at' => null],
@@ -90,10 +94,10 @@ it('delegates to repository API with model-level repository defaults', function 
 
     expect($created['tenant_id'] ?? null)->toBe(10);
     expect(TableModelUser::count())->toBe(2);
-});
+})->with('dblayer_drivers');
 
-it('delegates to query builder API while preserving model policies', function (): void {
-    setupTableModelFixture();
+it('delegates to query builder API while preserving model policies', function (string $driver): void {
+    setupTableModelFixture($driver);
 
     DB::table('users', 'table_model_conn')->insert([
         ['tenant_id' => 10, 'email' => 'a@example.test', 'name' => 'A', 'active' => 1, 'deleted_at' => null],
@@ -108,10 +112,10 @@ it('delegates to query builder API while preserving model policies', function ()
     expect($emails)->toBe(['a@example.test']);
     expect(TableModelUser::query())->toBeInstanceOf(QueryBuilder::class);
     expect(TableModelUser::builder()->count())->toBe(2);
-});
+})->with('dblayer_drivers');
 
-it('forwards DB facade methods and injects configured connection when available', function (): void {
-    setupTableModelFixture();
+it('forwards DB facade methods and injects configured connection when available', function (string $driver): void {
+    setupTableModelFixture($driver);
 
     expect(TableModelUser::statement(
         'insert into users (tenant_id, email, name, active, deleted_at) values (?, ?, ?, ?, ?)',
@@ -122,16 +126,16 @@ it('forwards DB facade methods and injects configured connection when available'
     expect((int) ($rows[0]['c'] ?? 0))->toBe(1);
     expect(TableModelUser::sqlScalar('select count(*) from users'))->toBe(1);
 
-    $lastId = (int) TableModelUser::lastInsertId();
-    expect($lastId)->toBe(1);
+    $lastId = TableModelUser::lastInsertId();
+    expect($lastId)->not->toBeFalse();
 
     $stats = TableModelUser::stats();
-    expect($stats['database'] ?? null)->toBe(':memory:');
-    expect($stats['driver'] ?? null)->toBe('sqlite');
-});
+    expect($stats['database'] ?? null)->not->toBeNull();
+    expect($stats['driver'] ?? null)->toBe(dblayerConnectionDriver('table_model_conn'));
+})->with('dblayer_drivers');
 
-it('supports per-call connection override for repository, query, and raw SQL helpers', function (): void {
-    setupTableModelFixture();
+it('supports per-call connection override for repository, query, and raw SQL helpers', function (string $driver): void {
+    setupTableModelFixture($driver);
     setupTableModelAltFixture();
 
     DB::table('users', 'table_model_conn')->insert([
@@ -158,7 +162,7 @@ it('supports per-call connection override for repository, query, and raw SQL hel
 
     expect((int) TableModelUser::sqlScalar('select count(*) from users'))->toBe(1);
     expect((int) TableModelUser::sqlScalar('select count(*) from users', [], 'table_model_alt'))->toBe(1);
-});
+})->with('dblayer_drivers');
 
 it('throws a clear exception when table is not configured', function (): void {
     expect(static fn(): QueryBuilder => BrokenTableModel::query())
