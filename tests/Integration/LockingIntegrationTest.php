@@ -8,11 +8,12 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
 it('compiles lock clauses according to each SQL dialect', function (string $driver): void {
     $connectionName = 'lock_compile_' . $driver;
     dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
 
     $updateSql = strtolower(DB::table('users', $connectionName)->lockForUpdate()->toSql());
     $sharedSql = strtolower(DB::table('users', $connectionName)->sharedLock()->toSql());
 
-    if ($driver === 'sqlite') {
+    if ($schemaDriver === 'sqlite') {
         expect($updateSql)->not->toContain('for update');
         expect($updateSql)->not->toContain('share');
         expect($sharedSql)->not->toContain('for share');
@@ -23,7 +24,7 @@ it('compiles lock clauses according to each SQL dialect', function (string $driv
 
     expect($updateSql)->toContain('for update');
 
-    if ($driver === 'mysql') {
+    if ($schemaDriver === 'mysql') {
         expect($sharedSql)->toContain('lock in share mode');
 
         return;
@@ -35,10 +36,11 @@ it('compiles lock clauses according to each SQL dialect', function (string $driv
 it('executes lockForUpdate flows inside transactions on available drivers', function (string $driver): void {
     $connectionName = 'lock_runtime_' . $driver;
     dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
 
     DB::statement(sprintf(
         'create table locked_rows (%s, value integer)',
-        dblayerAutoIncrementPrimaryKey($driver),
+        dblayerAutoIncrementPrimaryKey($schemaDriver),
     ), [], $connectionName);
 
     DB::table('locked_rows', $connectionName)->insert([
@@ -107,12 +109,13 @@ it('surfaces write-lock contention across concurrent connections', function (str
     $config = dblayerRequireDriver($driver);
     DB::addConnection($config, 'writer_one');
     DB::addConnection($config, 'writer_two');
+    $schemaDriver = dblayerConnectionDriver('writer_one');
 
     DB::statement(sprintf('drop table if exists %s', $table), [], 'writer_one');
     DB::statement(sprintf(
         'create table %s (%s, value integer)',
         $table,
-        dblayerAutoIncrementPrimaryKey($driver),
+        dblayerAutoIncrementPrimaryKey($schemaDriver),
     ), [], 'writer_one');
     DB::table($table, 'writer_one')->insert([
         'id' => 1,
@@ -127,7 +130,7 @@ it('surfaces write-lock contention across concurrent connections', function (str
             ->lockForUpdate()
             ->first();
 
-        if ($driver === 'mysql') {
+        if ($schemaDriver === 'mysql') {
             DB::statement('set innodb_lock_wait_timeout = 1', [], 'writer_two');
         } else {
             DB::statement("set lock_timeout = '250ms'", [], 'writer_two');

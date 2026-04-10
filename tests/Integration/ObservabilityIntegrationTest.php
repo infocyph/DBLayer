@@ -18,6 +18,7 @@ it('executes queries successfully when using retry policy wrappers', function (s
 
 it('exports telemetry through a custom exporter callback', function (string $driver): void {
     dblayerAddConnectionForDriver($driver);
+    $schemaDriver = dblayerConnectionDriver();
     $table = 'telemetry_probe_' . bin2hex(random_bytes(4));
 
     DB::enableTelemetry();
@@ -25,8 +26,8 @@ it('exports telemetry through a custom exporter callback', function (string $dri
         sprintf(
             'create table %s (%s, name %s)',
             $table,
-            dblayerAutoIncrementPrimaryKey($driver),
-            dblayerStringType($driver),
+            dblayerAutoIncrementPrimaryKey($schemaDriver),
+            dblayerStringType($schemaDriver),
         ),
     );
     DB::table($table)->insert(['name' => 'probe']);
@@ -45,6 +46,7 @@ it('exports telemetry through a custom exporter callback', function (string $dri
 
 it('builds OpenTelemetry payload and slow-query percentile report', function (string $driver): void {
     dblayerAddConnectionForDriver($driver);
+    $schemaDriver = dblayerConnectionDriver();
     $table = 'telemetry_probe_' . bin2hex(random_bytes(4));
 
     DB::enableTelemetry();
@@ -52,8 +54,8 @@ it('builds OpenTelemetry payload and slow-query percentile report', function (st
         sprintf(
             'create table %s (%s, name %s)',
             $table,
-            dblayerAutoIncrementPrimaryKey($driver),
-            dblayerStringType($driver),
+            dblayerAutoIncrementPrimaryKey($schemaDriver),
+            dblayerStringType($schemaDriver),
         ),
     );
     DB::table($table)->insert(['name' => 'probe']);

@@ -21,37 +21,43 @@ it('matches bootstrap example connection setup flow', function (string $driver):
     dblayerAddConnectionForDriver($driver, 'reporting');
 
     DB::setDefaultConnection('primary');
+    $primaryDriver = dblayerConnectionDriver('primary');
+    $reportingDriver = dblayerConnectionDriver('reporting');
 
     expect(DB::getDefaultConnection())->toBe('primary');
-    expect(DB::connection()->getDriverName())->toBe($driver);
-    expect(DB::connection('reporting')->getDriverName())->toBe($driver);
+    expect(DB::connection()->getDriverName())->toBe($primaryDriver);
+    expect(DB::connection('reporting')->getDriverName())->toBe($reportingDriver);
+    expect($primaryDriver)->toBe($reportingDriver);
 })->with('dblayer_drivers');
 
 it('matches chunking example flow', function (string $driver): void {
     dblayerAddConnectionForDriver($driver);
+    $schemaDriver = dblayerConnectionDriver();
+    $auditTable = dblayerTable('audit_logs');
 
     DB::statement(sprintf(
-        'create table audit_logs (
+        'create table %s (
             %s,
             action %s,
             created_at %s
         )',
-        dblayerAutoIncrementPrimaryKey($driver),
-        dblayerStringType($driver),
-        dblayerDateTimeType($driver),
+        $auditTable,
+        dblayerAutoIncrementPrimaryKey($schemaDriver),
+        dblayerStringType($schemaDriver),
+        dblayerDateTimeType($schemaDriver),
     ));
 
     $today = date('Y-m-d H:i:s');
 
     foreach (range(1, 5) as $index) {
-        DB::table('audit_logs')->insert([
+        DB::table($auditTable)->insert([
             'action' => 'event-' . $index,
             'created_at' => $today,
         ]);
     }
 
     $pages = [];
-    DB::table('audit_logs')
+    DB::table($auditTable)
         ->orderBy('id')
         ->chunk(2, static function (array $rows, int $page) use (&$pages): bool {
             $pages[$page] = array_column($rows, 'id');
@@ -66,7 +72,7 @@ it('matches chunking example flow', function (string $driver): void {
     ]);
 
     $chunkByIdPages = [];
-    DB::table('audit_logs')
+    DB::table($auditTable)
         ->where('created_at', '>=', date('Y-m-d 00:00:00'))
         ->chunkById(
             2,
@@ -87,9 +93,11 @@ it('matches chunking example flow', function (string $driver): void {
 
 it('matches filtering example flow', function (string $driver): void {
     dblayerAddConnectionForDriver($driver);
+    $schemaDriver = dblayerConnectionDriver();
+    $usersTable = dblayerTable('users');
 
     DB::statement(sprintf(
-        'create table users (
+        'create table %s (
             %s,
             name %s,
             email %s,
@@ -97,14 +105,15 @@ it('matches filtering example flow', function (string $driver): void {
             active integer,
             deleted_at %s
         )',
-        dblayerAutoIncrementPrimaryKey($driver),
-        dblayerStringType($driver),
-        dblayerStringType($driver),
-        dblayerStringType($driver),
-        dblayerDateTimeType($driver),
+        $usersTable,
+        dblayerAutoIncrementPrimaryKey($schemaDriver),
+        dblayerStringType($schemaDriver),
+        dblayerStringType($schemaDriver),
+        dblayerStringType($schemaDriver),
+        dblayerDateTimeType($schemaDriver),
     ));
 
-    DB::table('users')->insert([
+    DB::table($usersTable)->insert([
         ['name' => 'alice', 'email' => 'alice@example.com', 'role' => 'admin', 'active' => 1, 'deleted_at' => null],
         ['name' => 'alina', 'email' => 'alina@example.com', 'role' => 'admin', 'active' => 0, 'deleted_at' => null],
         ['name' => 'bob', 'email' => 'bob@example.com', 'role' => 'editor', 'active' => 1, 'deleted_at' => null],
@@ -117,7 +126,7 @@ it('matches filtering example flow', function (string $driver): void {
         'role' => 'admin',
     ];
 
-    $query = DB::table('users')
+    $query = DB::table($usersTable)
         ->select(['id', 'name', 'email', 'role', 'active'])
         ->whereNull('deleted_at');
 
@@ -159,31 +168,37 @@ it('matches filtering example flow', function (string $driver): void {
 it('matches multi connections example flow', function (string $driver): void {
     dblayerAddConnectionForDriver($driver, 'main');
     dblayerAddConnectionForDriver($driver, 'reporting');
+    $mainDriver = dblayerConnectionDriver('main');
+    $reportingDriver = dblayerConnectionDriver('reporting');
+    $usersTable = dblayerTable('users');
+    $eventsTable = dblayerTable('user_events');
 
     DB::statement(sprintf(
-        'create table users (%s, email %s)',
-        dblayerAutoIncrementPrimaryKey($driver),
-        dblayerStringType($driver),
+        'create table %s (%s, email %s)',
+        $usersTable,
+        dblayerAutoIncrementPrimaryKey($mainDriver),
+        dblayerStringType($mainDriver),
     ), [], 'main');
 
     DB::statement(sprintf(
-        'create table user_events (
+        'create table %s (
             %s,
             user_id integer,
             event %s,
             occurred_at %s
         )',
-        dblayerAutoIncrementPrimaryKey($driver),
-        dblayerStringType($driver),
-        dblayerDateTimeType($driver),
+        $eventsTable,
+        dblayerAutoIncrementPrimaryKey($reportingDriver),
+        dblayerStringType($reportingDriver),
+        dblayerDateTimeType($reportingDriver),
     ), [], 'reporting');
 
-    DB::table('users', 'main')->insert([
+    DB::table($usersTable, 'main')->insert([
         'id' => 1,
         'email' => 'hasan@example.com',
     ]);
 
-    DB::table('user_events', 'reporting')->insert([
+    DB::table($eventsTable, 'reporting')->insert([
         ['id' => 1, 'user_id' => 1, 'event' => 'signup', 'occurred_at' => '2025-01-01 00:00:00'],
         ['id' => 2, 'user_id' => 1, 'event' => 'login', 'occurred_at' => '2025-01-02 00:00:00'],
     ]);
@@ -191,13 +206,13 @@ it('matches multi connections example flow', function (string $driver): void {
     /** @var Connection $main */
     $main = DB::connection('main');
 
-    $user = $main->table('users')
+    $user = $main->table($usersTable)
         ->where('email', '=', 'hasan@example.com')
         ->first();
 
     expect($user)->not->toBeNull();
 
-    $events = DB::table('user_events', 'reporting')
+    $events = DB::table($eventsTable, 'reporting')
         ->where('user_id', '=', $user['id'])
         ->orderBy('occurred_at', 'desc')
         ->limit(50)
@@ -209,82 +224,93 @@ it('matches multi connections example flow', function (string $driver): void {
 it('matches transactions example flow', function (string $driver): void {
     dblayerAddConnectionForDriver($driver, 'main');
     DB::setDefaultConnection('main');
+    $schemaDriver = dblayerConnectionDriver('main');
+    $ordersTable = dblayerTable('orders');
+    $orderItemsTable = dblayerTable('order_items');
+    $usersTable = dblayerTable('users');
+    $walletsTable = dblayerTable('wallets');
+    $walletMovementsTable = dblayerTable('wallet_movements');
 
     DB::statement(sprintf(
-        'create table orders (
+        'create table %s (
             %s,
             user_id integer,
             status %s,
             total integer,
             created_at %s
         )',
-        dblayerAutoIncrementPrimaryKey($driver),
-        dblayerStringType($driver),
-        dblayerDateTimeType($driver),
+        $ordersTable,
+        dblayerAutoIncrementPrimaryKey($schemaDriver),
+        dblayerStringType($schemaDriver),
+        dblayerDateTimeType($schemaDriver),
     ));
     DB::statement(sprintf(
-        'create table order_items (
+        'create table %s (
             %s,
             order_id integer,
             sku %s,
             qty integer,
             unit_price integer
         )',
-        dblayerAutoIncrementPrimaryKey($driver),
-        dblayerStringType($driver),
+        $orderItemsTable,
+        dblayerAutoIncrementPrimaryKey($schemaDriver),
+        dblayerStringType($schemaDriver),
     ));
     DB::statement(sprintf(
-        'create table users (
+        'create table %s (
             id integer primary key,
             last_order_at %s
         )',
-        dblayerDateTimeType($driver),
+        $usersTable,
+        dblayerDateTimeType($schemaDriver),
     ));
-    DB::statement(
-        'create table wallets (
+    DB::statement(sprintf(
+        'create table %s (
             user_id integer primary key,
             balance integer
         )',
-    );
+        $walletsTable,
+    ));
     DB::statement(sprintf(
-        'create table wallet_movements (
+        'create table %s (
             %s,
             user_id integer,
             amount integer,
             reason %s,
             created_at %s
         )',
-        dblayerAutoIncrementPrimaryKey($driver),
-        dblayerStringType($driver),
-        dblayerDateTimeType($driver),
+        $walletMovementsTable,
+        dblayerAutoIncrementPrimaryKey($schemaDriver),
+        dblayerStringType($schemaDriver),
+        dblayerDateTimeType($schemaDriver),
     ));
 
-    DB::table('users')->insert([
+    DB::table($usersTable)->insert([
         'id' => 42,
         'last_order_at' => null,
     ]);
-    DB::table('wallets')->insert([
+    DB::table($walletsTable)->insert([
         'user_id' => 42,
         'balance' => 5000,
     ]);
 
     $orderId = DB::transaction(
-        static function (Connection $conn): string {
-            $orderId = $conn->table('orders')->insertGetId([
+        static function (Connection $conn) use ($ordersTable, $orderItemsTable, $usersTable): string {
+            $orderId = $conn->table($ordersTable)->insertGetId([
                 'user_id' => 42,
                 'status' => 'pending',
                 'total' => 1999,
                 'created_at' => date('Y-m-d H:i:s'),
             ]);
 
-            $conn->table('order_items')->insert([
+            $conn->table($orderItemsTable)->insert([
                 'order_id' => $orderId,
                 'sku' => 'SKU-123',
                 'qty' => 1,
                 'unit_price' => 1999,
             ]);
 
-            $conn->table('users')
+            $conn->table($usersTable)
                 ->where('id', '=', 42)
                 ->update(['last_order_at' => date('Y-m-d H:i:s')]);
 
@@ -293,21 +319,21 @@ it('matches transactions example flow', function (string $driver): void {
     );
 
     expect((int) $orderId)->toBeGreaterThan(0);
-    expect((int) DB::table('order_items')->count())->toBe(1);
+    expect((int) DB::table($orderItemsTable)->count())->toBe(1);
 
     $main = DB::connection('main');
 
     $walletResult = $main->transaction(
-        static function (Connection $conn): bool {
-            $currentBalance = (int) $conn->table('wallets')
+        static function (Connection $conn) use ($walletsTable, $walletMovementsTable): bool {
+            $currentBalance = (int) $conn->table($walletsTable)
                 ->where('user_id', '=', 42)
                 ->value('balance');
 
-            $conn->table('wallets')
+            $conn->table($walletsTable)
                 ->where('user_id', '=', 42)
                 ->update(['balance' => $currentBalance - 1999]);
 
-            $conn->table('wallet_movements')->insert([
+            $conn->table($walletMovementsTable)->insert([
                 'user_id' => 42,
                 'amount' => -1999,
                 'reason' => 'order_payment',
@@ -319,8 +345,8 @@ it('matches transactions example flow', function (string $driver): void {
     );
 
     expect($walletResult)->toBeTrue();
-    expect((int) DB::table('wallets')->where('user_id', '=', 42)->value('balance'))->toBe(3001);
-    expect((int) DB::table('wallet_movements')->count())->toBe(1);
+    expect((int) DB::table($walletsTable)->where('user_id', '=', 42)->value('balance'))->toBe(3001);
+    expect((int) DB::table($walletMovementsTable)->count())->toBe(1);
 })->with('dblayer_drivers');
 
 it('matches read replicas example flow', function (string $driver): void {

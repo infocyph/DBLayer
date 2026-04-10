@@ -59,19 +59,22 @@ it('reuses pooled connections via pool manager helpers', function (string $drive
 
 it('records query logs and profiles through logger and profiler services', function (string $driver): void {
     dblayerAddConnectionForDriver($driver);
+    $schemaDriver = dblayerConnectionDriver();
+    $table = dblayerTable('observability_items');
 
     DB::statement(
         sprintf(
-            'create table observability_items (
+            'create table %s (
             %s,
             name %s
         )',
-            dblayerAutoIncrementPrimaryKey($driver),
-            dblayerStringType($driver),
+            $table,
+            dblayerAutoIncrementPrimaryKey($schemaDriver),
+            dblayerStringType($schemaDriver),
         ),
     );
 
-    DB::table('observability_items')->insert([
+    DB::table($table)->insert([
         'name' => 'alpha',
     ]);
 
@@ -80,7 +83,7 @@ it('records query logs and profiles through logger and profiler services', funct
     DB::enableLogger($logFile);
     DB::enableProfiler();
 
-    DB::table('observability_items')->select('name')->get();
+    DB::table($table)->select('name')->get();
 
     $profiles = DB::profiler()->profiles();
     $logContents = is_file($logFile) ? (string) file_get_contents($logFile) : '';
@@ -97,25 +100,28 @@ it('records query logs and profiles through logger and profiler services', funct
 
 it('builds table repositories with normalized names and result processing', function (string $driver): void {
     dblayerAddConnectionForDriver($driver);
+    $schemaDriver = dblayerConnectionDriver();
+    $table = dblayerTable('user_profiles');
 
     DB::statement(
         sprintf(
-            'create table user_profiles (
+            'create table %s (
             %s,
             name %s,
             active integer
         )',
-            dblayerAutoIncrementPrimaryKey($driver),
-            dblayerStringType($driver),
+            $table,
+            dblayerAutoIncrementPrimaryKey($schemaDriver),
+            dblayerStringType($schemaDriver),
         ),
     );
 
-    DB::table('user_profiles')->insert([
+    DB::table($table)->insert([
         ['name' => 'Alice', 'active' => 1],
         ['name' => 'Bob', 'active' => 0],
     ]);
 
-    $repository = DB::repository('UserProfiles');
+    $repository = DB::repository($table);
 
     expect($repository->all()->count())->toBe(2);
     expect($repository->find(1)['name'] ?? null)->toBe('Alice');
@@ -128,25 +134,28 @@ it('builds table repositories with normalized names and result processing', func
 
 it('tracks transaction statistics through transaction manager wiring', function (string $driver): void {
     dblayerAddConnectionForDriver($driver);
+    $schemaDriver = dblayerConnectionDriver();
+    $table = dblayerTable('tx_items');
 
     DB::statement(
         sprintf(
-            'create table tx_items (
+            'create table %s (
             %s,
             name %s
         )',
-            dblayerAutoIncrementPrimaryKey($driver),
-            dblayerStringType($driver),
+            $table,
+            dblayerAutoIncrementPrimaryKey($schemaDriver),
+            dblayerStringType($schemaDriver),
         ),
     );
 
-    DB::transaction(static function (Connection $connection): void {
-        $connection->table('tx_items')->insert(['name' => 'committed']);
+    DB::transaction(static function (Connection $connection) use ($table): void {
+        $connection->table($table)->insert(['name' => 'committed']);
     });
 
     try {
-        DB::transaction(static function (Connection $connection): void {
-            $connection->table('tx_items')->insert(['name' => 'rolled-back']);
+        DB::transaction(static function (Connection $connection) use ($table): void {
+            $connection->table($table)->insert(['name' => 'rolled-back']);
             throw new RuntimeException('rollback');
         });
     } catch (Throwable) {
@@ -159,5 +168,5 @@ it('tracks transaction statistics through transaction manager wiring', function 
     expect($stats['total'] ?? 0)->toBeGreaterThanOrEqual(2);
     expect($stats['committed'] ?? 0)->toBeGreaterThanOrEqual(1);
     expect($stats['rolled_back'] ?? 0)->toBeGreaterThanOrEqual(1);
-    expect((int) DB::table('tx_items')->count())->toBe(1);
+    expect((int) DB::table($table)->count())->toBe(1);
 })->with('dblayer_drivers');

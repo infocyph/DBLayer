@@ -123,6 +123,22 @@ function dblayerTransientDeadlockMessage(string $driver): string
 }
 
 /**
+ * Return the effective driver for a configured connection.
+ */
+function dblayerConnectionDriver(?string $connection = null): string
+{
+    return DB::connection($connection)->getDriverName();
+}
+
+/**
+ * Generate a collision-resistant test table name.
+ */
+function dblayerTable(string $prefix): string
+{
+    return strtolower($prefix . '_' . bin2hex(random_bytes(4)));
+}
+
+/**
  * @return array<string,mixed>|null
  */
 function dblayerConnectionConfig(string $driver): ?array
