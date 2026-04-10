@@ -7,7 +7,6 @@ namespace Infocyph\DBLayer\Connection;
 use Infocyph\DBLayer\Driver\Support\DriverProfile;
 use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
-use Infocyph\DBLayer\Security\Security;
 
 /**
  * Immutable connection configuration wrapper.
@@ -78,6 +77,7 @@ final class ConnectionConfig
         'rate_limit_callback' => null,
         'strict_identifiers' => true,
         'require_tls' => null,
+        'allow_insecure' => false,
         'raw_sql_policy' => 'allow',
         'raw_sql_allowlist' => [],
     ];
@@ -390,25 +390,6 @@ final class ConnectionConfig
         return $expanded;
     }
 
-    /**
-     * Whether insecure transport override is enabled.
-     */
-    private function isInsecureTransportAllowed(): bool
-    {
-        $override = getenv('DBLAYER_ALLOW_INSECURE_TRANSPORT');
-
-        return $override === '1' || strtolower((string) $override) === 'true';
-    }
-
-    /**
-     * Whether current app environment is production-like.
-     */
-    private function isProductionEnvironment(): bool
-    {
-        $appEnv = strtolower(trim((string) (getenv('APP_ENV') ?: '')));
-
-        return \in_array($appEnv, ['production', 'prod'], true);
-    }
 
     /**
      * Normalize a driver name (aliases → canonical).
@@ -555,14 +536,15 @@ final class ConnectionConfig
     private function validateSecurityEnabled(array $security): void
     {
         $enabled = $security['enabled'] ?? true;
+        $allowInsecure = (bool) ($security['allow_insecure'] ?? false);
 
         if (! is_bool($enabled)) {
             throw ConnectionException::invalidConfiguration("Security config key 'enabled' must be a boolean.");
         }
 
-        if ($enabled === false && ! Security::isInsecureModeAllowed()) {
+        if ($enabled === false && ! $allowInsecure) {
             throw ConnectionException::invalidConfiguration(
-                "Security config key 'enabled=false' is blocked outside local/testing environments.",
+                "Security config key 'enabled=false' requires 'allow_insecure=true' in the same security block.",
             );
         }
     }
@@ -573,11 +555,7 @@ final class ConnectionConfig
     private function validateSecurityNumericLimits(array $security): void
     {
         foreach (['max_sql_length', 'max_params', 'max_param_bytes', 'queries_per_second', 'queries_per_minute'] as $key) {
-            if (! array_key_exists($key, $security)) {
-                continue;
-            }
-
-            $value = $security[$key];
+            $value = $security[$key] ?? null;
 
             if ($value !== null && ! is_int($value) && ! is_numeric($value)) {
                 throw ConnectionException::invalidConfiguration(
@@ -592,11 +570,11 @@ final class ConnectionConfig
      */
     private function validateSecurityScalarTypes(array $security): void
     {
-        if (array_key_exists('rate_limit_key', $security) && $security['rate_limit_key'] !== null && ! is_string($security['rate_limit_key'])) {
+        if (isset($security['rate_limit_key']) && ! is_string($security['rate_limit_key'])) {
             throw ConnectionException::invalidConfiguration("Security config key 'rate_limit_key' must be a string or null.");
         }
 
-        if (array_key_exists('rate_limit_callback', $security) && $security['rate_limit_callback'] !== null && ! is_callable($security['rate_limit_callback'])) {
+        if (isset($security['rate_limit_callback']) && ! is_callable($security['rate_limit_callback'])) {
             throw ConnectionException::invalidConfiguration("Security config key 'rate_limit_callback' must be callable or null.");
         }
 
@@ -604,8 +582,12 @@ final class ConnectionConfig
             throw ConnectionException::invalidConfiguration("Security config key 'strict_identifiers' must be a boolean.");
         }
 
-        if (array_key_exists('require_tls', $security) && $security['require_tls'] !== null && ! is_bool($security['require_tls'])) {
+        if (isset($security['require_tls']) && ! is_bool($security['require_tls'])) {
             throw ConnectionException::invalidConfiguration("Security config key 'require_tls' must be a boolean or null.");
+        }
+
+        if (array_key_exists('allow_insecure', $security) && ! is_bool($security['allow_insecure'])) {
+            throw ConnectionException::invalidConfiguration("Security config key 'allow_insecure' must be a boolean.");
         }
     }
 
@@ -618,12 +600,12 @@ final class ConnectionConfig
             return;
         }
 
-        if (! $this->isProductionEnvironment() || $this->isInsecureTransportAllowed()) {
+        if ((bool) ($security['allow_insecure'] ?? false)) {
             return;
         }
 
         throw ConnectionException::invalidConfiguration(
-            "Security config key 'require_tls=false' is blocked in production unless DBLAYER_ALLOW_INSECURE_TRANSPORT=1 is set.",
+            "Security config key 'require_tls=false' requires 'allow_insecure=true' in the same security block.",
         );
     }
 

@@ -41,6 +41,7 @@ Security config keys currently supported:
 - ``rate_limit_key``, ``rate_limit_callback``
 - ``strict_identifiers``
 - ``require_tls``
+- ``allow_insecure``
 - ``raw_sql_policy``, ``raw_sql_allowlist``
 
 Core

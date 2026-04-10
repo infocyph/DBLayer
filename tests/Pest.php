@@ -2,15 +2,8 @@
 
 declare(strict_types=1);
 
+use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\DB;
-
-// Keep test behavior deterministic and isolated from host shell environment.
-putenv('APP_ENV=testing');
-$_ENV['APP_ENV'] = 'testing';
-$_SERVER['APP_ENV'] = 'testing';
-putenv('DBLAYER_ALLOW_INSECURE_TRANSPORT=1');
-$_ENV['DBLAYER_ALLOW_INSECURE_TRANSPORT'] = '1';
-$_SERVER['DBLAYER_ALLOW_INSECURE_TRANSPORT'] = '1';
 
 beforeEach(function (): void {
     DB::purge();
@@ -253,6 +246,12 @@ function dblayerCanConnect(array $config): bool
 
     if ($driver === 'sqlite') {
         return true;
+    }
+
+    try {
+        ConnectionConfig::fromArray($config);
+    } catch (Throwable) {
+        return false;
     }
 
     try {

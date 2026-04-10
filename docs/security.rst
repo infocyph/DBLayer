@@ -34,14 +34,19 @@ Mode Semantics
 - ``NORMAL``: injection/binding validation with practical defaults.
 - ``STRICT``: adds more aggressive pattern checks and tighter policies.
 
-Environment Guardrails
-----------------------
+Policy Guardrails
+-----------------
 
-- ``SecurityMode::OFF`` is blocked outside local/testing environments.
-- ``security.enabled = false`` is also blocked outside local/testing.
-- Override for controlled cases: ``DBLAYER_ALLOW_INSECURE_SECURITY_MODE=1``.
+- ``SecurityMode::OFF`` is blocked by default.
+- ``security.enabled = false`` is blocked unless you set
+  ``security.allow_insecure = true``.
+- Intentional global override for advanced local diagnostics:
 
-DBLayer treats ``APP_ENV=production`` and ``APP_ENV=prod`` as production-like.
+.. code-block:: php
+
+   use Infocyph\DBLayer\Security\Security;
+
+   Security::allowInsecureMode(true);
 
 Validation Coverage
 -------------------
@@ -70,6 +75,7 @@ Per-Connection Security Config
        'rate_limit_callback' => null,
        'strict_identifiers' => true,
        'require_tls' => null,
+       'allow_insecure' => false,
        'raw_sql_policy' => 'allow',
        'raw_sql_allowlist' => [],
    ]
@@ -77,10 +83,9 @@ Per-Connection Security Config
 Transport / TLS Policy
 ----------------------
 
-- In production-like environments, MySQL and PostgreSQL connections require TLS by default.
-- ``security.require_tls = true`` enforces TLS in any environment.
-- ``security.require_tls = false`` is blocked in production unless
-  ``DBLAYER_ALLOW_INSECURE_TRANSPORT=1`` is set.
+- ``security.require_tls = true`` enforces TLS for MySQL/PostgreSQL.
+- ``security.require_tls = false`` requires ``security.allow_insecure = true``.
+- ``DB::hardenProduction()`` sets ``require_tls = true`` for hardened defaults.
 
 Driver requirements:
 
@@ -116,7 +121,7 @@ through the facade:
        'queries_per_second' => 250,
    ]);
 
-   // Convenience profile (enables strict identifiers; requires TLS in production).
+   // Convenience profile (enables strict identifiers and require_tls=true).
    DB::hardenProduction();
 
 These values are applied as enforced facade policy across registered and future

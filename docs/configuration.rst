@@ -70,26 +70,23 @@ Security Block
        'rate_limit_callback' => null,
        'strict_identifiers' => true,
        'require_tls' => null,
+       'allow_insecure' => false,
        'raw_sql_policy' => 'allow', // allow | deny | allowlist
        'raw_sql_allowlist' => [],
    ]
 
-Environment-Sensitive Hardening
--------------------------------
+Config-Driven Hardening
+-----------------------
 
-- ``APP_ENV=production`` (or ``prod``) activates production transport rules.
-- For MySQL/PostgreSQL, TLS is required by default in production-like environments.
-- ``security.require_tls=true`` forces TLS in every environment.
-- ``security.require_tls=false`` is blocked in production unless
-  ``DBLAYER_ALLOW_INSECURE_TRANSPORT=1`` is set.
-- ``security.enabled=false`` is blocked outside local/testing unless
-  ``DBLAYER_ALLOW_INSECURE_SECURITY_MODE=1`` is set.
+- ``security.require_tls=true`` forces TLS for MySQL/PostgreSQL.
+- ``security.require_tls=false`` requires ``security.allow_insecure=true``.
+- ``security.enabled=false`` requires ``security.allow_insecure=true``.
 
 Facade helpers:
 
 - ``DB::setSecurityDefaults([...])`` enforces defaults over connection-level values.
-- ``DB::hardenProduction()`` applies production-oriented defaults (strict identifiers,
-  and TLS requirement when running in production-like environment).
+- ``DB::hardenProduction()`` applies hardened defaults
+  (``enabled=true``, ``strict_identifiers=true``, ``require_tls=true``).
 
 Production Guidance
 -------------------

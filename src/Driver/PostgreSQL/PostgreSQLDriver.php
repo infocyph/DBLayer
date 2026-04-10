@@ -149,26 +149,6 @@ final class PostgreSQLDriver extends AbstractPdoDriver
     }
 
     /**
-     * Whether insecure transport override is enabled.
-     */
-    private function isInsecureTransportAllowed(): bool
-    {
-        $override = getenv('DBLAYER_ALLOW_INSECURE_TRANSPORT');
-
-        return $override === '1' || strtolower((string) $override) === 'true';
-    }
-
-    /**
-     * Whether current app environment is production-like.
-     */
-    private function isProductionEnvironment(): bool
-    {
-        $appEnv = strtolower(trim((string) (getenv('APP_ENV') ?: '')));
-
-        return \in_array($appEnv, ['production', 'prod'], true);
-    }
-
-    /**
      * Whether TLS should be required for this config.
      *
      * @param  array<string,mixed>  $config
@@ -177,14 +157,14 @@ final class PostgreSQLDriver extends AbstractPdoDriver
     {
         $security = $config['security'] ?? [];
 
-        if (is_array($security) && array_key_exists('require_tls', $security) && $security['require_tls'] !== null) {
-            return (bool) $security['require_tls'];
-        }
-
-        if ($this->isInsecureTransportAllowed()) {
+        if (! is_array($security)) {
             return false;
         }
 
-        return $this->isProductionEnvironment();
+        if (! isset($security['require_tls'])) {
+            return false;
+        }
+
+        return (bool) $security['require_tls'];
     }
 }

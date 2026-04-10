@@ -497,11 +497,8 @@ class DB
         $defaults = [
             'enabled' => true,
             'strict_identifiers' => true,
+            'require_tls' => true,
         ];
-
-        if (static::isProductionEnvironment()) {
-            $defaults['require_tls'] = true;
-        }
 
         static::setSecurityDefaults(
             array_replace($defaults, $securityOverrides),
@@ -1447,16 +1444,6 @@ class DB
         }
 
         $callback($event->connection, $event);
-    }
-
-    /**
-     * Whether current app environment is production-like.
-     */
-    private static function isProductionEnvironment(): bool
-    {
-        $appEnv = strtolower(trim((string) (getenv('APP_ENV') ?: '')));
-
-        return \in_array($appEnv, ['production', 'prod'], true);
     }
 
     /**

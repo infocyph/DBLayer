@@ -21,10 +21,6 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
  */
 final class Security
 {
-    private const string ALLOW_INSECURE_MODE_ENV = 'DBLAYER_ALLOW_INSECURE_SECURITY_MODE';
-
-    private const string APP_ENV_VAR = 'APP_ENV';
-
     /**
      * Dangerous SQL patterns (regex) for STRICT mode.
      *
@@ -63,6 +59,11 @@ final class Security
     private const int STRICT_MAX_QUERY_LENGTH = 8000;
 
     /**
+     * Explicit override for allowing insecure mode operations.
+     */
+    private static bool $allowInsecureMode = false;
+
+    /**
      * Global security mode.
      */
     private static SecurityMode $mode = SecurityMode::NORMAL;
@@ -81,6 +82,14 @@ final class Security
      * @var null|callable(string,array{queries_per_second:int,queries_per_minute:int}):void
      */
     private static $rateLimitHandler;
+
+    /**
+     * Explicitly allow/disallow insecure-mode behavior.
+     */
+    public static function allowInsecureMode(bool $allow = true): void
+    {
+        self::$allowInsecureMode = $allow;
+    }
 
     /**
      * Check rate limits (per-second & per-minute) for an identifier.
@@ -251,15 +260,7 @@ final class Security
      */
     public static function isInsecureModeAllowed(): bool
     {
-        $override = getenv(self::ALLOW_INSECURE_MODE_ENV);
-
-        if ($override === '1' || strtolower((string) $override) === 'true') {
-            return true;
-        }
-
-        $appEnv = strtolower(trim((string) (getenv(self::APP_ENV_VAR) ?: '')));
-
-        return \in_array($appEnv, ['local', 'development', 'dev', 'testing', 'test'], true);
+        return self::$allowInsecureMode;
     }
 
     /**
@@ -339,7 +340,7 @@ final class Security
     {
         if ($mode === SecurityMode::OFF && ! self::isInsecureModeAllowed()) {
             throw SecurityException::invalidConfiguration(
-                'SecurityMode::OFF is disabled outside local/testing. Set DBLAYER_ALLOW_INSECURE_SECURITY_MODE=1 to override.',
+                'SecurityMode::OFF is disabled by default. Call Security::allowInsecureMode(true) to override intentionally.',
             );
         }
 
@@ -603,9 +604,11 @@ final class Security
             return false;
         }
 
-        if (! (bool) $config['enabled'] && ! self::isInsecureModeAllowed()) {
+        $allowInsecure = (bool) ($config['allow_insecure'] ?? false);
+
+        if (! (bool) $config['enabled'] && ! $allowInsecure && ! self::isInsecureModeAllowed()) {
             throw SecurityException::invalidConfiguration(
-                'Disabling SQL security checks is blocked outside local/testing environments.',
+                'Disabling SQL security checks requires security.allow_insecure=true or Security::allowInsecureMode(true).',
             );
         }
 

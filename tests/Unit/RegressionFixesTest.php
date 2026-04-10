@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
 use Infocyph\DBLayer\Events\Events;
@@ -116,7 +116,7 @@ it('chunks by non-integer keys without repeating pages', function (string $drive
 
             return true;
         },
-        'uuid'
+        'uuid',
     );
 
     expect($pages)->toBe([
@@ -199,8 +199,7 @@ it('preserves object shape when setting nested paths via data_set', function ():
 it('removes empty event buckets when forgetting listeners', function (): void {
     $event = 'unit.event.' . bin2hex(random_bytes(8));
     $beforeCount = Events::getStats()['registered_events'];
-    $listener = static function (): void {
-    };
+    $listener = static function (): void {};
 
     Events::listen($event, $listener);
     Events::forget($event, $listener);
@@ -372,7 +371,7 @@ it('enforces read-only sqlite read replica sessions', function (): void {
     $count = (int) ($readPdo->query(sprintf('select count(*) from %s', $table))->fetchColumn() ?: 0);
     expect($count)->toBe(1);
 
-    expect(static fn (): int|false => $readPdo->exec(sprintf('insert into %s (id) values (2)', $table)))
+    expect(static fn(): int|false => $readPdo->exec(sprintf('insert into %s (id) values (2)', $table)))
         ->toThrow(\PDOException::class);
 
     $connection->disconnect();
@@ -472,15 +471,15 @@ it('supports query cancellation and deadline wrappers', function (string $driver
     $connectionName = 'regression_query_controls_' . $driver;
     dblayerAddConnectionForDriver($driver, $connectionName);
 
-    expect(fn (): mixed => DB::withQueryCancellation(
-        static fn (): bool => true,
-        static fn (): mixed => DB::select('select 1', [], $connectionName),
+    expect(fn(): mixed => DB::withQueryCancellation(
+        static fn(): bool => true,
+        static fn(): mixed => DB::select('select 1', [], $connectionName),
         $connectionName,
     ))->toThrow(ConnectionException::class);
 
-    expect(fn (): mixed => DB::withQueryDeadline(
+    expect(fn(): mixed => DB::withQueryDeadline(
         0.0,
-        static fn (): mixed => DB::select('select 1', [], $connectionName),
+        static fn(): mixed => DB::select('select 1', [], $connectionName),
         $connectionName,
     ))->toThrow(ConnectionException::class);
 })->with('dblayer_drivers');
@@ -680,39 +679,26 @@ it('collects and flushes telemetry payloads', function (string $driver): void {
 it('does not flag legitimate unions and still catches injected union payloads', function (): void {
     $validator = new QueryValidator();
 
-    expect(fn () => $validator->detectSqlInjection('select id from t1 union select id from t2'))
+    expect(fn() => $validator->detectSqlInjection('select id from t1 union select id from t2'))
         ->not->toThrow(SecurityException::class);
 
-    expect(fn () => $validator->detectSqlInjection(
-        'select * from users where name = "x" or 1=1 union select password from admins'
+    expect(fn() => $validator->detectSqlInjection(
+        'select * from users where name = "x" or 1=1 union select password from admins',
     ))->toThrow(SecurityException::class);
 });
 
-it('blocks turning global security mode off in production by default', function (): void {
-    $previousAppEnv = getenv('APP_ENV');
-    $previousOverride = getenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
+it('blocks turning global security mode off unless explicitly allowed', function (): void {
+    Security::allowInsecureMode(false);
 
-    putenv('APP_ENV=production');
-    putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
+    expect(static fn() => Security::setMode(SecurityMode::OFF))
+        ->toThrow(SecurityException::class);
 
-    try {
-        expect(static fn() => Security::setMode(SecurityMode::OFF))
-            ->toThrow(SecurityException::class);
-    } finally {
-        if ($previousAppEnv === false) {
-            putenv('APP_ENV');
-        } else {
-            putenv('APP_ENV=' . $previousAppEnv);
-        }
+    Security::allowInsecureMode(true);
+    Security::setMode(SecurityMode::OFF);
+    expect(Security::getMode())->toBe(SecurityMode::OFF);
 
-        if ($previousOverride === false) {
-            putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
-        } else {
-            putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE=' . $previousOverride);
-        }
-
-        Security::setMode(SecurityMode::NORMAL);
-    }
+    Security::setMode(SecurityMode::NORMAL);
+    Security::allowInsecureMode(false);
 });
 
 it('enforces strict identifier policy by default for safe builder APIs', function (string $driver): void {
@@ -811,38 +797,31 @@ it('requires TLS policy when explicitly requested for mysql and pgsql configs', 
     ]))->toThrow(ConnectionException::class);
 });
 
-it('blocks security.enabled=false in production config by default', function (): void {
-    $previousAppEnv = getenv('APP_ENV');
-    $previousOverride = getenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
+it('blocks security.enabled=false unless allow_insecure is enabled', function (): void {
+    expect(static fn(): ConnectionConfig => ConnectionConfig::fromArray([
+        'driver' => 'mysql',
+        'host' => '127.0.0.1',
+        'port' => 3306,
+        'database' => 'app',
+        'username' => 'root',
+        'password' => '',
+        'security' => [
+            'enabled' => false,
+        ],
+    ]))->toThrow(ConnectionException::class);
 
-    putenv('APP_ENV=production');
-    putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
-
-    try {
-        expect(static fn(): ConnectionConfig => ConnectionConfig::fromArray([
-            'driver' => 'mysql',
-            'host' => '127.0.0.1',
-            'port' => 3306,
-            'database' => 'app',
-            'username' => 'root',
-            'password' => '',
-            'security' => [
-                'enabled' => false,
-            ],
-        ]))->toThrow(ConnectionException::class);
-    } finally {
-        if ($previousAppEnv === false) {
-            putenv('APP_ENV');
-        } else {
-            putenv('APP_ENV=' . $previousAppEnv);
-        }
-
-        if ($previousOverride === false) {
-            putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE');
-        } else {
-            putenv('DBLAYER_ALLOW_INSECURE_SECURITY_MODE=' . $previousOverride);
-        }
-    }
+    expect(static fn(): ConnectionConfig => ConnectionConfig::fromArray([
+        'driver' => 'mysql',
+        'host' => '127.0.0.1',
+        'port' => 3306,
+        'database' => 'app',
+        'username' => 'root',
+        'password' => '',
+        'security' => [
+            'enabled' => false,
+            'allow_insecure' => true,
+        ],
+    ]))->not->toThrow(ConnectionException::class);
 });
 
 it('validates raw SQL policy configuration values', function (): void {
@@ -890,29 +869,17 @@ it('applies facade security policy to existing and future connections', function
         ->toThrow(SecurityException::class);
 })->with('dblayer_drivers');
 
-it('enables production hardening defaults through facade helper', function (): void {
-    $previousAppEnv = getenv('APP_ENV');
+it('enables hardened defaults through facade helper', function (): void {
+    DB::hardenProduction();
 
-    putenv('APP_ENV=production');
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'hardened_sqlite');
 
-    try {
-        DB::hardenProduction();
+    $security = DB::connection('hardened_sqlite')->getConfig()->securityConfig();
 
-        DB::addConnection([
-            'driver' => 'sqlite',
-            'database' => ':memory:',
-        ], 'hardened_sqlite');
-
-        $security = DB::connection('hardened_sqlite')->getConfig()->securityConfig();
-
-        expect($security['enabled'] ?? null)->toBeTrue();
-        expect($security['strict_identifiers'] ?? null)->toBeTrue();
-        expect($security['require_tls'] ?? null)->toBeTrue();
-    } finally {
-        if ($previousAppEnv === false) {
-            putenv('APP_ENV');
-        } else {
-            putenv('APP_ENV=' . $previousAppEnv);
-        }
-    }
+    expect($security['enabled'] ?? null)->toBeTrue();
+    expect($security['strict_identifiers'] ?? null)->toBeTrue();
+    expect($security['require_tls'] ?? null)->toBeTrue();
 });
