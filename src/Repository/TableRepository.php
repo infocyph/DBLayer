@@ -2,29 +2,29 @@
 
 declare(strict_types=1);
 
-namespace Infocyph\DBLayer\Model;
+namespace Infocyph\DBLayer\Repository;
 
 use BadMethodCallException;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
-use Infocyph\DBLayer\Query\Repository;
+use Infocyph\DBLayer\Query\Repository as QueryRepository;
 use InvalidArgumentException;
 use ReflectionMethod;
 
 /**
- * TableModel
+ * TableRepository
  *
- * Model-like static API on top of Repository + QueryBuilder + DB facade.
+ * Repository-oriented static API on top of Repository + QueryBuilder + DB facade.
  *
  * This class is intentionally NOT an ORM:
  * - no identity map
  * - no dirty tracking
  * - no relationship loader
  *
- * It is a convenience delegation layer for repository-style workflows.
+ * It is a convenience delegation layer for table-centric repository workflows.
  */
-abstract class TableModel
+abstract class TableRepository
 {
     /**
      * Optional named connection.
@@ -73,7 +73,7 @@ abstract class TableModel
     }
 
     /**
-     * Get the connection instance used by this model.
+     * Get the connection instance used by this repository class.
      */
     public static function connection(?string $connection = null): Connection
     {
@@ -81,7 +81,7 @@ abstract class TableModel
     }
 
     /**
-     * Build a query builder for this model.
+     * Build a query builder for this repository class.
      *
      * Uses repository->builder() so repository-level policy can be applied
      * before returning the builder instance.
@@ -94,15 +94,15 @@ abstract class TableModel
     /**
      * Alias for repository() to match common naming preference.
      */
-    public static function repo(?string $connection = null): Repository
+    public static function repo(?string $connection = null): QueryRepository
     {
         return static::repository($connection);
     }
 
     /**
-     * Build a repository for this model.
+     * Build a repository for this repository class.
      */
-    public static function repository(?string $connection = null): Repository
+    public static function repository(?string $connection = null): QueryRepository
     {
         $repository = DB::repository(static::tableName(), static::resolveConnectionName($connection));
 
@@ -110,7 +110,7 @@ abstract class TableModel
     }
 
     /**
-     * Execute a raw scalar query on this model's configured connection.
+     * Execute a raw scalar query on this repository class configured connection.
      *
      * @param array<int,mixed> $bindings
      */
@@ -120,7 +120,7 @@ abstract class TableModel
     }
 
     /**
-     * Execute a raw select query on this model's configured connection.
+     * Execute a raw select query on this repository class configured connection.
      *
      * @param array<int,mixed> $bindings
      * @return list<array<string,mixed>>
@@ -131,7 +131,7 @@ abstract class TableModel
     }
 
     /**
-     * Execute a raw statement on this model's configured connection.
+     * Execute a raw statement on this repository class configured connection.
      *
      * @param array<int,mixed> $bindings
      */
@@ -141,7 +141,7 @@ abstract class TableModel
     }
 
     /**
-     * Run a transaction on this model's configured connection.
+     * Run a transaction on this repository class configured connection.
      */
     public static function transaction(callable $callback, int $attempts = 1, ?string $connection = null): mixed
     {
@@ -159,7 +159,7 @@ abstract class TableModel
     /**
      * Override in subclasses to apply reusable repository defaults.
      */
-    protected static function configureRepository(Repository $repository): Repository
+    protected static function configureRepository(QueryRepository $repository): QueryRepository
     {
         return $repository;
     }
@@ -173,7 +173,7 @@ abstract class TableModel
     }
 
     /**
-     * Resolve explicit connection override or model default.
+     * Resolve explicit connection override or repository-class default.
      */
     protected static function resolveConnectionName(?string $connection = null): ?string
     {
@@ -198,7 +198,7 @@ abstract class TableModel
     }
 
     /**
-     * Forward a call to DB facade while injecting model connection argument
+     * Forward a call to DB facade while injecting repository connection argument
      * by parameter name when supported by the target method.
      *
      * @param array<int,mixed> $arguments

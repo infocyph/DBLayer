@@ -163,10 +163,10 @@ Use keyset streaming from builder or repository:
            return true;
        }, 'id');
 
-Model-Style App Repository Pattern
-----------------------------------
+Repository-Style App Service Pattern
+------------------------------------
 
-If you want model-like naming in your app, wrap DBLayer repository with
+If you want repository-oriented naming in your app, wrap DBLayer repository with
 composition:
 
 .. code-block:: php
@@ -196,26 +196,26 @@ composition:
        }
    }
 
-This keeps domain naming explicit without turning DBLayer into an ORM model
+This keeps domain naming explicit without turning DBLayer into an ORM
 system.
 
-Laravel-Like Static Model Facade (Still Repo Style)
----------------------------------------------------
+Laravel-Like Static Repository Facade (Still Repo Style)
+--------------------------------------------------------
 
-If you want a class that *feels* like a model API (``User::find()``,
+If you want a class that *feels* like a static repository API (``User::find()``,
 ``User::create()``, ``User::query()``), you can build one on top of repository.
 This is still not ORM behavior; it is repository delegation.
 
 DBLayer includes this base class directly:
 
-- ``Infocyph\DBLayer\Model\TableModel``
+- ``Infocyph\DBLayer\Repository\TableRepository``
 
 .. code-block:: php
 
-   use Infocyph\DBLayer\Model\TableModel;
+   use Infocyph\DBLayer\Repository\TableRepository;
    use Infocyph\DBLayer\Query\Repository;
 
-   abstract class AppTableModel extends TableModel
+   abstract class AppTableRepository extends TableRepository
    {
        protected static function configureRepository(Repository $repository): Repository
        {
@@ -223,7 +223,7 @@ DBLayer includes this base class directly:
        }
    }
 
-   final class User extends AppTableModel
+   final class User extends AppTableRepository
    {
        protected static string $table = 'users';
        protected static ?string $connection = 'main';
@@ -236,7 +236,7 @@ DBLayer includes this base class directly:
 
 What this gives:
 
-- model-like class ergonomics
+- repository-oriented class ergonomics
 - table and connection mapping in one class
 - full repository features (tenant scope, soft deletes, optimistic locking,
   hooks, casts)
@@ -245,15 +245,15 @@ What this intentionally does not give:
 
 - ORM relations/identity map/dirty tracking/unit-of-work
 
-TableModel Scenarios
+TableRepository Scenarios
 --------------------
 
-Read-Model Connection Split
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Read-Repository Connection Split
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: php
 
-   final class UserReadModel extends TableModel
+   final class UserReadRepository extends TableRepository
    {
        protected static string $table = 'users';
        protected static ?string $connection = 'reporting';
@@ -264,7 +264,7 @@ Policy Method Pattern
 
 .. code-block:: php
 
-   final class User extends TableModel
+   final class User extends TableRepository
    {
        protected static string $table = 'users';
 
@@ -301,7 +301,7 @@ Common Pitfalls
 Related Guides
 --------------
 
-- See ``table-model`` for class-based model-like usage patterns.
+- See ``table-repository`` for class-based repository-oriented usage patterns.
 - See ``examples-cookbook`` for ready-to-use end-to-end snippets.
 - See ``query-builder`` for SQL composition patterns.
 - See ``repository`` for policy features and lifecycle hooks.

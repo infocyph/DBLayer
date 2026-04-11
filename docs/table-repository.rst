@@ -1,24 +1,24 @@
-TableModel Guide
-================
+TableRepository Guide
+=====================
 
 Introduction
 ------------
 
-``TableModel`` gives model-like static ergonomics while keeping DBLayer's
+``TableRepository`` gives repository-oriented static ergonomics while keeping DBLayer's
 repository-first architecture.
 
 It is useful when your app wants a class-centric API such as
 ``User::find(1)`` and ``User::query()->...`` without adopting ORM behavior.
 
-Class: ``Infocyph\DBLayer\Model\TableModel``
+Class: ``Infocyph\DBLayer\Repository\TableRepository``
 
-When to Use TableModel
-----------------------
+When to Use TableRepository
+---------------------------
 
-Use ``TableModel`` when you want:
+Use ``TableRepository`` when you want:
 
 - one class per table/service boundary
-- model-like static method ergonomics
+- repository-oriented static method ergonomics
 - centralized table + default connection mapping
 - reusable repository/query configuration hooks
 
@@ -30,10 +30,10 @@ Minimal Setup
 
 .. code-block:: php
 
-   use Infocyph\DBLayer\Model\TableModel;
+   use Infocyph\DBLayer\Repository\TableRepository;
    use Infocyph\DBLayer\Query\Repository;
 
-   final class User extends TableModel
+   final class User extends TableRepository
    {
        protected static string $table = 'users';
        protected static ?string $connection = 'main';
@@ -125,12 +125,12 @@ Important chain behavior:
 Practical Use Cases
 -------------------
 
-Tenant-Aware Service Model
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Tenant-Aware Service Repository
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: php
 
-   final class User extends TableModel
+   final class User extends TableRepository
    {
        protected static string $table = 'users';
 
@@ -141,18 +141,18 @@ Tenant-Aware Service Model
        }
    }
 
-Read/Write Split by Model
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Read/Write Split by Repository Class
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: php
 
-   final class UserWriteModel extends TableModel
+   final class UserWriteRepository extends TableRepository
    {
        protected static string $table = 'users';
        protected static ?string $connection = 'main';
    }
 
-   final class UserReadModel extends TableModel
+   final class UserReadRepository extends TableRepository
    {
        protected static string $table = 'users';
        protected static ?string $connection = 'reporting';
@@ -171,8 +171,8 @@ Transactional Workflow
        }
    }, attempts: 2);
 
-Operational DB Access Through Model
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Operational DB Access Through Repository
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: php
 
@@ -180,8 +180,8 @@ Operational DB Access Through Model
    $caps = User::capabilities();
    $version = User::version();
 
-Raw SQL Through Model
-~~~~~~~~~~~~~~~~~~~~~
+Raw SQL Through Repository
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: php
 
@@ -192,7 +192,7 @@ Raw SQL Through Model
 Non-ORM Boundary
 ----------------
 
-``TableModel`` is intentionally not ORM:
+``TableRepository`` is intentionally not ORM:
 
 - no relationship mapping API
 - no unit-of-work
@@ -203,6 +203,6 @@ It is a static delegation layer over DBLayer components.
 See Also
 --------
 
-- ``api-table-model`` for method reference
+- ``api-table-repository`` for method reference
 - ``choosing-api`` for DB vs QueryBuilder vs Repository decisions
-- ``repository`` for repository capabilities used under ``TableModel``
+- ``repository`` for repository capabilities used under ``TableRepository``

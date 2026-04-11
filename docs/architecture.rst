@@ -9,7 +9,7 @@ Core Components
 ---------------
 
 - ``DB`` facade: static entrypoint.
-- ``TableModel``: model-like static adapter over repository/builder/facade.
+- ``TableRepository``: repository-oriented static adapter over repository/builder/facade.
 - ``Connection``: PDO lifecycle, driver, execution controls.
 - ``QueryBuilder``: fluent SQL builder.
 - ``Repository``: table-oriented abstraction.

@@ -23,7 +23,7 @@ If you are new to the project, follow this order:
 2. ``quickstart`` for a working end-to-end flow.
 3. ``choosing-api`` to choose DB vs QueryBuilder vs Repository.
 4. ``configuration`` and ``connections`` to move from local to production use.
-5. ``table-model`` for model-like class workflows without ORM.
+5. ``table-repository`` for repository-oriented class workflows without ORM.
 6. ``examples-cookbook`` for ready-to-use snippets across all layers.
 7. ``query-builder`` and ``repository`` for day-to-day application code.
 8. ``security`` and ``observability`` before deploying.
@@ -46,7 +46,7 @@ as lookup pages after reading the guides.
    configuration
    connections
    choosing-api
-   table-model
+   table-repository
    examples-cookbook
    query-builder
    repository
@@ -62,7 +62,7 @@ as lookup pages after reading the guides.
    :caption: API Reference
 
    api-facade
-   api-table-model
+   api-table-repository
    api-query-builder
    api-repository
    api-connection-config

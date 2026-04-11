@@ -168,19 +168,19 @@ Mapping to DTO
 
    $dtos = DB::repository('users')->mapInto(UserDto::class);
 
-TableModel Recipes
+TableRepository Recipes
 ------------------
 
-Minimal TableModel Class
+Minimal TableRepository Class
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: php
 
-   use Infocyph\DBLayer\Model\TableModel;
+   use Infocyph\DBLayer\Repository\TableRepository;
    use Infocyph\DBLayer\Query\QueryBuilder;
    use Infocyph\DBLayer\Query\Repository;
 
-   final class User extends TableModel
+   final class User extends TableRepository
    {
        protected static string $table = 'users';
        protected static ?string $connection = 'main';
@@ -196,7 +196,7 @@ Minimal TableModel Class
        }
    }
 
-Model-Like Calls
+Repository-Oriented Calls
 ~~~~~~~~~~~~~~~~
 
 .. code-block:: php
@@ -283,14 +283,14 @@ Choosing the Right Recipe
 
 - Prefer ``DB::table()`` for one-off query shape.
 - Prefer ``DB::repository()`` for repeated table rules.
-- Prefer ``TableModel`` when your app wants class-based static ergonomics.
+- Prefer ``TableRepository`` when your app wants class-based static ergonomics.
 - Use ``DB`` directly for transactions, capabilities, observability, and raw SQL.
 
 Related Pages
 -------------
 
 - ``choosing-api``
-- ``table-model``
+- ``table-repository``
 - ``query-builder``
 - ``repository``
 - ``transactions``

@@ -19,7 +19,7 @@ that creates builder/repository instances and owns connection/runtime behavior.
 
 Most applications use a mix of:
 
-- ``TableModel`` subclasses for model-like static repository workflows
+- ``TableRepository`` subclasses for static class-based repository workflows
 - ``DB::table()`` for query builder flows
 - ``DB::repository()`` for table-oriented app services
 - ``DB::transaction()`` for write consistency boundaries

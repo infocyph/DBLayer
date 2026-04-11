@@ -1,16 +1,16 @@
-API: TableModel
-===============
+API: TableRepository
+====================
 
-Class: ``Infocyph\DBLayer\Model\TableModel``
+Class: ``Infocyph\DBLayer\Repository\TableRepository``
 
-``TableModel`` provides model-like static ergonomics while staying pure
+``TableRepository`` provides repository-oriented static ergonomics while staying pure
 repository style. It delegates calls by priority:
 
 1. Repository methods
 2. QueryBuilder methods
 3. DB facade methods (with connection auto-injection when supported)
 
-For scenario-oriented usage patterns, see ``table-model``.
+For scenario-oriented usage patterns, see ``table-repository``.
 
 Because dispatch is repository/query-first, use ``sqlSelect()`` for raw SQL
 reads to avoid ambiguity with QueryBuilder ``select()``.
@@ -62,12 +62,12 @@ Scope Pattern
 Connection Pattern
 ------------------
 
-Set model default connection in static property, and override per-call when
+Set class default connection in static property, and override per-call when
 needed:
 
 .. code-block:: php
 
-   final class User extends TableModel
+   final class User extends TableRepository
    {
        protected static string $table = 'users';
        protected static ?string $connection = 'main';
@@ -80,7 +80,7 @@ needed:
 DB Interface Access
 -------------------
 
-You can call DB facade methods through ``TableModel`` static dispatch:
+You can call DB facade methods through ``TableRepository`` static dispatch:
 
 .. code-block:: php
 
@@ -96,10 +96,10 @@ Example
 
 .. code-block:: php
 
-   use Infocyph\DBLayer\Model\TableModel;
+   use Infocyph\DBLayer\Repository\TableRepository;
    use Infocyph\DBLayer\Query\Repository;
 
-   final class User extends TableModel
+   final class User extends TableRepository
    {
        protected static string $table = 'users';
        protected static ?string $connection = 'main';
@@ -117,5 +117,5 @@ Example
 Non-ORM Scope
 -------------
 
-``TableModel`` is intentionally not an ORM model implementation. It does not
+``TableRepository`` is intentionally not an ORM implementation. It does not
 provide relationship mapping, unit-of-work, or dirty-state tracking.
