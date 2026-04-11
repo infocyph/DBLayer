@@ -75,10 +75,10 @@ Pattern for scoped reads:
 
    $active = $users->get(fn ($q) => $q->where('active', '=', 1));
 
-Model-Style App Class (Composition)
+Repository-Style App Class (Composition)
 -----------------------------------
 
-DBLayer repository is not an ORM model. If you want model-like naming, wrap the
+DBLayer repository is not an ORM. If you want repository-oriented naming, wrap the
 repository in an app class:
 
 .. code-block:: php
@@ -118,21 +118,21 @@ repository in an app class:
 .. note::
 
    ``DB::repository('UserProfiles')`` normalizes to ``user_profiles`` table
-   name. This helps keep naming consistent for model-style class names.
+   name. This helps keep naming consistent for repository-style class names.
 
-Laravel-Like Model Surface (Without ORM)
+Laravel-Like Repository Surface (Without ORM)
 ----------------------------------------
 
-If you want static model-like calls while keeping pure repository style, build
-on top of DBLayer's built-in ``TableModel``:
+If you want static repository-oriented calls while keeping pure repository style, build
+on top of DBLayer's built-in ``TableRepository``:
 
 .. code-block:: php
 
-   use Infocyph\DBLayer\Model\TableModel;
+   use Infocyph\DBLayer\Repository\TableRepository;
    use Infocyph\DBLayer\Query\QueryBuilder;
    use Infocyph\DBLayer\Query\Repository;
 
-   abstract class AppTableModel extends TableModel
+   abstract class AppTableRepository extends TableRepository
    {
        protected static function configureRepository(Repository $repository): Repository
        {
@@ -140,7 +140,7 @@ on top of DBLayer's built-in ``TableModel``:
        }
    }
 
-   final class User extends AppTableModel
+   final class User extends AppTableRepository
    {
        protected static string $table = 'users';
        protected static ?string $connection = 'main';

@@ -100,7 +100,7 @@ What To Do Next
 ---------------
 
 - Move to ``choosing-api`` for a full scenario matrix.
-- Move to ``table-model`` for model-like static workflows (without ORM).
+- Move to ``table-repository`` for repository-oriented static workflows (without ORM).
 - Move to ``examples-cookbook`` for copy-ready snippets by use case.
 - Move to ``configuration`` for multi-connection and security options.
 - Move to ``connections`` for replica and pooling behavior.

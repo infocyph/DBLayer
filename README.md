@@ -6,7 +6,7 @@ A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with 
 
 ### Core Features
 - ✅ **Query Builder** - Fluent, Laravel-like API
-- ✅ **Repository Layer** - Thin model-style repositories on top of Query Builder
+- ✅ **Repository Layer** - Thin class-based repositories on top of Query Builder
 - ✅ **Connection Manager** - Connection pooling + read replicas
 - ✅ **Replica Strategies** - `random`, `round_robin`, `least_latency`
 - ✅ **Multi-Driver** - MySQL, PostgreSQL, SQLite
@@ -167,14 +167,14 @@ $active = $users->get(fn ($q) => $q->where('active', 1));
 
 If the same table rules appear in multiple call sites, move that logic into a repository-oriented class.
 
-### TableModel (Model-Like, Non-ORM)
+### TableRepository (Repository-Oriented, Non-ORM)
 
 ```php
-use Infocyph\DBLayer\Model\TableModel;
+use Infocyph\DBLayer\Repository\TableRepository;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository;
 
-final class User extends TableModel
+final class User extends TableRepository
 {
     protected static string $table = 'users';
     protected static ?string $connection = 'main';
