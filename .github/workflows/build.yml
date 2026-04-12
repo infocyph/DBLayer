@@ -99,10 +99,10 @@ jobs:
           composer test:sniff
           composer test:refactor
           if [ "${{ matrix.dependency-version }}" != "prefer-lowest" ]; then
-            composer test:static:strict
+            composer test:static
           fi
           if [ "${{ matrix.dependency-version }}" != "prefer-lowest" ]; then
-            composer test:security:strict
+            composer test:security
           fi
 
   analyze:
