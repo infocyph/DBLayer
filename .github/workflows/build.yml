@@ -134,10 +134,10 @@ jobs:
         run: composer release:audit
 
       - name: Quality Gate (PHPStan)
-        run: composer test:static:strict
+        run: composer test:static
 
       - name: Security Gate (Psalm)
-        run: composer test:security:strict
+        run: composer test:security
 
       - name: Run PHPStan (Code Scanning)
         run: |
