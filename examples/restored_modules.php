@@ -15,9 +15,32 @@ DB::addConnection([
     'database' => ':memory:',
 ], 'default');
 
+$removeDirectory = static function (string $directory): void {
+    if (!is_dir($directory)) {
+        return;
+    }
+
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST,
+    );
+
+    foreach ($iterator as $entry) {
+        $path = $entry->getPathname();
+        if ($entry->isDir()) {
+            @rmdir($path);
+            continue;
+        }
+
+        @unlink($path);
+    }
+
+    @rmdir($directory);
+};
+
 $cacheDir = '/tmp/dblayer-example-cache-' . bin2hex(random_bytes(6));
 $cache = DB::useFileCache($cacheDir);
-$cache->put('hello', 'world', 60);
+$cache->set('hello', 'world', 60);
 echo 'Cache value: ' . (string) $cache->get('hello') . PHP_EOL;
 
 DB::poolManager([
@@ -77,7 +100,7 @@ DB::disableLogger();
 DB::disableProfiler();
 
 @unlink($logFile);
-$cache->flush();
-@rmdir($cacheDir);
+$cache->clear();
+$removeDirectory($cacheDir);
 
 DB::purge();

@@ -2,26 +2,54 @@
 
 declare(strict_types=1);
 
-use Infocyph\DBLayer\Cache\Strategies\FileStrategy;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
 
-it('uses file cache strategy through DB facade', function (string $driver): void {
+it('uses cachelayer file adapter through DB facade', function (string $driver): void {
     dblayerAddConnectionForDriver($driver);
+
+    $removeDirectory = null;
+    $removeDirectory = static function (string $directory) use (&$removeDirectory): void {
+        if (!is_dir($directory)) {
+            return;
+        }
+
+        $entries = scandir($directory);
+        if (!is_array($entries)) {
+            return;
+        }
+
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+
+            $path = $directory . DIRECTORY_SEPARATOR . $entry;
+            if (is_dir($path)) {
+                $removeDirectory($path);
+                continue;
+            }
+
+            @unlink($path);
+        }
+
+        @rmdir($directory);
+    };
 
     $cacheDir = '/tmp/dblayer-file-cache-' . bin2hex(random_bytes(6));
 
     $cache = DB::useFileCache($cacheDir);
-    $stored = $cache->put('greeting', 'hello', 30);
+    $stored = $cache->set('greeting', 'hello', 30);
 
     expect($stored)->toBeTrue();
     expect($cache->get('greeting'))->toBe('hello');
-    expect($cache->getStrategy())->toBeInstanceOf(FileStrategy::class);
+    expect($cache->count())->toBe(1);
+    expect($cache->exportMetrics())->toBeArray();
     expect(is_dir($cacheDir))->toBeTrue();
 
-    $cache->flush();
-    @rmdir($cacheDir);
+    $cache->clear();
+    $removeDirectory($cacheDir);
 })->with('dblayer_drivers');
 
 it('reuses pooled connections via pool manager helpers', function (string $driver): void {

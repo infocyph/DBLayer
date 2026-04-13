@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer;
 
-use Infocyph\DBLayer\Cache\Cache;
-use Infocyph\DBLayer\Cache\Strategies\CacheStrategy;
-use Infocyph\DBLayer\Cache\Strategies\FileStrategy;
+use Infocyph\CacheLayer\Cache\Cache;
+use Infocyph\CacheLayer\Cache\CacheInterface;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\Connection\Pool;
@@ -43,7 +42,7 @@ class DB
     /**
      * Shared cache manager instance.
      */
-    protected static ?Cache $cache = null;
+    protected static ?CacheInterface $cache = null;
     /**
      * Original configuration objects keyed by connection name.
      *
@@ -214,16 +213,16 @@ class DB
     /**
      * Get shared cache manager instance.
      */
-    public static function cache(?CacheStrategy $strategy = null): Cache
+    public static function cache(?CacheInterface $cache = null): CacheInterface
     {
         if (static::$cache === null) {
-            static::$cache = new Cache($strategy);
+            static::$cache = $cache ?? Cache::memory('dblayer');
 
             return static::$cache;
         }
 
-        if ($strategy !== null) {
-            static::$cache->setStrategy($strategy);
+        if ($cache !== null) {
+            static::$cache = $cache;
         }
 
         return static::$cache;
@@ -1109,11 +1108,11 @@ class DB
     }
 
     /**
-     * Switch cache strategy to file-backed persistence.
+     * Switch shared cache instance to file-backed persistence.
      */
-    public static function useFileCache(?string $directory = null): Cache
+    public static function useFileCache(?string $directory = null): CacheInterface
     {
-        return static::cache(new FileStrategy($directory));
+        return static::cache(Cache::file('dblayer', $directory));
     }
 
     /**

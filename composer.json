@@ -39,7 +39,8 @@
     },
     "require": {
         "php": "^8.4",
-        "ext-pdo": "*"
+        "ext-pdo": "*",
+        "infocyph/cachelayer": "^1.01"
     },
     "require-dev": {
         "captainhook/captainhook": "^5.29.2",
