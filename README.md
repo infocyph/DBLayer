@@ -1,5 +1,13 @@
 # DBLayer - High-Performance PHP Database Layer
 
+[![Security & Standards](https://github.com/infocyph/DBLayer/actions/workflows/build.yml/badge.svg)](https://github.com/infocyph/DBLayer/actions/workflows/build.yml)
+![Packagist Downloads](https://img.shields.io/packagist/dt/infocyph/DBLayer?color=green\&link=https%3A%2F%2Fpackagist.org%2Fpackages%2Finfocyph%2FDBLayer)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+![Packagist Version](https://img.shields.io/packagist/v/infocyph/DBLayer)
+![Packagist PHP Version](https://img.shields.io/packagist/dependency-v/infocyph/DBLayer/php)
+![GitHub Code Size](https://img.shields.io/github/languages/code-size/infocyph/DBLayer)
+[![Documentation](https://img.shields.io/badge/Documentation-DBLayer-blue?logo=readthedocs&logoColor=white)](https://docs.infocyph.com/projects/DBLayer/)
+
 A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with multi-driver compatibility.
 
 ## Features
