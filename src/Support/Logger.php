@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Support;
 
+use Psr\Log\LoggerInterface as PsrLoggerInterface;
+use Psr\Log\LogLevel;
 use Throwable;
 
 /**
@@ -30,10 +32,9 @@ final class Logger
      *
      * @param string|null $logFile Log file path (default: system temp directory)
      */
-    public function __construct(?string $logFile = null)
+    public function __construct(?string $logFile = null, private ?PsrLoggerInterface $psrLogger = null)
     {
-        $this->logFile = $logFile
-          ?? (rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'dblayer.log');
+        $this->logFile = $logFile ?? $this->defaultLogFile();
     }
 
     /**
@@ -41,7 +42,7 @@ final class Logger
      */
     public function clear(): void
     {
-        if (is_file($this->logFile)) {
+        if (is_file($this->logFile) && ! is_link($this->logFile)) {
             @unlink($this->logFile);
         }
     }
@@ -95,6 +96,14 @@ final class Logger
     }
 
     /**
+     * Get configured PSR-3 logger backend.
+     */
+    public function getPsrLogger(): ?PsrLoggerInterface
+    {
+        return $this->psrLogger;
+    }
+
+    /**
      * Check if logging is enabled.
      */
     public function isEnabled(): bool
@@ -132,11 +141,66 @@ final class Logger
     }
 
     /**
+     * Set PSR-3 logger backend.
+     */
+    public function setPsrLogger(?PsrLoggerInterface $logger): void
+    {
+        $this->psrLogger = $logger;
+    }
+
+    /**
      * Control whether binding values are redacted in query logs.
      */
     public function setRedactBindings(bool $redact): void
     {
         $this->redactBindings = $redact;
+    }
+
+    private function defaultLogFile(): string
+    {
+        return rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+            . DIRECTORY_SEPARATOR
+            . 'dblayer'
+            . DIRECTORY_SEPARATOR
+            . 'dblayer.log';
+    }
+
+    /**
+     * @param  array<string,mixed>  $context
+     */
+    private function defaultMessageForLevel(string $level): string
+    {
+        return match ($level) {
+            'ERROR' => 'db.error',
+            'QUERY' => 'db.query.executed',
+            default => 'db.log',
+        };
+    }
+
+    private function isSafeLogTarget(): bool
+    {
+        $directory = dirname($this->logFile);
+        if ($directory === '' || is_link($directory)) {
+            return false;
+        }
+
+        if (! is_dir($directory) && ! @mkdir($directory, 0o700, true) && ! is_dir($directory)) {
+            return false;
+        }
+
+        if (! is_writable($directory)) {
+            return false;
+        }
+
+        if (is_link($this->logFile)) {
+            return false;
+        }
+
+        if (is_file($this->logFile) && ! is_writable($this->logFile)) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -151,13 +215,21 @@ final class Logger
             return $bindings;
         }
 
-        $sanitized = [];
+        return array_map($this->redactBindingValue(...), $bindings);
+    }
 
-        foreach ($bindings as $key => $value) {
-            $sanitized[$key] = $this->redactBindingValue($value);
-        }
-
-        return $sanitized;
+    private function normalizePsrLevel(string $level): string
+    {
+        return match ($level) {
+            'DEBUG' => LogLevel::DEBUG,
+            'NOTICE' => LogLevel::NOTICE,
+            'WARNING' => LogLevel::WARNING,
+            'ERROR' => LogLevel::ERROR,
+            'CRITICAL' => LogLevel::CRITICAL,
+            'ALERT' => LogLevel::ALERT,
+            'EMERGENCY' => LogLevel::EMERGENCY,
+            default => LogLevel::INFO,
+        };
     }
 
     /**
@@ -199,23 +271,51 @@ final class Logger
      */
     private function write(array $context): void
     {
-        $timestamp = date('Y-m-d H:i:s');
-
-        $level = $context['level'] ?? 'INFO';
+        $level = strtoupper((string) ($context['level'] ?? 'INFO'));
         unset($context['level']);
 
-        $json = json_encode(
-            $context,
-            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-        ) ?: '{}';
+        $message = (string) ($context['message'] ?? $this->defaultMessageForLevel($level));
+        unset($context['message']);
 
-        $entry = sprintf(
-            "[%s] %s: %s\n",
-            $timestamp,
-            $level,
-            $json,
-        );
+        $this->writeToPsrLogger($level, $message, $context);
+        $this->writeToFile($level, $message, $context);
+    }
 
-        @file_put_contents($this->logFile, $entry, FILE_APPEND | LOCK_EX);
+    /**
+     * @param  array<string,mixed>  $context
+     */
+    private function writeToFile(string $level, string $message, array $context): void
+    {
+        if (! $this->isSafeLogTarget()) {
+            return;
+        }
+
+        $timestamp = date('Y-m-d H:i:s');
+        $payload = $context;
+        $payload['message'] = $message;
+
+        $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}';
+        $entry = sprintf("[%s] %s: %s\n", $timestamp, $level, $json);
+        $isNewFile = ! is_file($this->logFile);
+
+        if (@file_put_contents($this->logFile, $entry, FILE_APPEND | LOCK_EX) === false) {
+            return;
+        }
+
+        if ($isNewFile) {
+            @chmod($this->logFile, 0o600);
+        }
+    }
+
+    /**
+     * @param  array<string,mixed>  $context
+     */
+    private function writeToPsrLogger(string $level, string $message, array $context): void
+    {
+        if ($this->psrLogger === null) {
+            return;
+        }
+
+        $this->psrLogger->log($this->normalizePsrLevel($level), $message, $context);
     }
 }

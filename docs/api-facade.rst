@@ -61,7 +61,7 @@ Execution Controls
 Observability and Utility
 -------------------------
 
-- ``enableLogger()``, ``disableLogger()``, ``logger()``
+- ``enableLogger()``, ``disableLogger()``, ``logger()``, ``setPsrLogger()``
 - ``enableProfiler()``, ``disableProfiler()``, ``profiler()``
 - ``enableTelemetry()``, ``disableTelemetry()``, ``telemetry()``, ``telemetryOtel()``
 - ``flushTelemetry()``, ``flushTelemetryOtel()``, ``slowQueryReport()``

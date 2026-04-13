@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer;
 
-use Infocyph\DBLayer\Cache\Cache;
-use Infocyph\DBLayer\Cache\Strategies\CacheStrategy;
-use Infocyph\DBLayer\Cache\Strategies\FileStrategy;
+use Infocyph\CacheLayer\Cache\Cache;
+use Infocyph\CacheLayer\Cache\CacheInterface;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\Connection\Pool;
@@ -24,6 +23,7 @@ use Infocyph\DBLayer\Support\Profiler;
 use Infocyph\DBLayer\Support\Str;
 use Infocyph\DBLayer\Support\Telemetry;
 use PDO;
+use Psr\Log\LoggerInterface as PsrLoggerInterface;
 use Throwable;
 
 /**
@@ -43,7 +43,7 @@ class DB
     /**
      * Shared cache manager instance.
      */
-    protected static ?Cache $cache = null;
+    protected static ?CacheInterface $cache = null;
     /**
      * Original configuration objects keyed by connection name.
      *
@@ -214,16 +214,16 @@ class DB
     /**
      * Get shared cache manager instance.
      */
-    public static function cache(?CacheStrategy $strategy = null): Cache
+    public static function cache(?CacheInterface $cache = null): CacheInterface
     {
         if (static::$cache === null) {
-            static::$cache = new Cache($strategy);
+            static::$cache = $cache ?? Cache::memory('dblayer');
 
             return static::$cache;
         }
 
-        if ($strategy !== null) {
-            static::$cache->setStrategy($strategy);
+        if ($cache !== null) {
+            static::$cache = $cache;
         }
 
         return static::$cache;
@@ -341,9 +341,15 @@ class DB
     /**
      * Enable facade query logger integration.
      */
-    public static function enableLogger(?string $logFile = null): void
+    public static function enableLogger(?string $logFile = null, ?PsrLoggerInterface $psrLogger = null): void
     {
-        static::logger($logFile)->enable();
+        $logger = static::logger($logFile);
+
+        if ($psrLogger !== null) {
+            $logger->setPsrLogger($psrLogger);
+        }
+
+        $logger->enable();
         static::ensureEventsHooked();
     }
 
@@ -889,6 +895,17 @@ class DB
     }
 
     /**
+     * Set or clear PSR-3 logger backend for facade query logging.
+     */
+    public static function setPsrLogger(?PsrLoggerInterface $logger): Logger
+    {
+        $instance = static::logger();
+        $instance->setPsrLogger($logger);
+
+        return $instance;
+    }
+
+    /**
      * Set global security policy values for current and future connections.
      *
      * Values set here are enforced over per-connection security settings.
@@ -1109,11 +1126,11 @@ class DB
     }
 
     /**
-     * Switch cache strategy to file-backed persistence.
+     * Switch shared cache instance to file-backed persistence.
      */
-    public static function useFileCache(?string $directory = null): Cache
+    public static function useFileCache(?string $directory = null): CacheInterface
     {
-        return static::cache(new FileStrategy($directory));
+        return static::cache(Cache::file('dblayer', $directory));
     }
 
     /**

@@ -13,6 +13,7 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
 use Infocyph\DBLayer\Security\QueryValidator;
 use Infocyph\DBLayer\Security\Security;
 use Infocyph\DBLayer\Security\SecurityMode;
+use Psr\Log\AbstractLogger;
 
 beforeEach(function (): void {
     DB::purge();
@@ -581,6 +582,155 @@ it('redacts query bindings in logger output by default', function (string $drive
     if (is_file($logFile)) {
         @unlink($logFile);
     }
+})->with('dblayer_drivers');
+
+it('forwards logger entries to configured PSR-3 backend', function (string $driver): void {
+    $connectionName = 'regression_logger_psr3_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
+    $table = dblayerTable('logger_psr_items');
+
+    DB::statement(
+        sprintf('create table %s (%s, name %s)', $table, dblayerAutoIncrementPrimaryKey($schemaDriver), dblayerStringType($schemaDriver)),
+        [],
+        $connectionName,
+    );
+    DB::table($table, $connectionName)->insert(['name' => 'seed']);
+
+    $records = new \ArrayObject();
+    $psrLogger = new class($records) extends AbstractLogger {
+        public function __construct(private \ArrayObject $records) {}
+
+        public function log($level, \Stringable|string $message, array $context = []): void
+        {
+            $this->records->append([
+                'level' => (string) $level,
+                'message' => (string) $message,
+                'context' => $context,
+            ]);
+        }
+    };
+
+    DB::enableLogger(null, $psrLogger);
+    DB::table($table, $connectionName)
+        ->whereRaw('name = ?', ['secret-token'])
+        ->limit(1)
+        ->get();
+
+    $lastRecord = $records[(int) ($records->count() - 1)] ?? null;
+    $serializedContext = json_encode(is_array($lastRecord) ? ($lastRecord['context'] ?? []) : []) ?: '';
+
+    expect($records->count())->toBeGreaterThan(0);
+    expect(is_array($lastRecord))->toBeTrue();
+    expect($lastRecord['level'] ?? null)->toBe('info');
+    expect($serializedContext)->toContain('[redacted:string:12]');
+    expect($serializedContext)->not->toContain('secret-token');
+
+    DB::setPsrLogger(null);
+    DB::disableLogger();
+})->with('dblayer_drivers');
+
+it('supports configuring psr logger backend via facade helper', function (string $driver): void {
+    $connectionName = 'regression_logger_set_psr_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
+    $table = dblayerTable('logger_set_psr_items');
+
+    DB::statement(
+        sprintf('create table %s (%s, name %s)', $table, dblayerAutoIncrementPrimaryKey($schemaDriver), dblayerStringType($schemaDriver)),
+        [],
+        $connectionName,
+    );
+    DB::table($table, $connectionName)->insert(['name' => 'seed']);
+
+    $records = new \ArrayObject();
+    $psrLogger = new class($records) extends AbstractLogger {
+        public function __construct(private \ArrayObject $records) {}
+
+        public function log($level, \Stringable|string $message, array $context = []): void
+        {
+            $this->records->append([
+                'level' => (string) $level,
+                'message' => (string) $message,
+                'context' => $context,
+            ]);
+        }
+    };
+
+    $logFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR
+        . 'dblayer-log-psr-helper-'
+        . bin2hex(random_bytes(8))
+        . '.log';
+
+    DB::enableLogger($logFile);
+    DB::setPsrLogger($psrLogger);
+    DB::table($table, $connectionName)->limit(1)->get();
+
+    expect($records->count())->toBeGreaterThan(0);
+
+    DB::setPsrLogger(null);
+    DB::disableLogger();
+
+    if (is_file($logFile)) {
+        @unlink($logFile);
+    }
+})->with('dblayer_drivers');
+
+it('does not write when logger target is a symlink', function (string $driver): void {
+    $connectionName = 'regression_logger_symlink_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
+    $table = dblayerTable('logger_symlink_items');
+
+    DB::statement(
+        sprintf('create table %s (%s, name %s)', $table, dblayerAutoIncrementPrimaryKey($schemaDriver), dblayerStringType($schemaDriver)),
+        [],
+        $connectionName,
+    );
+    DB::table($table, $connectionName)->insert(['name' => 'seed']);
+
+    $baseDir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR
+        . 'dblayer-log-symlink-'
+        . bin2hex(random_bytes(6));
+    $realLog = $baseDir . DIRECTORY_SEPARATOR . 'real.log';
+    $linkLog = $baseDir . DIRECTORY_SEPARATOR . 'link.log';
+
+    if ((! is_dir($baseDir)) && (! @mkdir($baseDir, 0o700, true))) {
+        test()->markTestSkipped('Unable to create temporary directory for symlink logger test.');
+
+        return;
+    }
+
+    file_put_contents($realLog, '');
+
+    if (! function_exists('symlink') || ! @symlink($realLog, $linkLog)) {
+        @unlink($realLog);
+        @rmdir($baseDir);
+        test()->markTestSkipped('Symlink creation is not available in this environment.');
+
+        return;
+    }
+
+    DB::enableLogger($linkLog);
+    DB::table($table, $connectionName)
+        ->whereRaw('name = ?', ['secret-token'])
+        ->limit(1)
+        ->get();
+    DB::disableLogger();
+
+    $contents = is_file($realLog) ? (string) file_get_contents($realLog) : '';
+
+    expect($contents)->toBe('');
+
+    if (is_link($linkLog)) {
+        @unlink($linkLog);
+    }
+    if (is_file($realLog)) {
+        @unlink($realLog);
+    }
+    @rmdir($baseDir);
 })->with('dblayer_drivers');
 
 it('caps telemetry and profiler buffers to configured limits', function (string $driver): void {

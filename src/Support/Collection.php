@@ -4,44 +4,20 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Support;
 
-use ArrayAccess;
-use Countable;
-use Iterator;
-use JsonSerializable;
+use Infocyph\ArrayKit\Collection\Collection as ArrayKitCollection;
+use Traversable;
 
 /**
  * Collection
  *
- * Fluent array wrapper providing chainable methods for array manipulation.
- * Implements standard PHP interfaces for array-like behavior.
- *
- * Intentionally lightweight and non-magic. Higher-level layers
- * can wrap or extend it if needed.
+ * DBLayer collection built on top of infocyph/arraykit while preserving the
+ * existing DBLayer API surface.
  *
  * @template TKey of array-key
  * @template TValue
- *
- * @implements ArrayAccess<TKey, TValue>
- * @implements Iterator<TKey, TValue>
- * @implements JsonSerializable
  */
-final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializable, \Stringable
+final class Collection extends ArrayKitCollection implements \Stringable
 {
-    /**
-     * Create a new collection.
-     *
-     * @param array<TKey, TValue> $items Initial items
-     */
-    public function __construct(protected array $items = []) {}
-
-    /**
-     * Convert collection to JSON string.
-     */
-    public function __toString(): string
-    {
-        return $this->toJson();
-    }
-
     /**
      * Create an empty collection.
      */
@@ -51,38 +27,37 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     }
 
     /**
-     * Create a collection from an array.
-     *
-     * @param array<TKey, TValue> $items
+     * Create a collection from value(s).
      */
-    public static function make(array $items = []): static
+    #[\Override]
+    public static function make(mixed $items = []): static
     {
+        if ($items instanceof self) {
+            return new static($items->all());
+        }
+
+        if ($items instanceof Traversable) {
+            return new static(iterator_to_array($items));
+        }
+
+        if (! is_array($items)) {
+            return new static([$items]);
+        }
+
         return new static($items);
     }
 
     /**
-     * Get all items in the collection.
-     *
-     * @return array<TKey, TValue>
-     */
-    public function all(): array
-    {
-        return $this->items;
-    }
-
-    /**
      * Get the average of a given key (or of values themselves if $key is null).
-     * Only numeric values are considered in the average.
-     *
-     * @param string|null $key Key to average
      */
     public function avg(?string $key = null): int|float
     {
-        if ($this->items === []) {
+        $items = $this->all();
+        if ($items === []) {
             return 0;
         }
 
-        [$total, $count] = $this->aggregateAverage($key);
+        [$total, $count] = $this->aggregateAverage($items, $key);
 
         if ($count === 0) {
             return 0;
@@ -94,18 +69,18 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     /**
      * Chunk the collection into smaller collections.
      *
-     * @param int $size Chunk size
      * @return static<int, static<TKey, TValue>>
      */
     public function chunk(int $size): static
     {
-        if ($size <= 0 || $this->items === []) {
+        $items = $this->all();
+        if ($size <= 0 || $items === []) {
             return static::empty();
         }
 
         $chunks = [];
 
-        foreach (array_chunk($this->items, $size, true) as $chunk) {
+        foreach (array_chunk($items, $size, true) as $chunk) {
             $chunks[] = new static($chunk);
         }
 
@@ -115,59 +90,38 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     /**
      * Determine if an item exists in the collection.
      *
-     * If only one argument is given, checks if that value exists.
+     * If one argument is given, checks if that value exists.
      * If two arguments are given, treats them as key/value and calls where().
      */
     public function contains(mixed $key, mixed $value = null): bool
     {
         if (func_num_args() === 1) {
-            return in_array($key, $this->items, true);
+            return in_array($key, $this->all(), true);
         }
 
         return $this->where((string) $key, $value)->isNotEmpty();
     }
 
     /**
-     * Count the number of items (Countable implementation).
-     */
-    #[\Override]
-    public function count(): int
-    {
-        return count($this->items);
-    }
-
-    /**
-     * Get the current item (Iterator implementation).
-     *
-     * @return TValue
-     */
-    #[\Override]
-    public function current(): mixed
-    {
-        return current($this->items);
-    }
-
-    /**
      * Filter the collection using a callback.
      *
-     * @param callable(TValue, TKey): bool|null $callback Filter callback
+     * @param callable(TValue, TKey): bool|null $callback
      * @return static<TKey, TValue>
      */
     public function filter(?callable $callback = null): static
     {
-        if ($this->items === []) {
+        $items = $this->all();
+        if ($items === []) {
             return static::empty();
         }
 
         if ($callback === null) {
-            $filtered = array_filter($this->items);
-
-            return new static($filtered);
+            return new static(array_filter($items));
         }
 
         $results = [];
 
-        foreach ($this->items as $key => $value) {
+        foreach ($items as $key => $value) {
             if ($callback($value, $key) === true) {
                 $results[$key] = $value;
             }
@@ -184,19 +138,20 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
      */
     public function first(?callable $callback = null, mixed $default = null): mixed
     {
-        if ($this->items === []) {
+        $items = $this->all();
+        if ($items === []) {
             return $default;
         }
 
         if ($callback === null) {
-            foreach ($this->items as $item) {
+            foreach ($items as $item) {
                 return $item;
             }
 
             return $default;
         }
 
-        foreach ($this->items as $key => $value) {
+        foreach ($items as $key => $value) {
             if ($callback($value, $key) === true) {
                 return $value;
             }
@@ -206,40 +161,11 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     }
 
     /**
-     * Determine if the collection is empty.
-     */
-    public function isEmpty(): bool
-    {
-        return $this->items === [];
-    }
-
-    /**
      * Determine if the collection is not empty.
      */
     public function isNotEmpty(): bool
     {
-        return $this->items !== [];
-    }
-
-    /**
-     * Get data for JSON serialization.
-     *
-     * @return array<TKey, TValue>
-     */
-    #[\Override]
-    public function jsonSerialize(): array
-    {
-        return $this->items;
-    }
-
-    /**
-     * Get the current key (Iterator implementation).
-     */
-    #[\Override]
-    public function key(): int|string|null
-    {
-        /** @var TKey|null */
-        return key($this->items);
+        return ! $this->isEmpty();
     }
 
     /**
@@ -250,13 +176,14 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
      */
     public function map(callable $callback): static
     {
-        if ($this->items === []) {
+        $items = $this->all();
+        if ($items === []) {
             return static::empty();
         }
 
         $results = [];
 
-        foreach ($this->items as $key => $value) {
+        foreach ($items as $key => $value) {
             $results[$key] = $callback($value, $key);
         }
 
@@ -264,84 +191,19 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     }
 
     /**
-     * Move to the next item (Iterator implementation).
-     */
-    #[\Override]
-    public function next(): void
-    {
-        next($this->items);
-    }
-
-    /**
-     * Check if offset exists (ArrayAccess implementation).
-     */
-    #[\Override]
-    public function offsetExists(mixed $offset): bool
-    {
-        return array_key_exists($offset, $this->items);
-    }
-
-    /**
-     * Get offset value (ArrayAccess implementation).
-     *
-     * @return TValue|null
-     */
-    #[\Override]
-    public function offsetGet(mixed $offset): mixed
-    {
-        return $this->items[$offset] ?? null;
-    }
-
-    /**
-     * Set offset value (ArrayAccess implementation).
-     *
-     * @param TValue $value
-     */
-    #[\Override]
-    public function offsetSet(mixed $offset, mixed $value): void
-    {
-        if ($offset === null) {
-            $this->items[] = $value;
-
-            return;
-        }
-
-        $this->items[$offset] = $value;
-    }
-
-    /**
-     * Unset offset value (ArrayAccess implementation).
-     */
-    #[\Override]
-    public function offsetUnset(mixed $offset): void
-    {
-        unset($this->items[$offset]);
-    }
-
-    /**
-     * Rewind the iterator (Iterator implementation).
-     */
-    #[\Override]
-    public function rewind(): void
-    {
-        reset($this->items);
-    }
-
-    /**
      * Get the sum of a given key (or of values themselves if $key is null).
-     *
-     * @param string|null $key Key to sum
      */
     public function sum(?string $key = null): int|float
     {
-        if ($this->items === []) {
+        $items = $this->all();
+        if ($items === []) {
             return 0;
         }
 
         $total = 0;
 
         if ($key === null) {
-            foreach ($this->items as $value) {
+            foreach ($items as $value) {
                 if (is_numeric($value)) {
                     $total += $value + 0;
                 }
@@ -350,14 +212,8 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
             return $total;
         }
 
-        foreach ($this->items as $item) {
-            $value = null;
-
-            if (is_array($item) && array_key_exists($key, $item)) {
-                $value = $item[$key];
-            } elseif (is_object($item) && isset($item->{$key})) {
-                $value = $item->{$key};
-            }
+        foreach ($items as $item) {
+            $value = $this->extractFieldValue($item, $key);
 
             if (is_numeric($value)) {
                 $total += $value + 0;
@@ -368,18 +224,9 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
     }
 
     /**
-     * Convert collection to array.
-     *
-     * @return array<TKey, TValue>
-     */
-    public function toArray(): array
-    {
-        return $this->items;
-    }
-
-    /**
      * Convert collection to JSON.
      */
+    #[\Override]
     public function toJson(int $options = 0): string
     {
         $json = json_encode(
@@ -388,15 +235,6 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
         );
 
         return $json === false ? '[]' : $json;
-    }
-
-    /**
-     * Check if the current position is valid (Iterator implementation).
-     */
-    #[\Override]
-    public function valid(): bool
-    {
-        return key($this->items) !== null;
     }
 
     /**
@@ -409,23 +247,22 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
         return $this->filter(
             static fn($item) => (
                 (is_array($item) && array_key_exists($key, $item) && $item[$key] === $value)
-            || (is_object($item) && isset($item->{$key}) && $item->{$key} === $value)
+                || (is_object($item) && isset($item->{$key}) && $item->{$key} === $value)
             ),
         );
     }
 
     /**
-     * Aggregate total and count for numeric average calculation.
-     *
+     * @param  array<TKey, TValue>  $items
      * @return array{0:int|float,1:int}
      */
-    private function aggregateAverage(?string $key): array
+    private function aggregateAverage(array $items, ?string $key): array
     {
         $total = 0;
         $count = 0;
 
-        foreach ($this->items as $item) {
-            $value = $this->averageCandidateValue($item, $key);
+        foreach ($items as $item) {
+            $value = $this->extractFieldValue($item, $key);
 
             if (! is_numeric($value)) {
                 continue;
@@ -438,10 +275,7 @@ final class Collection implements ArrayAccess, Countable, Iterator, JsonSerializ
         return [$total, $count];
     }
 
-    /**
-     * Resolve the value candidate used by avg().
-     */
-    private function averageCandidateValue(mixed $item, ?string $key): mixed
+    private function extractFieldValue(mixed $item, ?string $key): mixed
     {
         if ($key === null) {
             return $item;

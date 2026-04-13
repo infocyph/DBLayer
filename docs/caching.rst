@@ -1,8 +1,8 @@
 Caching
 ~~~~~~~
 
-DBLayer cache is strategy-based. You can keep default memory caching for local
-or switch to file strategy for persistence between requests/processes.
+DBLayer caching is powered by ``infocyph/cachelayer``.
+``DB::cache()`` returns a CacheLayer cache instance (PSR-6 + PSR-16 style API).
 
 Basic Cache
 -----------
@@ -10,19 +10,19 @@ Basic Cache
 .. code-block:: php
 
    $cache = DB::cache();
-   $cache->put('k', 'v', 60);
+   $cache->set('k', 'v', 60);
    $value = $cache->get('k');
 
-TTL is in seconds. ``0`` means store indefinitely (strategy permitting).
+TTL is in seconds. Use ``null`` for adapter default.
 
-File Strategy
--------------
+File Cache Adapter
+------------------
 
 .. code-block:: php
 
    $cache = DB::useFileCache(__DIR__ . '/../storage/cache');
 
-Use file strategy when you need durable local cache without external services.
+Use file adapter when you need durable local cache without external services.
 
 Remember Pattern
 ----------------
@@ -33,22 +33,23 @@ Remember Pattern
        return DB::table('users')->where('active', '=', 1)->get();
    }, 120);
 
-Null return values are treated as cache miss semantics in remember-style flows.
-If you need to cache null explicitly, use a sentinel value.
+The resolver return value is cached as-is, including ``null``.
 
 Tags
 ----
 
 .. code-block:: php
 
-   $tagged = $cache->tags(['users', 'tenant:10']);
-   $tagged->put('profile:1', ['id' => 1], 60);
+   $cache->setTagged('profile:1', ['id' => 1], ['users', 'tenant:10'], 60);
+
+   // Later: invalidate all items for a tag
+   $cache->invalidateTag('users');
 
 Operational Metrics
 -------------------
 
-Cache exposes hit/miss/write/delete metrics:
+CacheLayer exposes adapter-level metrics:
 
 .. code-block:: php
 
-   $stats = DB::cache()->getStats();
+   $metrics = DB::cache()->exportMetrics();
