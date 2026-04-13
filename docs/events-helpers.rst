@@ -43,6 +43,8 @@ From ``src/helpers.php``:
 - Data helpers: ``data_get()``, ``data_set()``
 - Utility helpers: ``collect()``, ``retry()``, ``rescue()``, ``blank()``, ``filled()``, ``now()``
 
+``collect()`` returns ``Infocyph\DBLayer\Support\Collection`` (ArrayKit-backed).
+
 Helper Philosophy
 -----------------
 

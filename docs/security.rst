@@ -143,6 +143,7 @@ Error and Log Hygiene
 
 - Query failure exceptions expose statement type and SQL fingerprint, not full SQL text.
 - Logger redacts binding values by default.
+- Logger can mirror structured entries to any PSR-3 backend via ``DB::setPsrLogger()``.
 
 .. code-block:: php
 

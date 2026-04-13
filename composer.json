@@ -40,7 +40,9 @@
     "require": {
         "php": "^8.4",
         "ext-pdo": "*",
-        "infocyph/cachelayer": "^1.01"
+        "infocyph/arraykit": "^4.0",
+        "infocyph/cachelayer": "^1.01",
+        "psr/log": "^3.0"
     },
     "require-dev": {
         "captainhook/captainhook": "^5.29.2",

@@ -23,6 +23,7 @@ use Infocyph\DBLayer\Support\Profiler;
 use Infocyph\DBLayer\Support\Str;
 use Infocyph\DBLayer\Support\Telemetry;
 use PDO;
+use Psr\Log\LoggerInterface as PsrLoggerInterface;
 use Throwable;
 
 /**
@@ -340,9 +341,15 @@ class DB
     /**
      * Enable facade query logger integration.
      */
-    public static function enableLogger(?string $logFile = null): void
+    public static function enableLogger(?string $logFile = null, ?PsrLoggerInterface $psrLogger = null): void
     {
-        static::logger($logFile)->enable();
+        $logger = static::logger($logFile);
+
+        if ($psrLogger !== null) {
+            $logger->setPsrLogger($psrLogger);
+        }
+
+        $logger->enable();
         static::ensureEventsHooked();
     }
 
@@ -885,6 +892,17 @@ class DB
     public static function setProfilerMaxProfiles(?int $maxProfiles): void
     {
         static::profiler()->setMaxProfiles($maxProfiles);
+    }
+
+    /**
+     * Set or clear PSR-3 logger backend for facade query logging.
+     */
+    public static function setPsrLogger(?PsrLoggerInterface $logger): Logger
+    {
+        $instance = static::logger();
+        $instance->setPsrLogger($logger);
+
+        return $instance;
     }
 
     /**

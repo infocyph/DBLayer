@@ -13,6 +13,7 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
 use Infocyph\DBLayer\Security\QueryValidator;
 use Infocyph\DBLayer\Security\Security;
 use Infocyph\DBLayer\Security\SecurityMode;
+use Psr\Log\AbstractLogger;
 
 beforeEach(function (): void {
     DB::purge();
@@ -581,6 +582,52 @@ it('redacts query bindings in logger output by default', function (string $drive
     if (is_file($logFile)) {
         @unlink($logFile);
     }
+})->with('dblayer_drivers');
+
+it('forwards logger entries to configured PSR-3 backend', function (string $driver): void {
+    $connectionName = 'regression_logger_psr3_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+    $schemaDriver = dblayerConnectionDriver($connectionName);
+    $table = dblayerTable('logger_psr_items');
+
+    DB::statement(
+        sprintf('create table %s (%s, name %s)', $table, dblayerAutoIncrementPrimaryKey($schemaDriver), dblayerStringType($schemaDriver)),
+        [],
+        $connectionName,
+    );
+    DB::table($table, $connectionName)->insert(['name' => 'seed']);
+
+    $records = new \ArrayObject();
+    $psrLogger = new class($records) extends AbstractLogger {
+        public function __construct(private \ArrayObject $records) {}
+
+        public function log($level, \Stringable|string $message, array $context = []): void
+        {
+            $this->records->append([
+                'level' => (string) $level,
+                'message' => (string) $message,
+                'context' => $context,
+            ]);
+        }
+    };
+
+    DB::enableLogger(null, $psrLogger);
+    DB::table($table, $connectionName)
+        ->whereRaw('name = ?', ['secret-token'])
+        ->limit(1)
+        ->get();
+
+    $lastRecord = $records[(int) ($records->count() - 1)] ?? null;
+    $serializedContext = json_encode(is_array($lastRecord) ? ($lastRecord['context'] ?? []) : []) ?: '';
+
+    expect($records->count())->toBeGreaterThan(0);
+    expect(is_array($lastRecord))->toBeTrue();
+    expect($lastRecord['level'] ?? null)->toBe('info');
+    expect($serializedContext)->toContain('[redacted:string:12]');
+    expect($serializedContext)->not->toContain('secret-token');
+
+    DB::setPsrLogger(null);
+    DB::disableLogger();
 })->with('dblayer_drivers');
 
 it('caps telemetry and profiler buffers to configured limits', function (string $driver): void {

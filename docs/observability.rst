@@ -20,8 +20,19 @@ Logger
    DB::select('select 1');
    DB::disableLogger();
 
-Logger writes structured entries to file and is intended for operational
-troubleshooting. Binding values are redacted by default.
+Logger writes structured entries to file and can also forward entries to any
+PSR-3 compatible logger backend. Binding values are redacted by default.
+
+.. code-block:: php
+
+   use Psr\Log\LoggerInterface;
+
+   /** @var LoggerInterface $psrLogger */
+   DB::enableLogger('/tmp/dblayer.log', $psrLogger);
+
+   // Or configure backend separately:
+   // DB::setPsrLogger($psrLogger);
+   // DB::enableLogger('/tmp/dblayer.log');
 
 .. code-block:: php
 
