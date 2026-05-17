@@ -7,6 +7,10 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
 
 require __DIR__ . '/../vendor/autoload.php';
 
+$writeLine = static function (string $message): void {
+    fwrite(STDOUT, $message . PHP_EOL);
+};
+
 DB::purge();
 
 DB::addConnection([
@@ -26,7 +30,7 @@ $rows = DB::withQueryRetryPolicy(
     static fn(): array => DB::select('select 1 as ok'),
 );
 
-echo 'Rows: ' . count($rows) . PHP_EOL;
+$writeLine('Rows: ' . count($rows));
 
 try {
     DB::withQueryDeadline(
@@ -34,10 +38,10 @@ try {
         static fn(): mixed => DB::select('select 1'),
     );
 } catch (ConnectionException $e) {
-    echo 'Deadline triggered: ' . $e->getMessage() . PHP_EOL;
+    $writeLine('Deadline triggered: ' . $e->getMessage());
 }
 
 $telemetry = DB::flushTelemetry();
-echo 'Collected queries: ' . ($telemetry['summary']['query_count'] ?? 0) . PHP_EOL;
+$writeLine('Collected queries: ' . ($telemetry['summary']['query_count'] ?? 0));
 
 DB::disableTelemetry();

@@ -44,10 +44,10 @@ final readonly class QueryExecuted
     public function toArray(): array
     {
         return [
-            'sql'           => $this->sql,
-            'bindings'      => $this->bindings,
-            'time'          => $this->time,
-            'connection'    => $this->connection->getDriverName(),
+            'sql' => $this->sql,
+            'bindings' => $this->bindings,
+            'time' => $this->time,
+            'connection' => $this->connection->getDriverName(),
             'rows_affected' => $this->rowsAffected,
         ];
     }

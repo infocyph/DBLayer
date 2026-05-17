@@ -20,7 +20,7 @@ final class SQLiteGrammar extends Grammar
     /**
      * Compile an INSERT OR IGNORE statement.
      *
-     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param array<int,array<string,mixed>>|array<string,mixed> $values
      */
     public function compileInsertOrIgnore(QueryBuilder $query, array $values): string
     {
@@ -30,7 +30,7 @@ final class SQLiteGrammar extends Grammar
     /**
      * Compile an INSERT OR REPLACE statement.
      *
-     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param array<int,array<string,mixed>>|array<string,mixed> $values
      */
     public function compileInsertOrReplace(QueryBuilder $query, array $values): string
     {
@@ -40,7 +40,7 @@ final class SQLiteGrammar extends Grammar
     /**
      * Compile a REPLACE statement.
      *
-     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param array<int,array<string,mixed>>|array<string,mixed> $values
      */
     public function compileReplace(QueryBuilder $query, array $values): string
     {
@@ -53,8 +53,7 @@ final class SQLiteGrammar extends Grammar
     #[\Override]
     public function compileTruncate(QueryBuilder $query): string
     {
-        $components = $query->getComponents();
-        $table      = $this->wrapTable($components['from']);
+        $table = $this->resolveMutationTable($query);
 
         // SQLite doesn't have TRUNCATE, use DELETE instead.
         return "delete from {$table}";
@@ -72,7 +71,7 @@ final class SQLiteGrammar extends Grammar
     /**
      * Compile a date-based where clause.
      *
-     * @param  array{column:string,operator:string,value:mixed}  $where
+     * @param array{column:string,operator:string,value:mixed} $where
      */
     public function whereDate(QueryBuilder $query, array $where): string
     {
@@ -85,7 +84,7 @@ final class SQLiteGrammar extends Grammar
     /**
      * Compile a day-based where clause.
      *
-     * @param  array{column:string,operator:string,value:mixed}  $where
+     * @param array{column:string,operator:string,value:mixed} $where
      */
     public function whereDay(QueryBuilder $query, array $where): string
     {
@@ -98,7 +97,7 @@ final class SQLiteGrammar extends Grammar
     /**
      * Compile a month-based where clause.
      *
-     * @param  array{column:string,operator:string,value:mixed}  $where
+     * @param array{column:string,operator:string,value:mixed} $where
      */
     public function whereMonth(QueryBuilder $query, array $where): string
     {
@@ -111,7 +110,7 @@ final class SQLiteGrammar extends Grammar
     /**
      * Compile a year-based where clause.
      *
-     * @param  array{column:string,operator:string,value:mixed}  $where
+     * @param array{column:string,operator:string,value:mixed} $where
      */
     public function whereYear(QueryBuilder $query, array $where): string
     {

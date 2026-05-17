@@ -40,7 +40,7 @@ final class Collection extends ArrayKitCollection implements \Stringable
             return new static(iterator_to_array($items));
         }
 
-        if (! is_array($items)) {
+        if (!is_array($items)) {
             return new static([$items]);
         }
 
@@ -68,8 +68,6 @@ final class Collection extends ArrayKitCollection implements \Stringable
 
     /**
      * Chunk the collection into smaller collections.
-     *
-     * @return static<int, static<TKey, TValue>>
      */
     public function chunk(int $size): static
     {
@@ -99,13 +97,17 @@ final class Collection extends ArrayKitCollection implements \Stringable
             return in_array($key, $this->all(), true);
         }
 
+        if (!is_string($key) && !is_int($key)) {
+            return false;
+        }
+
         return $this->where((string) $key, $value)->isNotEmpty();
     }
 
     /**
      * Filter the collection using a callback.
      *
-     * @param callable(TValue, TKey): bool|null $callback
+     * @param callable(TValue, int|string): bool|null $callback
      * @return static<TKey, TValue>
      */
     public function filter(?callable $callback = null): static
@@ -133,7 +135,7 @@ final class Collection extends ArrayKitCollection implements \Stringable
     /**
      * Get the first item, optionally matching a callback.
      *
-     * @param callable(TValue, TKey): bool|null $callback
+     * @param callable(TValue, int|string): bool|null $callback
      * @return TValue|mixed
      */
     public function first(?callable $callback = null, mixed $default = null): mixed
@@ -147,8 +149,6 @@ final class Collection extends ArrayKitCollection implements \Stringable
             foreach ($items as $item) {
                 return $item;
             }
-
-            return $default;
         }
 
         foreach ($items as $key => $value) {
@@ -165,13 +165,13 @@ final class Collection extends ArrayKitCollection implements \Stringable
      */
     public function isNotEmpty(): bool
     {
-        return ! $this->isEmpty();
+        return !$this->isEmpty();
     }
 
     /**
      * Map over the collection.
      *
-     * @param callable(TValue, TKey): mixed $callback
+     * @param callable(TValue, int|string): mixed $callback
      * @return static<TKey, mixed>
      */
     public function map(callable $callback): static
@@ -253,7 +253,7 @@ final class Collection extends ArrayKitCollection implements \Stringable
     }
 
     /**
-     * @param  array<TKey, TValue>  $items
+     * @param array<int|string, mixed> $items
      * @return array{0:int|float,1:int}
      */
     private function aggregateAverage(array $items, ?string $key): array
@@ -264,7 +264,7 @@ final class Collection extends ArrayKitCollection implements \Stringable
         foreach ($items as $item) {
             $value = $this->extractFieldValue($item, $key);
 
-            if (! is_numeric($value)) {
+            if (!is_numeric($value)) {
                 continue;
             }
 

@@ -27,7 +27,7 @@ final readonly class QueryExecuting
         public Connection $connection,
         ?float $time = null,
     ) {
-        $this->time       = $time ?? microtime(true);
+        $this->time = $time ?? microtime(true);
     }
 
     /**
@@ -43,10 +43,10 @@ final readonly class QueryExecuting
     public function toArray(): array
     {
         return [
-            'sql'        => $this->sql,
-            'bindings'   => $this->bindings,
+            'sql' => $this->sql,
+            'bindings' => $this->bindings,
             'connection' => $this->connection->getDriverName(),
-            'time'       => $this->time,
+            'time' => $this->time,
         ];
     }
 }

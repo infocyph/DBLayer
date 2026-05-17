@@ -63,11 +63,11 @@ final class CursorPaginator extends AbstractPaginator
     public function meta(): array
     {
         return [
-            'cursor'      => $this->cursor(),
+            'cursor' => $this->cursor(),
             'next_cursor' => $this->nextCursor(),
-            'per_page'    => $this->perPage(),
-            'count'       => $this->count(),
-            'has_more'    => $this->hasMorePages(),
+            'per_page' => $this->perPage(),
+            'count' => $this->count(),
+            'has_more' => $this->hasMorePages(),
         ];
     }
 

@@ -8,9 +8,13 @@ namespace Infocyph\DBLayer\Query\Core;
 
 enum QueryType: string
 {
-    case DELETE   = 'delete';
-    case INSERT   = 'insert';
-    case SELECT   = 'select';
+    case DELETE = 'delete';
+
+    case INSERT = 'insert';
+
+    case SELECT = 'select';
+
     case TRUNCATE = 'truncate';
-    case UPDATE   = 'update';
+
+    case UPDATE = 'update';
 }

@@ -45,13 +45,13 @@ final class SimplePaginator extends AbstractPaginator
     {
         return [
             'current_page' => $this->currentPage(),
-            'per_page'     => $this->perPage(),
-            'total'        => null,
-            'last_page'    => null,
-            'from'         => $this->firstItem(),
-            'to'           => $this->lastItem(),
-            'count'        => $this->count(),
-            'has_more'     => $this->hasMorePages(),
+            'per_page' => $this->perPage(),
+            'total' => null,
+            'last_page' => null,
+            'from' => $this->firstItem(),
+            'to' => $this->lastItem(),
+            'count' => $this->count(),
+            'has_more' => $this->hasMorePages(),
         ];
     }
 

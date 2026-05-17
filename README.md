@@ -289,14 +289,19 @@ Hardening controls:
 - ext-pdo_pgsql (for PostgreSQL)
 - ext-pdo_sqlite (for SQLite)
 
-## License
+## Security
 
-MIT License
+Protected by [PHPForge](https://github.com/infocyph/PHPForge) — an automated quality and security gate for PHP projects.
 
-## Author
+---
 
-Hasan - [Infocyph](https://infocyph.com)
-
-## Contributing
-
-Contributions are welcome via pull requests and issues.
+<div align="center">
+  <sub><strong>Made with ❤️ for the PHP community</strong></sub><br />
+  <sub><a href="LICENSE">MIT Licensed</a></sub><br />
+  <a href="https://docs.infocyph.com/projects/DBLayer">Documentation</a> •
+  <a href="SECURITY.md">Security</a> •
+  <a href="CODE_OF_CONDUCT.md">Code of Conduct</a> •
+  <a href="CONTRIBUTING.md">Contributing</a> •
+  <a href="https://github.com/infocyph/DBLayer/issues">Report Bug</a> •
+  <a href="https://github.com/infocyph/DBLayer/issues">Request Feature</a>
+</div>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection;
 
+use Infocyph\DBLayer\Support\Numeric;
 use Throwable;
 
 /**
@@ -26,7 +27,7 @@ final class HealthCheck
         'check_interval' => 30,
         'max_latency_ms' => 1_000,
         'max_error_rate' => 0.1,
-        'sample_size'    => 100,
+        'sample_size' => 100,
     ];
 
     /**
@@ -50,13 +51,13 @@ final class HealthCheck
      * }
      */
     private array $metrics = [
-        'last_check'    => null,
-        'is_healthy'    => true,
-        'latency_ms'    => 0.0,
-        'error_rate'    => 0.0,
-        'total_checks'  => 0,
+        'last_check' => null,
+        'is_healthy' => true,
+        'latency_ms' => 0.0,
+        'error_rate' => 0.0,
+        'total_checks' => 0,
         'failed_checks' => 0,
-        'last_error'    => null,
+        'last_error' => null,
     ];
 
     /**
@@ -69,7 +70,7 @@ final class HealthCheck
     /**
      * Create a new health check instance.
      *
-     * @param  array<string,mixed>  $config
+     * @param array<string,mixed> $config
      */
     public function __construct(/**
      * Connection to monitor.
@@ -80,10 +81,10 @@ final class HealthCheck
         $merged = array_merge(self::DEFAULTS, $config);
 
         $this->config = [
-            'check_interval' => (int) $merged['check_interval'],
-            'max_latency_ms' => (int) $merged['max_latency_ms'],
-            'max_error_rate' => (float) $merged['max_error_rate'],
-            'sample_size'    => (int) $merged['sample_size'],
+            'check_interval' => Numeric::arrayInt($merged, 'check_interval', self::DEFAULTS['check_interval']),
+            'max_latency_ms' => Numeric::arrayInt($merged, 'max_latency_ms', self::DEFAULTS['max_latency_ms']),
+            'max_error_rate' => Numeric::arrayFloat($merged, 'max_error_rate', self::DEFAULTS['max_error_rate']),
+            'sample_size' => Numeric::arrayInt($merged, 'sample_size', self::DEFAULTS['sample_size']),
         ];
     }
 
@@ -132,7 +133,7 @@ final class HealthCheck
         } catch (Throwable $e) {
             $this->metrics['failed_checks']++;
             $this->metrics['is_healthy'] = false;
-            $this->metrics['last_error']  = $e->getMessage();
+            $this->metrics['last_error'] = $e->getMessage();
 
             return false;
         }
@@ -186,7 +187,7 @@ final class HealthCheck
         $durations = array_column($this->samples, 'duration');
         sort($durations);
 
-        $count     = count($this->samples);
+        $count = count($this->samples);
         $successes = 0;
 
         foreach ($this->samples as $sample) {
@@ -201,9 +202,9 @@ final class HealthCheck
             'avg_duration' => round($avg, 4),
             'min_duration' => round(min($durations), 4),
             'max_duration' => round(max($durations), 4),
-            'p50_duration' => round($this->percentile($durations, 50.0), 4),
-            'p95_duration' => round($this->percentile($durations, 95.0), 4),
-            'p99_duration' => round($this->percentile($durations, 99.0), 4),
+            'p50_duration' => round(Numeric::percentile($durations, 50.0), 4),
+            'p95_duration' => round(Numeric::percentile($durations, 95.0), 4),
+            'p99_duration' => round(Numeric::percentile($durations, 99.0), 4),
             'success_rate' => round($successes / $count, 4),
         ];
     }
@@ -222,11 +223,11 @@ final class HealthCheck
     public function getReport(): array
     {
         return [
-            'status'           => $this->getStatus(),
-            'metrics'          => $this->getMetrics(),
-            'performance'      => $this->getPerformanceStats(),
+            'status' => $this->getStatus(),
+            'metrics' => $this->getMetrics(),
+            'performance' => $this->getPerformanceStats(),
             'connection_stats' => $this->connection->getStats(),
-            'config'           => $this->config,
+            'config' => $this->config,
         ];
     }
 
@@ -235,7 +236,7 @@ final class HealthCheck
      */
     public function getStatus(): string
     {
-        if (! $this->metrics['is_healthy']) {
+        if (!$this->metrics['is_healthy']) {
             return 'unhealthy';
         }
 
@@ -262,13 +263,13 @@ final class HealthCheck
     /**
      * Record query performance sample.
      *
-     * @param  float  $duration  Duration in milliseconds.
+     * @param float $duration Duration in milliseconds.
      */
     public function recordSample(float $duration, bool $success): void
     {
         $this->samples[] = [
-            'duration'  => $duration,
-            'success'   => $success,
+            'duration' => $duration,
+            'success' => $success,
             'timestamp' => microtime(true),
         ];
 
@@ -284,44 +285,16 @@ final class HealthCheck
     public function reset(): void
     {
         $this->metrics = [
-            'last_check'    => null,
-            'is_healthy'    => true,
-            'latency_ms'    => 0.0,
-            'error_rate'    => 0.0,
-            'total_checks'  => 0,
+            'last_check' => null,
+            'is_healthy' => true,
+            'latency_ms' => 0.0,
+            'error_rate' => 0.0,
+            'total_checks' => 0,
             'failed_checks' => 0,
-            'last_error'    => null,
+            'last_error' => null,
         ];
 
         $this->samples = [];
-    }
-
-    /**
-     * Calculate percentile value.
-     *
-     * @param  list<float>  $sorted
-     */
-    private function percentile(array $sorted, float $percentile): float
-    {
-        $count = count($sorted);
-
-        if ($count === 0) {
-            return 0.0;
-        }
-
-        $index = ($percentile / 100.0) * ($count - 1);
-        $lower = (int) floor($index);
-        $upper = (int) ceil($index);
-
-        if ($lower === $upper) {
-            return (float) $sorted[$lower];
-        }
-
-        $lowerValue = (float) $sorted[$lower];
-        $upperValue = (float) $sorted[$upper];
-        $fraction   = $index - $lower;
-
-        return $lowerValue + ($upperValue - $lowerValue) * $fraction;
     }
 
     /**

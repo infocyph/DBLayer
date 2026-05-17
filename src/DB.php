@@ -18,6 +18,7 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository;
 use Infocyph\DBLayer\Query\ResultProcessor;
+use Infocyph\DBLayer\Support\ArrayNormalizer;
 use Infocyph\DBLayer\Support\Logger;
 use Infocyph\DBLayer\Support\Profiler;
 use Infocyph\DBLayer\Support\Str;
@@ -44,6 +45,7 @@ class DB
      * Shared cache manager instance.
      */
     protected static ?CacheInterface $cache = null;
+
     /**
      * Original configuration objects keyed by connection name.
      *
@@ -157,6 +159,8 @@ class DB
 
     /**
      * Dynamically pass methods to the default connection.
+     *
+     * @param array<int,mixed> $parameters
      */
     public static function __callStatic(string $method, array $parameters): mixed
     {
@@ -166,14 +170,14 @@ class DB
     /**
      * Add a database connection configuration (and instantiate shared Connection).
      *
-     * @param  array<string,mixed>|ConnectionConfig  $config
+     * @param array<string,mixed>|ConnectionConfig $config
      */
     public static function addConnection(array|ConnectionConfig $config, string $name = 'default'): Connection
     {
         $configObject = static::normalizeConfig($config);
 
         static::$connectionConfigs[$name] = $configObject;
-        static::$connections[$name]       = new Connection($configObject);
+        static::$connections[$name] = new Connection($configObject);
         static::$pool?->addConfig($name, $configObject);
 
         if (static::$defaultConnection === null) {
@@ -186,7 +190,7 @@ class DB
     /**
      * Execute multiple queries in sequence.
      *
-     * @param  list<array{0:string,1:array<int,mixed>|null}>  $queries
+     * @param list<array{0:string,1:array<int,mixed>|null}> $queries
      * @return list<array<int,mixed>>
      */
     public static function batch(array $queries, ?string $connection = null): array
@@ -195,7 +199,7 @@ class DB
 
         foreach ($queries as $query) {
             [$sql, $bindings] = $query;
-            $results[]        = static::select($sql, $bindings ?? [], $connection);
+            $results[] = static::select($sql, $bindings ?? [], $connection);
         }
 
         return $results;
@@ -261,7 +265,7 @@ class DB
      */
     public static function connection(?string $name = null, bool $fresh = false): Connection
     {
-        $name = static::resolveConnectionName($name);
+        $name = self::resolveConnectionName($name);
 
         $config = static::$connectionConfigs[$name];
 
@@ -271,7 +275,7 @@ class DB
         }
 
         // Shared singleton: lazily (re)instantiate if missing.
-        if (! isset(static::$connections[$name])) {
+        if (!isset(static::$connections[$name])) {
             static::$connections[$name] = new Connection($config);
         }
 
@@ -281,19 +285,19 @@ class DB
     /**
      * Execute a delete statement.
      *
-     * @param  array<int,mixed>  $bindings
+     * @param array<int,mixed> $bindings
      *
      * @throws ConnectionException
      */
     public static function delete(string $query, array $bindings = [], ?string $connection = null): int
     {
-        $conn = static::connection($connection);
-        $startedAt = microtime(true);
-        $result = $conn->delete($query, $bindings);
-
-        static::trackRawQueryDuration($conn, $query, $bindings, $result, $startedAt);
-
-        return $result;
+        return self::executeTimedRaw(
+            $query,
+            $bindings,
+            $connection,
+            static fn(Connection $conn): int => $conn->delete($query, $bindings),
+            static fn(int $result): int => $result,
+        );
     }
 
     /**
@@ -350,7 +354,7 @@ class DB
         }
 
         $logger->enable();
-        static::ensureEventsHooked();
+        self::ensureEventsHooked();
     }
 
     /**
@@ -359,7 +363,7 @@ class DB
     public static function enableProfiler(): void
     {
         static::profiler()->enable();
-        static::ensureEventsHooked();
+        self::ensureEventsHooked();
     }
 
     /**
@@ -368,7 +372,7 @@ class DB
     public static function enableQueryLog(): void
     {
         static::$loggingQueries = true;
-        static::ensureEventsHooked();
+        self::ensureEventsHooked();
     }
 
     /**
@@ -392,7 +396,7 @@ class DB
     /**
      * Export and clear telemetry buffers.
      *
-     * @param  null|callable(array<string,mixed>):void  $exporter
+     * @param null|callable(array<string,mixed>):void $exporter
      * @return array<string,mixed>
      */
     public static function flushTelemetry(?callable $exporter = null): array
@@ -403,7 +407,7 @@ class DB
     /**
      * Export and clear telemetry buffers as OpenTelemetry-like payload.
      *
-     * @param  null|callable(array<string,mixed>):void  $exporter
+     * @param null|callable(array<string,mixed>):void $exporter
      * @return array<string,mixed>
      */
     public static function flushTelemetryOtel(
@@ -480,7 +484,7 @@ class DB
      */
     public static function getQueryLog(): array
     {
-        return static::orderedQueryLog();
+        return self::orderedQueryLog();
     }
 
     /**
@@ -496,7 +500,7 @@ class DB
     /**
      * Apply production-safe security defaults quickly.
      *
-     * @param  array<string,mixed>  $securityOverrides
+     * @param array<string,mixed> $securityOverrides
      */
     public static function hardenProduction(array $securityOverrides = [], bool $refreshExisting = true): void
     {
@@ -537,7 +541,7 @@ class DB
     /**
      * Execute an insert statement.
      *
-     * @param  array<int,mixed>  $bindings
+     * @param array<int,mixed> $bindings
      *
      * @throws ConnectionException
      */
@@ -547,7 +551,7 @@ class DB
         $startedAt = microtime(true);
         $result = $conn->insert($query, $bindings);
 
-        static::trackRawQueryDuration($conn, $query, $bindings, $result ? 1 : 0, $startedAt);
+        self::trackRawQueryDuration($conn, $query, $bindings, $result ? 1 : 0, $startedAt);
 
         return $result;
     }
@@ -572,12 +576,12 @@ class DB
      *  - connection (string|null)
      *  - rows (int|null)
      *
-     * @param  callable(array<string,mixed>):void  $callback
+     * @param callable(array<string,mixed>):void $callback
      */
     public static function listen(callable $callback): void
     {
         static::$listeners[] = $callback;
-        static::ensureEventsHooked();
+        self::ensureEventsHooked();
     }
 
     /**
@@ -619,7 +623,7 @@ class DB
     /**
      * Get shared connection pool instance.
      *
-     * @param  array<string,int>  $poolConfig
+     * @param array<string,int> $poolConfig
      */
     public static function pool(array $poolConfig = []): Pool
     {
@@ -637,7 +641,7 @@ class DB
     /**
      * Get shared pool manager.
      *
-     * @param  array<string,int>  $poolConfig
+     * @param array<string,int> $poolConfig
      */
     public static function poolManager(array $poolConfig = []): PoolManager
     {
@@ -667,24 +671,24 @@ class DB
     {
         static::$pool?->closeAll();
 
-        static::$connections        = [];
-        static::$connectionConfigs  = [];
-        static::$defaultConnection  = null;
-        static::$queryLog           = [];
-        static::$queryLogCount      = 0;
-        static::$queryLogStart      = 0;
-        static::$listeners          = [];
-        static::$loggingQueries     = false;
-        static::$eventsHooked       = false;
+        static::$connections = [];
+        static::$connectionConfigs = [];
+        static::$defaultConnection = null;
+        static::$queryLog = [];
+        static::$queryLogCount = 0;
+        static::$queryLogStart = 0;
+        static::$listeners = [];
+        static::$loggingQueries = false;
+        static::$eventsHooked = false;
         static::$maxQueryLogEntries = null;
-        static::$cache              = null;
-        static::$logger             = null;
-        static::$pool               = null;
-        static::$poolManager        = null;
-        static::$profiler           = null;
-        static::$resultProcessor    = null;
-        static::$securityDefaults   = null;
-        static::$queryTimeMonitors  = [];
+        static::$cache = null;
+        static::$logger = null;
+        static::$pool = null;
+        static::$poolManager = null;
+        static::$profiler = null;
+        static::$resultProcessor = null;
+        static::$securityDefaults = null;
+        static::$queryTimeMonitors = [];
         Telemetry::clear();
     }
 
@@ -708,7 +712,7 @@ class DB
      */
     public static function raw(mixed $value): mixed
     {
-        return static::connection()->raw((string) $value);
+        return static::connection()->raw(self::stringifyScalar($value));
     }
 
     /**
@@ -722,7 +726,7 @@ class DB
     {
         $name ??= static::$defaultConnection;
 
-        if ($name === null || ! isset(static::$connectionConfigs[$name])) {
+        if ($name === null || !isset(static::$connectionConfigs[$name])) {
             throw ConnectionException::connectionNotFound($name ?? 'null');
         }
 
@@ -744,7 +748,7 @@ class DB
     public static function repository(string $table, ?string $connection = null): Repository
     {
         $conn = static::connection($connection);
-        $normalizedTable = static::normalizeTableName($table);
+        $normalizedTable = self::normalizeTableName($table);
 
         return new class ($conn, $normalizedTable, static::resultProcessor()) extends Repository {
             public function __construct(Connection $connection, private readonly string $table, ResultProcessor $results)
@@ -790,44 +794,44 @@ class DB
     /**
      * Execute a query and return the first scalar value.
      *
-     * @param  array<int,mixed>  $bindings
+     * @param array<int,mixed> $bindings
      *
      * @throws ConnectionException
      */
     public static function scalar(string $query, array $bindings = [], ?string $connection = null): mixed
     {
-        $conn = static::connection($connection);
-        $startedAt = microtime(true);
-        $result = $conn->scalar($query, $bindings);
-
-        static::trackRawQueryDuration($conn, $query, $bindings, null, $startedAt);
-
-        return $result;
+        return self::executeTimedRaw(
+            $query,
+            $bindings,
+            $connection,
+            static fn(Connection $conn): mixed => $conn->scalar($query, $bindings),
+        );
     }
 
     /**
      * Execute a select statement.
      *
-     * @param  array<int,mixed>  $bindings
+     * @param array<int,mixed> $bindings
      * @return list<array<string,mixed>>
      *
      * @throws ConnectionException
      */
     public static function select(string $query, array $bindings = [], ?string $connection = null): array
     {
-        $conn = static::connection($connection);
-        $startedAt = microtime(true);
-        $result = $conn->select($query, $bindings);
+        $result = self::executeTimedRaw(
+            $query,
+            $bindings,
+            $connection,
+            static fn(Connection $conn): array => $conn->select($query, $bindings),
+        );
 
-        static::trackRawQueryDuration($conn, $query, $bindings, null, $startedAt);
-
-        return $result;
+        return array_values($result);
     }
 
     /**
      * Execute a select statement and return the first result.
      *
-     * @param  array<int,mixed>  $bindings
+     * @param array<int,mixed> $bindings
      *
      * @throws ConnectionException
      */
@@ -841,20 +845,19 @@ class DB
     /**
      * Execute a query and return all result sets.
      *
-     * @param  array<int,mixed>  $bindings
+     * @param array<int,mixed> $bindings
      * @return list<list<array<string,mixed>>>
      *
      * @throws ConnectionException
      */
     public static function selectResultSets(string $query, array $bindings = [], ?string $connection = null): array
     {
-        $conn = static::connection($connection);
-        $startedAt = microtime(true);
-        $result = $conn->selectResultSets($query, $bindings);
-
-        static::trackRawQueryDuration($conn, $query, $bindings, null, $startedAt);
-
-        return $result;
+        return self::executeTimedRaw(
+            $query,
+            $bindings,
+            $connection,
+            static fn(Connection $conn): array => $conn->selectResultSets($query, $bindings),
+        );
     }
 
     /**
@@ -883,7 +886,7 @@ class DB
     public static function setMaxQueryLogEntries(?int $max): void
     {
         static::$maxQueryLogEntries = $max !== null && $max > 0 ? $max : null;
-        static::reconfigureQueryLogStorage();
+        self::reconfigureQueryLogStorage();
     }
 
     /**
@@ -910,7 +913,7 @@ class DB
      *
      * Values set here are enforced over per-connection security settings.
      *
-     * @param  array<string,mixed>  $security
+     * @param array<string,mixed> $security
      */
     public static function setSecurityDefaults(array $security, bool $refreshExisting = true): void
     {
@@ -922,7 +925,7 @@ class DB
         ]);
 
         static::$securityDefaults = $security;
-        static::applySecurityDefaultsToRegisteredConnections($refreshExisting);
+        self::applySecurityDefaultsToRegisteredConnections($refreshExisting);
     }
 
     /**
@@ -946,7 +949,7 @@ class DB
     /**
      * Get percentile report for query durations currently buffered in telemetry.
      *
-     * @param  list<int|float>  $percentiles
+     * @param list<int|float> $percentiles
      * @return array<string,mixed>
      */
     public static function slowQueryReport(array $percentiles = [50, 90, 95, 99], ?float $minimumMs = null): array
@@ -957,7 +960,7 @@ class DB
     /**
      * Execute a statement (INSERT/UPDATE/DELETE/DDL).
      *
-     * @param  array<int,mixed>  $bindings
+     * @param array<int,mixed> $bindings
      *
      * @throws ConnectionException
      */
@@ -967,7 +970,7 @@ class DB
         $startedAt = microtime(true);
         $conn->execute($query, $bindings);
 
-        static::trackRawQueryDuration($conn, $query, $bindings, null, $startedAt);
+        self::trackRawQueryDuration($conn, $query, $bindings, null, $startedAt);
 
         return true;
     }
@@ -990,11 +993,11 @@ class DB
         $conn = static::connection($connection);
 
         return [
-            'driver'            => $conn->getDriverName(),
-            'database'          => $conn->getDatabaseName(),
-            'prefix'            => $conn->getTablePrefix(),
+            'driver' => $conn->getDriverName(),
+            'database' => $conn->getDatabaseName(),
+            'prefix' => $conn->getTablePrefix(),
             'transaction_level' => $conn->transactionLevel(),
-            'total_queries'     => static::$queryLogCount,
+            'total_queries' => static::$queryLogCount,
         ];
     }
 
@@ -1098,31 +1101,34 @@ class DB
      */
     public static function unprepared(string $query, ?string $connection = null): bool
     {
-        $conn = static::connection($connection);
-        $startedAt = microtime(true);
-        $conn->execute($query);
+        return self::executeTimedRaw(
+            $query,
+            [],
+            $connection,
+            static function (Connection $conn) use ($query): bool {
+                $conn->execute($query);
 
-        static::trackRawQueryDuration($conn, $query, [], null, $startedAt);
-
-        return true;
+                return true;
+            },
+        );
     }
 
     /**
      * Execute an update statement.
      *
-     * @param  array<int,mixed>  $bindings
+     * @param array<int,mixed> $bindings
      *
      * @throws ConnectionException
      */
     public static function update(string $query, array $bindings = [], ?string $connection = null): int
     {
-        $conn = static::connection($connection);
-        $startedAt = microtime(true);
-        $result = $conn->update($query, $bindings);
-
-        static::trackRawQueryDuration($conn, $query, $bindings, $result, $startedAt);
-
-        return $result;
+        return self::executeTimedRaw(
+            $query,
+            $bindings,
+            $connection,
+            static fn(Connection $conn): int => $conn->update($query, $bindings),
+            static fn(int $result): int => $result,
+        );
     }
 
     /**
@@ -1140,9 +1146,11 @@ class DB
      */
     public static function version(?string $connection = null): string
     {
-        return (string) static::connection($connection)
+        $version = static::connection($connection)
           ->getPdo()
           ->getAttribute(PDO::ATTR_SERVER_VERSION);
+
+        return self::stringifyScalar($version);
     }
 
     /**
@@ -1166,7 +1174,7 @@ class DB
             'callback' => $callback,
         ];
 
-        static::ensureEventsHooked();
+        self::ensureEventsHooked();
     }
 
     /**
@@ -1178,7 +1186,7 @@ class DB
         callable $callback,
         ?string $connection = null,
     ): mixed {
-        $name = static::resolveConnectionName($connection);
+        $name = self::resolveConnectionName($connection);
 
         return static::poolManager()->using(
             $name,
@@ -1235,7 +1243,7 @@ class DB
     /**
      * Normalize a connection configuration into a ConnectionConfig instance.
      *
-     * @param  array<string,mixed>|ConnectionConfig  $config
+     * @param array<string,mixed>|ConnectionConfig $config
      */
     protected static function normalizeConfig(array|ConnectionConfig $config): ConnectionConfig
     {
@@ -1246,15 +1254,13 @@ class DB
 
             return $config->with(
                 'security',
-                static::mergeSecurityDefaults($config->securityConfig()),
+                self::mergeSecurityDefaults($config->securityConfig()),
             );
         }
 
         if (static::$securityDefaults !== null) {
-            $security = isset($config['security']) && is_array($config['security'])
-                ? $config['security']
-                : [];
-            $config['security'] = static::mergeSecurityDefaults($security);
+            $security = self::normalizeStringKeyArray($config['security'] ?? []);
+            $config['security'] = self::mergeSecurityDefaults($security);
         }
 
         return ConnectionConfig::fromArray($config);
@@ -1263,7 +1269,7 @@ class DB
     /**
      * Append one query-log entry (supports bounded ring-buffer mode).
      *
-     * @param  array<string,mixed>  $entry
+     * @param array<string,mixed> $entry
      */
     private static function appendQueryLogEntry(array $entry): void
     {
@@ -1300,13 +1306,13 @@ class DB
         foreach (static::$connectionConfigs as $name => $config) {
             $normalized = $config->with(
                 'security',
-                static::mergeSecurityDefaults($config->securityConfig()),
+                self::mergeSecurityDefaults($config->securityConfig()),
             );
 
             static::$connectionConfigs[$name] = $normalized;
             static::$pool?->addConfig($name, $normalized);
 
-            if ($refreshExisting || ! isset(static::$connections[$name])) {
+            if ($refreshExisting || !isset(static::$connections[$name])) {
                 static::$connections[$name] = new Connection($normalized);
             }
         }
@@ -1326,20 +1332,25 @@ class DB
     private static function buildQueryEventPayload(QueryExecuted $event): array
     {
         $connectionName = array_find_key(static::$connections, fn($connection) => $connection === $event->connection);
+        $bindings = [];
+
+        foreach ($event->bindings as $binding) {
+            $bindings[] = $binding;
+        }
 
         return [
-            'query'      => $event->sql,
-            'bindings'   => $event->bindings,
-            'time'       => $event->time, // ms
+            'query' => $event->sql,
+            'bindings' => $bindings,
+            'time' => $event->time, // ms
             'connection' => $connectionName,
-            'rows'       => $event->rowsAffected,
+            'rows' => $event->rowsAffected,
         ];
     }
 
     /**
      * Notify facade listeners for one query event payload.
      *
-     * @param  array<string,mixed>  $payload
+     * @param array<string,mixed> $payload
      */
     private static function dispatchQueryPayloadToListeners(array $payload): void
     {
@@ -1361,7 +1372,7 @@ class DB
         }
 
         static::$eventsHooked = true;
-        static::registerEventBridges();
+        self::registerEventBridges();
     }
 
     /**
@@ -1382,11 +1393,40 @@ class DB
 
             if ($monitor['cumulative_ms'] >= $monitor['threshold_ms']) {
                 $monitor['fired'] = true;
-                static::invokeQueryTimeMonitor($monitor['callback'], $event);
+                self::invokeQueryTimeMonitor($monitor['callback'], $event);
             }
 
             static::$queryTimeMonitors[$index] = $monitor;
         }
+    }
+
+    /**
+     * @template TResult
+     * @param array<int,mixed> $bindings
+     * @param callable(Connection):TResult $operation
+     * @param null|callable(TResult):int $rowsAffectedResolver
+     * @return TResult
+     */
+    private static function executeTimedRaw(
+        string $query,
+        array $bindings,
+        ?string $connection,
+        callable $operation,
+        ?callable $rowsAffectedResolver = null,
+    ): mixed {
+        $conn = static::connection($connection);
+        $startedAt = microtime(true);
+        $result = $operation($conn);
+
+        self::trackRawQueryDuration(
+            $conn,
+            $query,
+            $bindings,
+            $rowsAffectedResolver !== null ? $rowsAffectedResolver($result) : null,
+            $startedAt,
+        );
+
+        return $result;
     }
 
     /**
@@ -1397,11 +1437,11 @@ class DB
         $profilerEnabled = static::$profiler !== null && static::$profiler->isEnabled();
         $loggerEnabled = static::$logger !== null && static::$logger->isEnabled();
 
-        if (! static::shouldHandleQueryEvent($profilerEnabled, $loggerEnabled)) {
+        if (!self::shouldHandleQueryEvent($profilerEnabled, $loggerEnabled)) {
             return;
         }
 
-        $payload = static::buildQueryEventPayload($event);
+        $payload = self::buildQueryEventPayload($event);
 
         if ($profilerEnabled) {
             static::$profiler?->finish($event->sql, $event->bindings);
@@ -1411,13 +1451,13 @@ class DB
             static::$logger?->query($event->sql, $event->bindings, $event->time);
         }
 
-        static::dispatchQueryPayloadToListeners($payload);
+        self::dispatchQueryPayloadToListeners($payload);
 
         if (static::$loggingQueries) {
-            static::appendQueryLogEntry($payload);
+            self::appendQueryLogEntry($payload);
         }
 
-        static::evaluateQueryTimeMonitors($event);
+        self::evaluateQueryTimeMonitors($event);
     }
 
     /**
@@ -1438,9 +1478,9 @@ class DB
     private static function invokeQueryTimeMonitor(callable $callback, QueryExecuted $event): void
     {
         if (\is_array($callback)) {
-            $reflection = new \ReflectionMethod($callback[0], (string) $callback[1]);
+            $reflection = new \ReflectionMethod($callback[0], $callback[1]);
             $params = $reflection->getNumberOfParameters();
-        } elseif (\is_object($callback) && ! $callback instanceof \Closure) {
+        } elseif (\is_object($callback) && !$callback instanceof \Closure) {
             $reflection = new \ReflectionMethod($callback, '__invoke');
             $params = $reflection->getNumberOfParameters();
         } else {
@@ -1466,7 +1506,7 @@ class DB
     /**
      * Merge global security defaults with connection-level security settings.
      *
-     * @param  array<string,mixed>  $security
+     * @param array<string,mixed> $security
      * @return array<string,mixed>
      */
     private static function mergeSecurityDefaults(array $security): array
@@ -1476,6 +1516,14 @@ class DB
         }
 
         return array_replace($security, static::$securityDefaults);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private static function normalizeStringKeyArray(mixed $value): array
+    {
+        return ArrayNormalizer::stringKeyArray($value);
     }
 
     /**
@@ -1508,7 +1556,7 @@ class DB
         }
 
         $ordered = [];
-        $max     = static::$maxQueryLogEntries;
+        $max = static::$maxQueryLogEntries;
 
         for ($i = 0; $i < static::$queryLogCount; $i++) {
             $index = (static::$queryLogStart + $i) % $max;
@@ -1523,14 +1571,14 @@ class DB
      */
     private static function reconfigureQueryLogStorage(): void
     {
-        $ordered = static::orderedQueryLog();
-        $max     = static::$maxQueryLogEntries;
+        $ordered = self::orderedQueryLog();
+        $max = static::$maxQueryLogEntries;
 
         if ($max !== null && \count($ordered) > $max) {
             $ordered = \array_slice($ordered, -$max);
         }
 
-        static::$queryLog = \array_values($ordered);
+        static::$queryLog = $ordered;
         static::$queryLogCount = \count(static::$queryLog);
         static::$queryLogStart = 0;
     }
@@ -1541,10 +1589,10 @@ class DB
     private static function registerEventBridges(): void
     {
         Events::listen('db.query.executing', static function (QueryExecuting $event): void {
-            static::handleQueryExecuting($event);
+            self::handleQueryExecuting($event);
         });
         Events::listen('db.query.executed', static function (QueryExecuted $event): void {
-            static::handleQueryExecuted($event);
+            self::handleQueryExecuted($event);
         });
     }
 
@@ -1557,7 +1605,7 @@ class DB
     {
         $name ??= static::$defaultConnection;
 
-        if ($name === null || ! isset(static::$connectionConfigs[$name])) {
+        if ($name === null || !isset(static::$connectionConfigs[$name])) {
             throw ConnectionException::connectionNotFound($name ?? 'null');
         }
 
@@ -1576,10 +1624,23 @@ class DB
           || $loggerEnabled;
     }
 
+    private static function stringifyScalar(mixed $value): string
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value) || is_bool($value)) {
+            return (string) $value;
+        }
+
+        return '';
+    }
+
     /**
      * Feed raw facade query timings into cumulative query-time monitors.
      *
-     * @param  array<int,mixed>  $bindings
+     * @param array<int,mixed> $bindings
      */
     private static function trackRawQueryDuration(
         Connection $connection,
@@ -1594,7 +1655,7 @@ class DB
 
         $elapsedMs = (microtime(true) - $startedAt) * 1_000.0;
 
-        static::evaluateQueryTimeMonitors(
+        self::evaluateQueryTimeMonitors(
             new QueryExecuted($sql, $bindings, $elapsedMs, $connection, $rowsAffected),
         );
     }

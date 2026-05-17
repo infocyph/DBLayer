@@ -10,11 +10,9 @@ use Infocyph\DBLayer\Grammar\Grammar;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
+use Infocyph\DBLayer\Query\Concerns\RepositoryInternals;
 use Infocyph\DBLayer\Support\Collection;
 use InvalidArgumentException;
-use ReflectionClass;
-use ReflectionException;
-use ReflectionParameter;
 
 /**
  * Base Repository
@@ -28,6 +26,8 @@ use ReflectionParameter;
  */
 abstract class Repository
 {
+    use RepositoryInternals;
+
     /**
      * Attribute casts.
      *
@@ -187,11 +187,16 @@ abstract class Repository
 
     /**
      * Get all rows for this table as a Collection.
+     *
+     * @param list<Expression|string> $columns
+     * @return Collection<int|string,mixed>
      */
     public function all(array $columns = ['*']): Collection
     {
-        $rows = $this->query()
-          ->select($columns)
+        $rows = $this->applySelectedColumns(
+            $this->query(),
+            $columns,
+        )
           ->get();
         $rows = $this->applyReadCastsToRows($rows);
 
@@ -388,7 +393,12 @@ abstract class Repository
             $scope,
         );
 
-        return $query->cursorPaginate($perPage, $cursor, $column, $direction);
+        return $query->cursorPaginate(
+            $perPage,
+            $cursor,
+            $this->normalizeColumnName($column, 'id'),
+            $this->normalizeDirection($direction),
+        );
     }
 
     /**
@@ -400,8 +410,8 @@ abstract class Repository
 
         if ($this->softDeletes) {
             $affected = $this->queryWithoutSoftDeletes()
-              ->where($this->primaryKey(), '=', $id)
-              ->update([$this->softDeleteColumn => $this->freshTimestamp()]);
+              ->where($this->normalizeColumnName($this->primaryKey(), 'id'), '=', $id)
+              ->update([$this->normalizeColumnName($this->softDeleteColumn, 'deleted_at') => $this->freshTimestamp()]);
 
             $this->runVoidHooks('afterDelete', ['id' => $id, 'affected' => $affected, 'soft' => true]);
 
@@ -409,7 +419,7 @@ abstract class Repository
         }
 
         $affected = $this->queryWithoutSoftDeletes()
-          ->where($this->primaryKey(), '=', $id)
+          ->where($this->normalizeColumnName($this->primaryKey(), 'id'), '=', $id)
           ->delete();
 
         $this->runVoidHooks('afterDelete', ['id' => $id, 'affected' => $affected, 'soft' => false]);
@@ -481,13 +491,16 @@ abstract class Repository
     /**
      * Find a row by primary key.
      *
+     * @param list<Expression|string> $columns
      * @return array<string,mixed>|null
      */
     public function find(mixed $id, array $columns = ['*']): ?array
     {
-        $key = $this->primaryKey();
-        $row = $this->query()
-          ->select($columns)
+        $key = $this->normalizeColumnName($this->primaryKey(), 'id');
+        $row = $this->applySelectedColumns(
+            $this->query(),
+            $columns,
+        )
           ->where($key, '=', $id)
           ->first();
 
@@ -496,6 +509,10 @@ abstract class Repository
 
     /**
      * Find multiple rows by primary key.
+     *
+     * @param list<mixed> $ids
+     * @param list<Expression|string> $columns
+     * @return Collection<int|string,mixed>
      */
     public function findMany(array $ids, array $columns = ['*']): Collection
     {
@@ -503,11 +520,13 @@ abstract class Repository
             return $this->results->process([]);
         }
 
-        $key = $this->primaryKey();
+        $key = $this->normalizeColumnName($this->primaryKey(), 'id');
 
-        $rows = $this->query()
-          ->select($columns)
-          ->whereIn($key, $ids)
+        $rows = $this->applySelectedColumns(
+            $this->query(),
+            $columns,
+        )
+          ->whereIn($key, $this->toList($ids))
           ->get();
         $rows = $this->applyReadCastsToRows($rows);
 
@@ -518,12 +537,13 @@ abstract class Repository
      * Get the first row matching an optional scoped query.
      *
      * @param callable(QueryBuilder):void|null $scope
+     * @param list<Expression|string> $columns
      * @return array<string,mixed>|null
      */
     public function first(?callable $scope = null, array $columns = ['*']): ?array
     {
         $query = $this->applyScope(
-            $this->query()->select($columns),
+            $this->applySelectedColumns($this->query(), $columns),
             $scope,
         );
 
@@ -535,14 +555,17 @@ abstract class Repository
      *
      * @param class-string $className
      * @param callable(QueryBuilder):void|null $scope
+     * @param list<Expression|string> $columns
      */
     public function firstInto(string $className, ?callable $scope = null, array $columns = ['*']): ?object
     {
-        return $this->firstMap(
-            fn(array $row): object => $this->mapRowIntoClass($className, $row),
-            $scope,
-            $columns,
-        );
+        $row = $this->first($scope, $columns);
+
+        if ($row === null) {
+            return null;
+        }
+
+        return $this->mapRowIntoClass($className, $row);
     }
 
     /**
@@ -550,6 +573,7 @@ abstract class Repository
      *
      * @param callable(array<string,mixed>):mixed $mapper
      * @param callable(QueryBuilder):void|null $scope
+     * @param list<Expression|string> $columns
      */
     public function firstMap(callable $mapper, ?callable $scope = null, array $columns = ['*']): mixed
     {
@@ -598,7 +622,7 @@ abstract class Repository
         $this->runVoidHooks('beforeDelete', ['id' => $id, 'force' => true]);
 
         $affected = $this->queryWithoutSoftDeletes()
-          ->where($this->primaryKey(), '=', $id)
+          ->where($this->normalizeColumnName($this->primaryKey(), 'id'), '=', $id)
           ->delete();
 
         $this->runVoidHooks('afterDelete', ['id' => $id, 'affected' => $affected, 'force' => true]);
@@ -621,11 +645,13 @@ abstract class Repository
      * Get rows using an optional scoped query as a Collection.
      *
      * @param callable(QueryBuilder):void|null $scope
+     * @param list<Expression|string> $columns
+     * @return Collection<int|string,mixed>
      */
     public function get(?callable $scope = null, array $columns = ['*']): Collection
     {
         $query = $this->applyScope(
-            $this->query()->select($columns),
+            $this->applySelectedColumns($this->query(), $columns),
             $scope,
         );
 
@@ -670,13 +696,25 @@ abstract class Repository
      *
      * @param callable(array<string,mixed>):mixed $mapper
      * @param callable(QueryBuilder):void|null $scope
+     * @param list<Expression|string> $columns
+     * @return Collection<int|string,mixed>
      */
     public function map(callable $mapper, ?callable $scope = null, array $columns = ['*']): Collection
     {
         $rows = $this->get($scope, $columns);
 
         return $rows->map(
-            static fn(mixed $row): mixed => $mapper((array) $row),
+            static function (mixed $row) use ($mapper): mixed {
+                if (is_array($row)) {
+                    return $mapper(self::normalizeAttributeArray($row));
+                }
+
+                if (is_object($row)) {
+                    return $mapper(self::normalizeAttributeArray(get_object_vars($row)));
+                }
+
+                return $mapper([]);
+            },
         );
     }
 
@@ -685,15 +723,22 @@ abstract class Repository
      *
      * @param class-string $className
      * @param callable(QueryBuilder):void|null $scope
-     * @return Collection<int|string,object>
+     * @param list<Expression|string> $columns
+     * @return Collection<int|string,mixed>
      */
     public function mapInto(string $className, ?callable $scope = null, array $columns = ['*']): Collection
     {
-        return $this->map(
-            fn(array $row): object => $this->mapRowIntoClass($className, $row),
-            $scope,
-            $columns,
-        );
+        $mapped = [];
+
+        foreach ($this->get($scope, $columns) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $mapped[] = $this->mapRowIntoClass($className, self::normalizeAttributeArray($row));
+        }
+
+        return new Collection($mapped);
     }
 
     /**
@@ -701,7 +746,7 @@ abstract class Repository
      */
     public function on(string $event, callable $callback): static
     {
-        if (! array_key_exists($event, $this->hooks)) {
+        if (!array_key_exists($event, $this->hooks)) {
             throw new InvalidArgumentException(sprintf(
                 'Unsupported repository hook [%s].',
                 $event,
@@ -767,14 +812,14 @@ abstract class Repository
      */
     public function restoreById(mixed $id): int
     {
-        if (! $this->softDeletes) {
+        if (!$this->softDeletes) {
             return 0;
         }
 
         return $this->queryWithoutSoftDeletes()
-          ->where($this->primaryKey(), '=', $id)
-          ->whereNotNull($this->softDeleteColumn)
-          ->update([$this->softDeleteColumn => null]);
+          ->where($this->normalizeColumnName($this->primaryKey(), 'id'), '=', $id)
+          ->whereNotNull($this->normalizeColumnName($this->softDeleteColumn, 'deleted_at'))
+          ->update([$this->normalizeColumnName($this->softDeleteColumn, 'deleted_at') => null]);
     }
 
     /**
@@ -788,7 +833,7 @@ abstract class Repository
      *  - json, array
      *  - datetime
      *
-     * @param  array<string,string|callable(mixed):mixed>  $casts
+     * @param array<string,string|callable(mixed):mixed> $casts
      */
     public function setCasts(array $casts): static
     {
@@ -837,7 +882,7 @@ abstract class Repository
         $payload = $this->runPayloadHooks('beforeUpdate', $payload);
 
         $affected = $this->queryWithoutSoftDeletes()
-          ->where($this->primaryKey(), '=', $id)
+          ->where($this->normalizeColumnName($this->primaryKey(), 'id'), '=', $id)
           ->update($payload);
 
         $this->runVoidHooks('afterUpdate', ['id' => $id, 'payload' => $payload, 'affected' => $affected]);
@@ -847,6 +892,8 @@ abstract class Repository
 
     /**
      * Update row by id only if expected version matches current version.
+     *
+     * @param array<string,mixed> $values
      */
     public function updateByIdWithVersion(
         mixed $id,
@@ -861,8 +908,8 @@ abstract class Repository
         $payload = $this->runPayloadHooks('beforeUpdate', $payload);
 
         $affected = $this->queryWithoutSoftDeletes()
-          ->where($this->primaryKey(), '=', $id)
-          ->where($column, '=', $expectedVersion)
+          ->where($this->normalizeColumnName($this->primaryKey(), 'id'), '=', $id)
+          ->where($this->normalizeColumnName($column, 'version'), '=', $expectedVersion)
           ->update($payload);
 
         $this->runVoidHooks('afterUpdate', [
@@ -939,7 +986,7 @@ abstract class Repository
     public function value(string $column, ?callable $scope = null): mixed
     {
         $query = $this->applyScope(
-            $this->query()->select([$column]),
+            $this->query()->select($column),
             $scope,
         );
 
@@ -990,7 +1037,8 @@ abstract class Repository
     protected function applyAttributes(QueryBuilder $query, array $attributes): QueryBuilder
     {
         foreach ($attributes as $column => $value) {
-            $query->where((string) $column, '=', $value);
+            $normalized = $this->normalizeColumnName((string) $column, 'id');
+            $query->where($normalized, '=', $value);
         }
 
         return $query;
@@ -1006,7 +1054,7 @@ abstract class Repository
         }
 
         if ($this->tenantId !== null) {
-            $query->where($this->tenantColumn, '=', $this->tenantId);
+            $query->where($this->normalizeColumnName($this->tenantColumn, 'tenant_id'), '=', $this->tenantId);
         }
 
         foreach ($this->defaultOrders as $order) {
@@ -1015,9 +1063,9 @@ abstract class Repository
 
         if ($this->softDeletes) {
             if ($this->onlyTrashed) {
-                $query->whereNotNull($this->softDeleteColumn);
-            } elseif (! $this->withTrashed) {
-                $query->whereNull($this->softDeleteColumn);
+                $query->whereNotNull($this->normalizeColumnName($this->softDeleteColumn, 'deleted_at'));
+            } elseif (!$this->withTrashed) {
+                $query->whereNull($this->normalizeColumnName($this->softDeleteColumn, 'deleted_at'));
             }
         }
 
@@ -1064,449 +1112,5 @@ abstract class Repository
         return $this->applyRepositoryConstraints(
             $this->newQuery()->from($this->table()),
         );
-    }
-
-    /**
-     * Cast a single scalar through configured cast map when column is known.
-     */
-    private function applyCastValueForColumn(string $column, mixed $value): mixed
-    {
-        if (! array_key_exists($column, $this->casts)) {
-            return $value;
-        }
-
-        return $this->castValue($value, $this->casts[$column], false);
-    }
-
-    /**
-     * Apply configured read casts to one row.
-     *
-     * @param  array<string,mixed>|null  $row
-     * @return array<string,mixed>|null
-     */
-    private function applyReadCastsToRow(?array $row): ?array
-    {
-        if ($row === null || $this->casts === []) {
-            return $row;
-        }
-
-        foreach ($this->casts as $column => $cast) {
-            if (! array_key_exists($column, $row)) {
-                continue;
-            }
-
-            $row[$column] = $this->castValue($row[$column], $cast, false);
-        }
-
-        return $row;
-    }
-
-    /**
-     * Apply configured read casts to many rows.
-     *
-     * @param  list<array<string,mixed>>  $rows
-     * @return list<array<string,mixed>>
-     */
-    private function applyReadCastsToRows(array $rows): array
-    {
-        if ($this->casts === [] || $rows === []) {
-            return $rows;
-        }
-
-        return array_map(
-            fn(array $row): array => $this->applyReadCastsToRow($row) ?? $row,
-            $rows,
-        );
-    }
-
-    /**
-     * Apply active tenant value to one row payload when column is absent.
-     *
-     * @param array<string,mixed> $attributes
-     * @return array<string,mixed>
-     */
-    private function applyTenantAttributes(array $attributes): array
-    {
-        if ($this->tenantId === null) {
-            return $attributes;
-        }
-
-        if (! array_key_exists($this->tenantColumn, $attributes)) {
-            $attributes[$this->tenantColumn] = $this->tenantId;
-        }
-
-        return $attributes;
-    }
-
-    /**
-     * Apply active tenant to single-row or multi-row write payloads.
-     *
-     * @param array<string,mixed>|array<int,array<string,mixed>> $values
-     * @return array<string,mixed>|array<int,array<string,mixed>>
-     */
-    private function applyTenantValues(array $values): array
-    {
-        if ($values === []) {
-            return $values;
-        }
-
-        $first = reset($values);
-        if (is_array($first)) {
-            return array_map(
-                $this->applyTenantAttributes(...),
-                $values,
-            );
-        }
-
-        return $this->applyTenantAttributes($values);
-    }
-
-    /**
-     * Apply write casts to one payload.
-     *
-     * @param  array<string,mixed>  $attributes
-     * @return array<string,mixed>
-     */
-    private function applyWriteCastsToAttributes(array $attributes): array
-    {
-        if ($this->casts === []) {
-            return $attributes;
-        }
-
-        foreach ($this->casts as $column => $cast) {
-            if (! array_key_exists($column, $attributes)) {
-                continue;
-            }
-
-            $attributes[$column] = $this->castValue($attributes[$column], $cast, true);
-        }
-
-        return $attributes;
-    }
-
-    /**
-     * Apply write casts to one or many payload rows.
-     *
-     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
-     * @return array<string,mixed>|array<int,array<string,mixed>>
-     */
-    private function applyWriteCastsToValues(array $values): array
-    {
-        if ($values === []) {
-            return $values;
-        }
-
-        $first = reset($values);
-
-        if (is_array($first)) {
-            return array_map(
-                $this->applyWriteCastsToAttributes(...),
-                $values,
-            );
-        }
-
-        return $this->applyWriteCastsToAttributes($values);
-    }
-
-    /**
-     * Resolve callable parameter count for lifecycle hook dispatching.
-     */
-    private function callableParameterCount(callable $callable): int
-    {
-        if (\is_array($callable)) {
-            $reflection = new \ReflectionMethod($callable[0], (string) $callable[1]);
-
-            return $reflection->getNumberOfParameters();
-        }
-
-        if (\is_object($callable) && ! $callable instanceof \Closure) {
-            $reflection = new \ReflectionMethod($callable, '__invoke');
-
-            return $reflection->getNumberOfParameters();
-        }
-
-        $reflection = new \ReflectionFunction(\Closure::fromCallable($callable));
-
-        return $reflection->getNumberOfParameters();
-    }
-
-    /**
-     * Apply cast rules for one value.
-     *
-     * @param  string|callable(mixed):mixed  $cast
-     */
-    private function castValue(mixed $value, string|callable $cast, bool $forWrite): mixed
-    {
-        if (\is_callable($cast)) {
-            return $cast($value);
-        }
-
-        $type = strtolower($cast);
-
-        return match ($type) {
-            'int', 'integer' => $value === null ? null : (int) $value,
-            'float', 'double', 'real' => $value === null ? null : (float) $value,
-            'bool', 'boolean' => $value === null ? null : (bool) $value,
-            'string' => $value === null ? null : (string) $value,
-            'json', 'array' => $forWrite
-                ? (is_array($value) || is_object($value) ? json_encode($value, JSON_THROW_ON_ERROR) : $value)
-                : (is_string($value) ? (json_decode($value, true) ?? $value) : $value),
-            'datetime' => $forWrite
-                ? $this->normalizeDateTimeForWrite($value)
-                : $value,
-            default => $value,
-        };
-    }
-
-    /**
-     * Find the first row that matches all given attributes.
-     *
-     * @param array<string,mixed> $attributes
-     * @return array<string,mixed>|null
-     */
-    private function firstByAttributes(array $attributes): ?array
-    {
-        $query = $this->applyAttributes($this->query(), $attributes);
-
-        return $this->applyReadCastsToRow($query->first());
-    }
-
-    /**
-     * Generate a DB date-time string for soft deletes.
-     */
-    private function freshTimestamp(): string
-    {
-        return new \DateTimeImmutable('now')->format($this->grammar->getDateFormat());
-    }
-
-    /**
-     * @param ReflectionClass<object> $reflection
-     * @param array<string,mixed> $row
-     */
-    private function hydratePublicProperties(ReflectionClass $reflection, object $instance, array $row): void
-    {
-        foreach ($row as $key => $value) {
-            if (! $reflection->hasProperty($key)) {
-                continue;
-            }
-
-            $property = $reflection->getProperty($key);
-            if (! $property->isPublic() || $property->isReadOnly()) {
-                continue;
-            }
-
-            $property->setValue($instance, $value);
-        }
-    }
-
-    /**
-     * @param ReflectionClass<object> $reflection
-     * @param class-string $className
-     * @param array<string,mixed> $row
-     */
-    private function instantiateDto(ReflectionClass $reflection, string $className, array $row): object
-    {
-        $constructor = $reflection->getConstructor();
-        if ($constructor === null || $constructor->getNumberOfParameters() === 0) {
-            return $reflection->newInstance();
-        }
-
-        $arguments = [];
-
-        foreach ($constructor->getParameters() as $parameter) {
-            $arguments[] = $this->resolveDtoArgument($className, $parameter, $row);
-        }
-
-        return $reflection->newInstanceArgs($arguments);
-    }
-
-    /**
-     * Map one row into a DTO class by constructor/property names.
-     *
-     * @param class-string $className
-     * @param array<string,mixed> $row
-     */
-    private function mapRowIntoClass(string $className, array $row): object
-    {
-        $reflection = $this->resolveDtoReflection($className);
-        $instance = $this->instantiateDto($reflection, $className, $row);
-
-        $this->hydratePublicProperties($reflection, $instance, $row);
-
-        return $instance;
-    }
-
-    /**
-     * Convert DateTime values to grammar-aligned SQL date strings.
-     */
-    private function normalizeDateTimeForWrite(mixed $value): mixed
-    {
-        if ($value instanceof \DateTimeInterface) {
-            return $value->format($this->grammar->getDateFormat());
-        }
-
-        return $value;
-    }
-
-    /**
-     * Normalize and validate SQL direction.
-     */
-    private function normalizeDirection(string $direction): string
-    {
-        $normalized = strtolower($direction);
-
-        if (! in_array($normalized, ['asc', 'desc'], true)) {
-            throw new InvalidArgumentException(sprintf(
-                'Invalid order direction [%s]. Expected "asc" or "desc".',
-                $direction,
-            ));
-        }
-
-        return $normalized;
-    }
-
-    /**
-     * Base query without soft-delete visibility constraints.
-     */
-    private function queryWithoutSoftDeletes(): QueryBuilder
-    {
-        $withTrashed = $this->withTrashed;
-        $onlyTrashed = $this->onlyTrashed;
-
-        $this->withTrashed = true;
-        $this->onlyTrashed = false;
-
-        try {
-            return $this->query();
-        } finally {
-            $this->withTrashed = $withTrashed;
-            $this->onlyTrashed = $onlyTrashed;
-        }
-    }
-
-    /**
-     * Reload a row after insert when possible.
-     *
-     * @param array<string,mixed> $payload
-     * @return array<string,mixed>|null
-     */
-    private function reloadCreatedRow(array $payload): ?array
-    {
-        $primaryKey = $this->primaryKey();
-        if (array_key_exists($primaryKey, $payload)) {
-            $found = $this->find($payload[$primaryKey]);
-            if ($found !== null) {
-                return $found;
-            }
-        }
-
-        $lastInsertId = $this->connection->lastInsertId();
-
-        if ($lastInsertId !== '') {
-            $found = $this->find($lastInsertId);
-            if ($found !== null) {
-                return $found;
-            }
-        }
-
-        return $this->firstByAttributes($payload);
-    }
-
-    /**
-     * @param class-string $className
-     * @param array<string,mixed> $row
-     */
-    private function resolveDtoArgument(string $className, ReflectionParameter $parameter, array $row): mixed
-    {
-        $name = $parameter->getName();
-
-        if (array_key_exists($name, $row)) {
-            return $row[$name];
-        }
-
-        if ($parameter->isDefaultValueAvailable()) {
-            return $parameter->getDefaultValue();
-        }
-
-        if ($parameter->allowsNull()) {
-            return null;
-        }
-
-        throw new InvalidArgumentException(sprintf(
-            'Cannot map row into DTO [%s]: missing required field [%s].',
-            $className,
-            $name,
-        ));
-    }
-
-    /**
-     * @param class-string $className
-     */
-    private function resolveDtoReflection(string $className): ReflectionClass
-    {
-        try {
-            $reflection = new ReflectionClass($className);
-        } catch (ReflectionException $e) {
-            throw new InvalidArgumentException(
-                sprintf('DTO class [%s] does not exist.', $className),
-                0,
-                $e,
-            );
-        }
-
-        if (! $reflection->isInstantiable()) {
-            throw new InvalidArgumentException(
-                sprintf('DTO class [%s] is not instantiable.', $className),
-            );
-        }
-
-        return $reflection;
-    }
-
-    /**
-     * Execute payload hooks that can return a transformed payload.
-     *
-     * @param  array<string,mixed>  $payload
-     * @return array<string,mixed>
-     */
-    private function runPayloadHooks(string $event, array $payload): array
-    {
-        foreach ($this->hooks[$event] ?? [] as $hook) {
-            $params = $this->callableParameterCount($hook);
-
-            if ($params <= 0) {
-                $result = $hook();
-            } elseif ($params === 1) {
-                $result = $hook($payload);
-            } else {
-                $result = $hook($payload, $this);
-            }
-
-            if (is_array($result)) {
-                $payload = $result;
-            }
-        }
-
-        return $payload;
-    }
-
-    /**
-     * Execute fire-and-forget hooks with context payload.
-     *
-     * @param  array<string,mixed>  $context
-     */
-    private function runVoidHooks(string $event, array $context): void
-    {
-        foreach ($this->hooks[$event] ?? [] as $hook) {
-            $params = $this->callableParameterCount($hook);
-
-            if ($params <= 0) {
-                $hook();
-            } elseif ($params === 1) {
-                $hook($context);
-            } else {
-                $hook($context, $this);
-            }
-        }
     }
 }

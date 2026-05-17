@@ -32,7 +32,7 @@ final class DriverProfile
      */
     private const array DEADLOCK_ERROR_CODES = [
         // MySQL / MariaDB: ER_LOCK_DEADLOCK
-        'mysql'   => ['1213'],
+        'mysql' => ['1213'],
         'mariadb' => ['1213'],
         // PostgreSQL typically uses only SQLSTATE for deadlock ⇒ no extra here
     ];
@@ -75,11 +75,11 @@ final class DriverProfile
      */
     private const array DEADLOCK_SQLSTATES = [
         // MySQL / MariaDB
-        'mysql'   => ['40001'],
+        'mysql' => ['40001'],
         'mariadb' => ['40001'],
 
         // PostgreSQL
-        'pgsql'    => ['40P01', '40001'],
+        'pgsql' => ['40P01', '40001'],
         'postgres' => ['40P01', '40001'],
     ];
 
@@ -89,11 +89,11 @@ final class DriverProfile
      * @var array<string,int|null>
      */
     private const array DEFAULT_PORTS = [
-        'mysql'   => 3306,
+        'mysql' => 3306,
         'mariadb' => 3306,
-        'pgsql'   => 5432,
+        'pgsql' => 5432,
         'postgres' => 5432,
-        'sqlite'  => null,
+        'sqlite' => null,
     ];
 
     private function __construct()
@@ -107,7 +107,7 @@ final class DriverProfile
      * This is intended to be called from ConnectionConfig, after base defaults
      * and user config are merged.
      *
-     * @param  array<string,mixed>  $config
+     * @param array<string,mixed> $config
      * @return array<string,mixed>
      */
     public static function applyConnectionDefaults(array $config): array
@@ -121,7 +121,7 @@ final class DriverProfile
         }
 
         // Default port.
-        if (! array_key_exists('port', $config) || $config['port'] === null || $config['port'] === '') {
+        if (!array_key_exists('port', $config) || $config['port'] === null || $config['port'] === '') {
             $port = self::DEFAULT_PORTS[$driver] ?? null;
 
             if ($port !== null) {
@@ -133,11 +133,11 @@ final class DriverProfile
         switch ($driver) {
             case 'mysql':
             case 'mariadb':
-                if (! isset($config['charset']) || ! is_string($config['charset']) || $config['charset'] === '') {
+                if (!isset($config['charset']) || !is_string($config['charset']) || $config['charset'] === '') {
                     $config['charset'] = 'utf8mb4';
                 }
 
-                if (! isset($config['collation']) || ! is_string($config['collation']) || $config['collation'] === '') {
+                if (!isset($config['collation']) || !is_string($config['collation']) || $config['collation'] === '') {
                     $config['collation'] = 'utf8mb4_unicode_ci';
                 }
 
@@ -146,11 +146,11 @@ final class DriverProfile
             case 'pgsql':
             case 'postgres':
             case 'postgresql':
-                if (! isset($config['charset']) || ! is_string($config['charset']) || $config['charset'] === '') {
+                if (!isset($config['charset']) || !is_string($config['charset']) || $config['charset'] === '') {
                     $config['charset'] = 'utf8';
                 }
 
-                if (! isset($config['schema']) || ! is_string($config['schema']) || $config['schema'] === '') {
+                if (!isset($config['schema']) || !is_string($config['schema']) || $config['schema'] === '') {
                     $config['schema'] = 'public';
                 }
 
@@ -176,7 +176,7 @@ final class DriverProfile
             return true;
         }
 
-        if (! $e instanceof PDOException) {
+        if (!$e instanceof PDOException) {
             return false;
         }
 
@@ -191,17 +191,17 @@ final class DriverProfile
         $driver = strtolower($driver);
 
         return match ($driver) {
-            'mysql', 'mariadb'              => new MySQLGrammar(),
+            'mysql', 'mariadb' => new MySQLGrammar(),
             'pgsql', 'postgres', 'postgresql' => new PostgreSQLGrammar(),
-            'sqlite', 'sqlite3'             => new SQLiteGrammar(),
-            default                         => throw ConnectionException::unsupportedDriver($driver),
+            'sqlite', 'sqlite3' => new SQLiteGrammar(),
+            default => throw ConnectionException::unsupportedDriver($driver),
         };
     }
 
     /**
      * Determine if a non-empty code exists in the known deadlock code list.
      *
-     * @param  list<string>  $knownCodes
+     * @param list<string> $knownCodes
      */
     private static function matchesKnownDeadlockCode(?string $code, array $knownCodes): bool
     {
@@ -215,7 +215,8 @@ final class DriverProfile
     {
         $hints = self::DEADLOCK_MESSAGE_HINTS[$driver]
           ?? self::DEADLOCK_MESSAGE_HINTS['default'];
-        return array_any($hints, fn($needle) => $needle !== '' && stripos($message, (string) $needle) !== false);
+
+        return array_any($hints, fn(string $needle): bool => stripos($message, $needle) !== false);
     }
 
     /**
@@ -223,16 +224,29 @@ final class DriverProfile
      */
     private static function metadataSuggestsDeadlock(string $driver, PDOException $e): bool
     {
-        $errorInfo  = $e->errorInfo;
-        $sqlState   = is_array($errorInfo) && isset($errorInfo[0]) ? (string) $errorInfo[0] : null;
-        $vendorCode = is_array($errorInfo) && isset($errorInfo[1]) ? (string) $errorInfo[1] : null;
-        $code       = (string) $e->getCode();
+        $errorInfo = $e->errorInfo;
+        $sqlState = is_array($errorInfo) && isset($errorInfo[0]) ? self::nullableString($errorInfo[0]) : null;
+        $vendorCode = is_array($errorInfo) && isset($errorInfo[1]) ? self::nullableString($errorInfo[1]) : null;
+        $code = (string) $e->getCode();
 
         $states = self::DEADLOCK_SQLSTATES[$driver] ?? [];
-        $codes  = self::DEADLOCK_ERROR_CODES[$driver] ?? [];
+        $codes = self::DEADLOCK_ERROR_CODES[$driver] ?? [];
 
         return self::matchesKnownDeadlockCode($sqlState, $states)
           || self::matchesKnownDeadlockCode($vendorCode, $codes)
           || self::matchesKnownDeadlockCode($code, $codes);
+    }
+
+    private static function nullableString(mixed $value): ?string
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value) || is_bool($value)) {
+            return (string) $value;
+        }
+
+        return null;
     }
 }

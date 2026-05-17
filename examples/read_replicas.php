@@ -6,6 +6,10 @@ use Infocyph\DBLayer\DB;
 
 require __DIR__ . '/../vendor/autoload.php';
 
+$writeLine = static function (string $message): void {
+    fwrite(STDOUT, $message . PHP_EOL);
+};
+
 DB::purge();
 
 DB::addConnection([
@@ -21,11 +25,11 @@ DB::addConnection([
 $connection = DB::connection();
 
 $connection->select('select 1');
-echo 'First replica index: ' . ($connection->getReadReplicaInfo()['selected_index'] ?? -1) . PHP_EOL;
+$writeLine('First replica index: ' . ($connection->getReadReplicaInfo()['selected_index'] ?? -1));
 
 $connection->reconnect(false);
 $connection->select('select 1');
 
 $info = $connection->getReadReplicaInfo();
-echo 'Second replica index: ' . ($info['selected_index'] ?? -1) . PHP_EOL;
-echo 'Strategy: ' . ($info['strategy'] ?? 'unknown') . PHP_EOL;
+$writeLine('Second replica index: ' . ($info['selected_index'] ?? -1));
+$writeLine('Strategy: ' . ($info['strategy'] ?? 'unknown'));

@@ -113,6 +113,7 @@ it('chunks by non-integer keys without repeating pages', function (string $drive
     DB::table($table, $connection)->chunkById(
         2,
         function (array $rows, int $page) use (&$pages): bool {
+            unset($page);
             $pages[] = array_column($rows, 'uuid');
 
             return true;
@@ -379,7 +380,7 @@ it('enforces read-only sqlite read replica sessions', function (): void {
     unset($readPdo, $writePdo, $connection);
 
     if (is_file($databaseFile)) {
-        expect(@unlink($databaseFile))->toBeTrue();
+        expect(unlink($databaseFile))->toBeTrue();
     }
 });
 
@@ -411,7 +412,7 @@ it('applies write override configuration for write pdo connection', function ():
     unset($pdo, $connection);
 
     if (is_file($databaseFile)) {
-        expect(@unlink($databaseFile))->toBeTrue();
+        expect(unlink($databaseFile))->toBeTrue();
     }
 });
 
@@ -580,7 +581,7 @@ it('redacts query bindings in logger output by default', function (string $drive
 
     DB::disableLogger();
     if (is_file($logFile)) {
-        @unlink($logFile);
+        unlink($logFile);
     }
 })->with('dblayer_drivers');
 
@@ -673,7 +674,7 @@ it('supports configuring psr logger backend via facade helper', function (string
     DB::disableLogger();
 
     if (is_file($logFile)) {
-        @unlink($logFile);
+        unlink($logFile);
     }
 })->with('dblayer_drivers');
 
@@ -697,7 +698,7 @@ it('does not write when logger target is a symlink', function (string $driver): 
     $realLog = $baseDir . DIRECTORY_SEPARATOR . 'real.log';
     $linkLog = $baseDir . DIRECTORY_SEPARATOR . 'link.log';
 
-    if ((! is_dir($baseDir)) && (! @mkdir($baseDir, 0o700, true))) {
+    if ((! is_dir($baseDir)) && (! mkdir($baseDir, 0o700, true))) {
         test()->markTestSkipped('Unable to create temporary directory for symlink logger test.');
 
         return;
@@ -705,9 +706,25 @@ it('does not write when logger target is a symlink', function (string $driver): 
 
     file_put_contents($realLog, '');
 
-    if (! function_exists('symlink') || ! @symlink($realLog, $linkLog)) {
-        @unlink($realLog);
-        @rmdir($baseDir);
+    $linked = false;
+
+    if (function_exists('symlink')) {
+        set_error_handler(static fn(): bool => true);
+
+        try {
+            $linked = symlink($realLog, $linkLog);
+        } finally {
+            restore_error_handler();
+        }
+    }
+
+    if (! $linked) {
+        if (is_file($realLog)) {
+            unlink($realLog);
+        }
+        if (is_dir($baseDir)) {
+            rmdir($baseDir);
+        }
         test()->markTestSkipped('Symlink creation is not available in this environment.');
 
         return;
@@ -725,12 +742,14 @@ it('does not write when logger target is a symlink', function (string $driver): 
     expect($contents)->toBe('');
 
     if (is_link($linkLog)) {
-        @unlink($linkLog);
+        unlink($linkLog);
     }
     if (is_file($realLog)) {
-        @unlink($realLog);
+        unlink($realLog);
     }
-    @rmdir($baseDir);
+    if (is_dir($baseDir)) {
+        rmdir($baseDir);
+    }
 })->with('dblayer_drivers');
 
 it('caps telemetry and profiler buffers to configured limits', function (string $driver): void {

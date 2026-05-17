@@ -17,7 +17,7 @@ final class ReadReplicaSessionPolicy
      */
     public static function apply(string $driver, ?PDO $pdo): void
     {
-        if (! $pdo instanceof PDO || $driver !== 'sqlite') {
+        if (!$pdo instanceof PDO || $driver !== 'sqlite') {
             return;
         }
 

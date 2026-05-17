@@ -28,7 +28,7 @@ final readonly class TransactionRolledBack
     {
         return [
             'connection' => $this->connection->getDriverName(),
-            'duration'   => $this->duration,
+            'duration' => $this->duration,
         ];
     }
 }

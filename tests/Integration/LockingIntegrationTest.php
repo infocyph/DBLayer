@@ -99,7 +99,7 @@ it('surfaces write-lock contention across concurrent connections', function (str
             DB::connection('writer_two')->disconnect();
 
             if (is_file($databaseFile)) {
-                @unlink($databaseFile);
+                unlink($databaseFile);
             }
         }
 

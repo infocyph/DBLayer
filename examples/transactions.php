@@ -10,6 +10,10 @@ use Infocyph\DBLayer\Exceptions\TransactionException;
 
 require __DIR__ . '/bootstrap.php';
 
+$writeLine = static function (string $message): void {
+    fwrite(STDOUT, $message . PHP_EOL);
+};
+
 // 6.1 Using the default connection via DB::transaction()
 // __callStatic() forwards this to Connection::transaction().
 try {
@@ -44,10 +48,10 @@ try {
         },
     );
 
-    echo "Order created with ID: {$orderId}\n";
+    $writeLine("Order created with ID: {$orderId}");
 } catch (TransactionException $e) {
     // All queries inside the closure are rolled back on exception
-    echo "Failed to create order: {$e->getMessage()}\n";
+    $writeLine("Failed to create order: {$e->getMessage()}");
 }
 
 // 6.2 Explicit connection & nested transaction work on that one connection only
@@ -81,7 +85,7 @@ try {
         },
     );
 
-    echo "Wallet transaction result: " . ($result ? 'OK' : 'NOOP') . "\n";
+    $writeLine('Wallet transaction result: ' . ($result ? 'OK' : 'NOOP'));
 } catch (\Throwable $e) {
-    echo "Wallet transaction failed: {$e->getMessage()}\n";
+    $writeLine("Wallet transaction failed: {$e->getMessage()}");
 }

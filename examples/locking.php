@@ -6,6 +6,10 @@ use Infocyph\DBLayer\DB;
 
 require __DIR__ . '/../vendor/autoload.php';
 
+$writeLine = static function (string $message): void {
+    fwrite(STDOUT, $message . PHP_EOL);
+};
+
 DB::purge();
 
 // SQLite
@@ -32,11 +36,11 @@ DB::addConnection([
     'password' => 'secret',
 ], 'pgsql_conn');
 
-echo "SQLite lockForUpdate SQL:\n";
-echo DB::table('users', 'sqlite_conn')->lockForUpdate()->toSql() . PHP_EOL;
+$writeLine('SQLite lockForUpdate SQL:');
+$writeLine(DB::table('users', 'sqlite_conn')->lockForUpdate()->toSql());
 
-echo "MySQL lockForUpdate SQL:\n";
-echo DB::table('users', 'mysql_conn')->lockForUpdate()->toSql() . PHP_EOL;
+$writeLine('MySQL lockForUpdate SQL:');
+$writeLine(DB::table('users', 'mysql_conn')->lockForUpdate()->toSql());
 
-echo "PostgreSQL sharedLock SQL:\n";
-echo DB::table('users', 'pgsql_conn')->sharedLock()->toSql() . PHP_EOL;
+$writeLine('PostgreSQL sharedLock SQL:');
+$writeLine(DB::table('users', 'pgsql_conn')->sharedLock()->toSql());

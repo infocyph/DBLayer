@@ -7,6 +7,10 @@ use Infocyph\DBLayer\DB;
 
 require __DIR__ . '/../vendor/autoload.php';
 
+$writeLine = static function (string $message): void {
+    fwrite(STDOUT, $message . PHP_EOL);
+};
+
 $configs = [
     'sqlite' => [
         'driver' => 'sqlite',
@@ -67,7 +71,7 @@ foreach ($configs as $driver => $config) {
     $count = (int) DB::table($table)->count();
     $qty = (int) DB::table($table)->where('id', '=', 1)->value('qty');
 
-    echo sprintf("[%s] count=%d qty=%d\n", $driver, $count, $qty);
+    $writeLine(sprintf('[%s] count=%d qty=%d', $driver, $count, $qty));
 }
 
 DB::purge();
@@ -121,7 +125,7 @@ function envConnectionConfig(string $driver): ?array
 }
 
 /**
- * @param  list<string>  $keys
+ * @param list<string> $keys
  */
 function envFirst(array $keys): ?string
 {

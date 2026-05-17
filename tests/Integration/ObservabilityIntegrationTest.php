@@ -8,7 +8,11 @@ it('executes queries successfully when using retry policy wrappers', function (s
     dblayerAddConnectionForDriver($driver);
 
     $rows = DB::withQueryRetryPolicy(
-        static fn (\Throwable $error, int $attempt, string $sql, array $bindings): bool => false,
+        static function (\Throwable $error, int $attempt, string $sql, array $bindings): bool {
+            unset($error, $attempt, $sql, $bindings);
+
+            return false;
+        },
         static fn (): array => DB::select('select 1 as ok'),
     );
 

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Security;
 
 /**
- * SecurityMode
+ * GuardMode
  *
  * Controls how aggressively DBLayer applies security checks.
  *
@@ -16,6 +16,8 @@ namespace Infocyph\DBLayer\Security;
 enum SecurityMode: string
 {
     case NORMAL = 'normal';
-    case OFF    = 'off';
+
+    case OFF = 'off';
+
     case STRICT = 'strict';
 }

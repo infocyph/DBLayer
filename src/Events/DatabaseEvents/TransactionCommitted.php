@@ -28,7 +28,7 @@ final readonly class TransactionCommitted
     {
         return [
             'connection' => $this->connection->getDriverName(),
-            'duration'   => $this->duration,
+            'duration' => $this->duration,
         ];
     }
 }

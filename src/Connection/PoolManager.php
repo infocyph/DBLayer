@@ -93,7 +93,7 @@ final class PoolManager
      * Connection is always released back to the pool.
      *
      * @template T
-     * @param  callable(Connection):T  $callback
+     * @param callable(Connection):T $callback
      * @return T
      */
     public function using(string $name, callable $callback): mixed

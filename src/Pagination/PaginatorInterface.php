@@ -14,6 +14,8 @@ use Traversable;
  *
  * Kept intentionally small and framework-agnostic so it can be
  * used from HTTP, CLI, queues, etc. without coupling.
+ *
+ * @extends IteratorAggregate<int,mixed>
  */
 interface PaginatorInterface extends Countable, IteratorAggregate, JsonSerializable
 {

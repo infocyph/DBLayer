@@ -38,7 +38,7 @@ final class DBLayerBench
 
     public function benchSelectByPrimaryKey(): void
     {
-        if (! self::$sqliteAvailable) {
+        if (!self::$sqliteAvailable) {
             DB::table('users')
                 ->where('id', '=', $this->currentUserId)
                 ->toSql();
@@ -56,7 +56,7 @@ final class DBLayerBench
         $firstId = $this->currentUserId;
         $secondId = $firstId === self::SEED_ROWS ? 1 : $firstId + 1;
 
-        if (! self::$sqliteAvailable) {
+        if (!self::$sqliteAvailable) {
             DB::table('users')->where('id', '=', $firstId)->toSql();
             DB::table('users')->where('id', '=', $secondId)->toSql();
 
@@ -71,7 +71,7 @@ final class DBLayerBench
 
     public function benchUpdateSingleColumn(): void
     {
-        if (! self::$sqliteAvailable) {
+        if (!self::$sqliteAvailable) {
             DB::table('users')
                 ->select('id')
                 ->where('id', '=', $this->currentUserId)
@@ -90,7 +90,7 @@ final class DBLayerBench
 
     public function setUpBeforeSubject(): void
     {
-        if (! self::$initialized) {
+        if (!self::$initialized) {
             self::initializeRuntime();
             self::$initialized = true;
         }
@@ -122,7 +122,7 @@ final class DBLayerBench
 
         self::$sqliteAvailable = \in_array('sqlite', PDO::getAvailableDrivers(), true);
 
-        if (! self::$sqliteAvailable) {
+        if (!self::$sqliteAvailable) {
             // Compile-only fallback for environments without pdo_sqlite.
             DB::addConnection([
                 'driver' => 'mysql',

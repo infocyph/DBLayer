@@ -11,14 +11,16 @@ use Throwable;
  * Base exception for all DBLayer-related errors.
  *
  * All domain-specific exceptions MUST extend this class.
+ *
+ * @phpstan-consistent-constructor
  */
 class DBException extends RuntimeException
 {
     /**
      * Wrap a lower-level throwable into a DBLayer exception.
      *
-     * @param Throwable   $throwable The original error.
-     * @param string|null $prefix    Optional context prefix for the message.
+     * @param Throwable $throwable The original error.
+     * @param string|null $prefix Optional context prefix for the message.
      */
     public static function fromThrowable(
         Throwable $throwable,

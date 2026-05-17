@@ -20,11 +20,11 @@ final class PostgreSQLGrammar extends Grammar
     /**
      * Compile a delete statement with RETURNING.
      *
-     * @param  array<int,string>  $returning
+     * @param array<int,string> $returning
      */
     public function compileDeleteReturning(QueryBuilder $query, array $returning = ['*']): string
     {
-        $delete  = $this->compileDelete($query);
+        $delete = $this->compileDelete($query);
         $columns = $this->columnize($returning);
 
         return "{$delete} returning {$columns}";
@@ -33,7 +33,7 @@ final class PostgreSQLGrammar extends Grammar
     /**
      * Compile an insert statement with RETURNING.
      *
-     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param array<int,array<string,mixed>>|array<string,mixed> $values
      */
     public function compileInsertGetId(
         QueryBuilder $query,
@@ -52,24 +52,21 @@ final class PostgreSQLGrammar extends Grammar
     #[\Override]
     public function compileTruncate(QueryBuilder $query): string
     {
-        $components = $query->getComponents();
-        $table      = $this->wrapTable($components['from']);
-
-        return "truncate table {$table} restart identity cascade";
+        return $this->compileTruncateTable($query, ' restart identity cascade');
     }
 
     /**
      * Compile an update statement with RETURNING.
      *
-     * @param  array<string,mixed>  $values
-     * @param  array<int,string>    $returning
+     * @param array<string,mixed> $values
+     * @param array<int,string> $returning
      */
     public function compileUpdateReturning(
         QueryBuilder $query,
         array $values,
         array $returning = ['*'],
     ): string {
-        $update  = $this->compileUpdate($query, $values);
+        $update = $this->compileUpdate($query, $values);
         $columns = $this->columnize($returning);
 
         return "{$update} returning {$columns}";
@@ -78,9 +75,9 @@ final class PostgreSQLGrammar extends Grammar
     /**
      * Compile an insert statement with ON CONFLICT (UPSERT).
      *
-     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
-     * @param  array<int,string>                                   $uniqueBy
-     * @param  array<string,mixed>|null                            $update
+     * @param array<int,array<string,mixed>>|array<string,mixed> $values
+     * @param array<int,string> $uniqueBy
+     * @param array<string,mixed>|null $update
      */
     public function compileUpsert(
         QueryBuilder $query,
@@ -88,7 +85,7 @@ final class PostgreSQLGrammar extends Grammar
         array $uniqueBy,
         ?array $update = null,
     ): string {
-        $insert   = $this->compileInsert($query, $values);
+        $insert = $this->compileInsert($query, $values);
         $conflict = $this->columnize($uniqueBy);
 
         if ($update === null) {
@@ -106,10 +103,10 @@ final class PostgreSQLGrammar extends Grammar
     /**
      * Compile an UPSERT statement with RETURNING.
      *
-     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
-     * @param  array<int,string>  $uniqueBy
-     * @param  array<string,mixed>|null  $update
-     * @param  array<int,string>  $returning
+     * @param array<int,array<string,mixed>>|array<string,mixed> $values
+     * @param array<int,string> $uniqueBy
+     * @param array<string,mixed>|null $update
+     * @param array<int,string> $returning
      */
     public function compileUpsertReturning(
         QueryBuilder $query,
@@ -155,7 +152,7 @@ final class PostgreSQLGrammar extends Grammar
         return match ($lock) {
             'update' => 'for update',
             'shared' => 'for share',
-            default  => '',
+            default => '',
         };
     }
 

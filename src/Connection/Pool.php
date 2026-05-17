@@ -31,10 +31,10 @@ final class Pool
      * }
      */
     private const array DEFAULTS = [
-        'min_connections'       => 1,
-        'max_connections'       => 10,
-        'idle_timeout'          => 60,
-        'max_lifetime'          => 3_600,
+        'min_connections' => 1,
+        'max_connections' => 10,
+        'idle_timeout' => 60,
+        'max_lifetime' => 3_600,
         'health_check_interval' => 30,
     ];
 
@@ -99,27 +99,27 @@ final class Pool
      * }
      */
     private array $stats = [
-        'created'         => 0,
-        'reused'          => 0,
-        'closed'          => 0,
-        'health_checks'   => 0,
+        'created' => 0,
+        'reused' => 0,
+        'closed' => 0,
+        'health_checks' => 0,
         'health_failures' => 0,
     ];
 
     /**
      * Create a new connection pool.
      *
-     * @param  array<string,int>  $poolConfig
+     * @param array<string,int> $poolConfig
      */
     public function __construct(array $poolConfig = [])
     {
         $merged = array_merge(self::DEFAULTS, $poolConfig);
 
         $this->poolConfig = [
-            'min_connections'       => (int) $merged['min_connections'],
-            'max_connections'       => (int) $merged['max_connections'],
-            'idle_timeout'          => (int) $merged['idle_timeout'],
-            'max_lifetime'          => (int) $merged['max_lifetime'],
+            'min_connections' => (int) $merged['min_connections'],
+            'max_connections' => (int) $merged['max_connections'],
+            'idle_timeout' => (int) $merged['idle_timeout'],
+            'max_lifetime' => (int) $merged['max_lifetime'],
             'health_check_interval' => (int) $merged['health_check_interval'],
         ];
     }
@@ -150,7 +150,7 @@ final class Pool
         }
 
         $this->connections = [];
-        $this->idle        = [];
+        $this->idle = [];
     }
 
     /**
@@ -168,7 +168,7 @@ final class Pool
      */
     public function getConnection(string $name = 'default'): Connection
     {
-        if (! isset($this->configs[$name])) {
+        if (!isset($this->configs[$name])) {
             throw ConnectionException::configNotFound($name);
         }
 
@@ -197,7 +197,7 @@ final class Pool
     public function getStats(): array
     {
         $totalConnections = 0;
-        $idleCount        = 0;
+        $idleCount = 0;
 
         foreach ($this->connections as $connections) {
             $totalConnections += count($connections);
@@ -208,20 +208,20 @@ final class Pool
         }
 
         $activeCount = max(0, $totalConnections - $idleCount);
-        $max         = $this->poolConfig['max_connections'];
+        $max = $this->poolConfig['max_connections'];
         $utilization = $max > 0 ? ($activeCount / $max) * 100.0 : 0.0;
 
         return [
-            'created'            => $this->stats['created'],
-            'reused'             => $this->stats['reused'],
-            'closed'             => $this->stats['closed'],
-            'health_checks'      => $this->stats['health_checks'],
-            'health_failures'    => $this->stats['health_failures'],
+            'created' => $this->stats['created'],
+            'reused' => $this->stats['reused'],
+            'closed' => $this->stats['closed'],
+            'health_checks' => $this->stats['health_checks'],
+            'health_failures' => $this->stats['health_failures'],
             'active_connections' => $activeCount,
-            'idle_connections'   => $idleCount,
-            'total_connections'  => $totalConnections,
-            'max_connections'    => $max,
-            'pool_utilization'   => $utilization,
+            'idle_connections' => $idleCount,
+            'total_connections' => $totalConnections,
+            'max_connections' => $max,
+            'pool_utilization' => $utilization,
         ];
     }
 
@@ -234,46 +234,18 @@ final class Pool
     {
         $now = microtime(true);
 
-        // Check if we need to perform health check.
-        if ($this->lastHealthCheck !== null) {
-            $elapsed = $now - $this->lastHealthCheck;
-
-            if ($elapsed < $this->poolConfig['health_check_interval']) {
-                return;
-            }
+        if (!$this->shouldRunHealthCheck($now)) {
+            return;
         }
 
         $this->lastHealthCheck = $now;
         $this->stats['health_checks']++;
 
-        // Probe active connections in bounded batches to avoid full scans.
-        $candidates = [];
-
-        foreach ($this->connections as $name => $connections) {
-            foreach ($connections as $data) {
-                $candidates[] = [
-                    'name'       => $name,
-                    'connection' => $data['connection'],
-                ];
-            }
-        }
-
+        $candidates = $this->collectHealthCheckCandidates();
         $total = \count($candidates);
 
         if ($total > 0) {
-            $batchSize = \min(self::HEALTH_CHECK_BATCH_SIZE, $total);
-
-            for ($i = 0; $i < $batchSize; $i++) {
-                $index = ($this->healthCursor + $i) % $total;
-                $item  = $candidates[$index];
-
-                if (! $item['connection']->isHealthy()) {
-                    $this->removeConnection($item['name'], $item['connection']);
-                    $this->stats['health_failures']++;
-                }
-            }
-
-            $this->healthCursor = ($this->healthCursor + $batchSize) % $total;
+            $this->probeHealthCheckBatch($candidates, $total);
         } else {
             $this->healthCursor = 0;
         }
@@ -288,7 +260,7 @@ final class Pool
     public function releaseConnection(string $name, Connection $connection): void
     {
         // Check if connection is healthy.
-        if (! $connection->isHealthy()) {
+        if (!$connection->isHealthy()) {
             $this->removeConnection($name, $connection);
 
             return;
@@ -299,7 +271,7 @@ final class Pool
 
         if (isset($this->connections[$name][$connectionId])) {
             $createdAt = $this->connections[$name][$connectionId]['created_at'];
-            $lifetime  = microtime(true) - $createdAt;
+            $lifetime = microtime(true) - $createdAt;
 
             if ($lifetime > $this->poolConfig['max_lifetime']) {
                 $this->removeConnection($name, $connection);
@@ -309,7 +281,7 @@ final class Pool
         }
 
         // Add to idle pool.
-        if (! isset($this->idle[$name])) {
+        if (!isset($this->idle[$name])) {
             $this->idle[$name] = [];
         }
 
@@ -347,10 +319,10 @@ final class Pool
     public function resetStats(): void
     {
         $this->stats = [
-            'created'         => 0,
-            'reused'          => 0,
-            'closed'          => 0,
-            'health_checks'   => 0,
+            'created' => 0,
+            'reused' => 0,
+            'closed' => 0,
+            'health_checks' => 0,
             'health_failures' => 0,
         ];
     }
@@ -370,6 +342,25 @@ final class Pool
     }
 
     /**
+     * @return list<array{name:string,connection:Connection}>
+     */
+    private function collectHealthCheckCandidates(): array
+    {
+        $candidates = [];
+
+        foreach ($this->connections as $name => $connections) {
+            foreach ($connections as $data) {
+                $candidates[] = [
+                    'name' => $name,
+                    'connection' => $data['connection'],
+                ];
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
      * Create a new connection.
      *
      * Each pooled connection gets its own HealthCheck instance
@@ -377,7 +368,7 @@ final class Pool
      */
     private function createConnection(string $name): Connection
     {
-        $config     = $this->configs[$name];
+        $config = $this->configs[$name];
         $connection = new Connection($config);
 
         // Attach HealthCheck monitor tuned with pool config.
@@ -389,7 +380,7 @@ final class Pool
 
         $connectionId = spl_object_id($connection);
 
-        if (! isset($this->connections[$name])) {
+        if (!isset($this->connections[$name])) {
             $this->connections[$name] = [];
         }
 
@@ -408,16 +399,12 @@ final class Pool
      */
     private function getIdleConnection(string $name): ?Connection
     {
-        if (! isset($this->idle[$name]) || $this->idle[$name] === []) {
+        if (!isset($this->idle[$name]) || $this->idle[$name] === []) {
             return null;
         }
 
         // Get the first idle connection.
         $connectionId = array_key_first($this->idle[$name]);
-        if ($connectionId === null) {
-            return null;
-        }
-
         $data = $this->idle[$name][$connectionId];
 
         // Check idle timeout.
@@ -433,7 +420,7 @@ final class Pool
         unset($this->idle[$name][$connectionId]);
 
         // Check health before returning (uses HealthCheck if attached).
-        if (! $data['connection']->isHealthy()) {
+        if (!$data['connection']->isHealthy()) {
             $this->removeConnection($name, $data['connection']);
 
             // Try next one.
@@ -441,6 +428,26 @@ final class Pool
         }
 
         return $data['connection'];
+    }
+
+    /**
+     * @param list<array{name:string,connection:Connection}> $candidates
+     */
+    private function probeHealthCheckBatch(array $candidates, int $total): void
+    {
+        $batchSize = \min(self::HEALTH_CHECK_BATCH_SIZE, $total);
+
+        for ($i = 0; $i < $batchSize; $i++) {
+            $index = ($this->healthCursor + $i) % $total;
+            $item = $candidates[$index];
+
+            if (!$item['connection']->isHealthy()) {
+                $this->removeConnection($item['name'], $item['connection']);
+                $this->stats['health_failures']++;
+            }
+        }
+
+        $this->healthCursor = ($this->healthCursor + $batchSize) % $total;
     }
 
     /**
@@ -459,5 +466,16 @@ final class Pool
                 }
             }
         }
+    }
+
+    private function shouldRunHealthCheck(float $now): bool
+    {
+        if ($this->lastHealthCheck === null) {
+            return true;
+        }
+
+        $elapsed = $now - $this->lastHealthCheck;
+
+        return $elapsed >= $this->poolConfig['health_check_interval'];
     }
 }

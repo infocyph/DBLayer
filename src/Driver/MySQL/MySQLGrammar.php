@@ -20,7 +20,7 @@ final class MySQLGrammar extends Grammar
     /**
      * Compile an INSERT IGNORE statement.
      *
-     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param array<int,array<string,mixed>>|array<string,mixed> $values
      */
     public function compileInsertIgnore(QueryBuilder $query, array $values): string
     {
@@ -30,8 +30,8 @@ final class MySQLGrammar extends Grammar
     /**
      * Compile an insert statement with ON DUPLICATE KEY UPDATE.
      *
-     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
-     * @param  array<string,mixed>  $update
+     * @param array<int,array<string,mixed>>|array<string,mixed> $values
+     * @param array<string,mixed> $update
      */
     public function compileInsertOnDuplicateKeyUpdate(
         QueryBuilder $query,
@@ -55,7 +55,7 @@ final class MySQLGrammar extends Grammar
     /**
      * Compile a REPLACE statement.
      *
-     * @param  array<int,array<string,mixed>>|array<string,mixed>  $values
+     * @param array<int,array<string,mixed>>|array<string,mixed> $values
      */
     public function compileReplace(QueryBuilder $query, array $values): string
     {
@@ -68,9 +68,7 @@ final class MySQLGrammar extends Grammar
     #[\Override]
     public function compileTruncate(QueryBuilder $query): string
     {
-        $components = $query->getComponents();
-
-        return 'truncate table ' . $this->wrapTable($components['from']);
+        return $this->compileTruncateTable($query);
     }
 
     /**
@@ -89,7 +87,7 @@ final class MySQLGrammar extends Grammar
     protected function compileLimit(QueryBuilder $query, int $limit): string
     {
         $components = $query->getComponents();
-        $offset     = $components['offset'];
+        $offset = $components['offset'];
 
         if ($offset !== null) {
             return 'limit ' . (int) $offset . ', ' . $limit;
@@ -109,7 +107,7 @@ final class MySQLGrammar extends Grammar
         return match ($lock) {
             'update' => 'for update',
             'shared' => 'lock in share mode',
-            default  => '',
+            default => '',
         };
     }
 

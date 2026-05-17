@@ -58,15 +58,15 @@ final class Transaction
      * }
      */
     private array $stats = [
-        'total'           => 0,
-        'committed'       => 0,
-        'rolled_back'     => 0,
-        'deadlocks'       => 0,
-        'timeouts'        => 0,
-        'in_transaction'  => false,
-        'current_level'   => 0,
-        'savepoints'      => 0,
-        'elapsed_time'    => 0.0,
+        'total' => 0,
+        'committed' => 0,
+        'rolled_back' => 0,
+        'deadlocks' => 0,
+        'timeouts' => 0,
+        'in_transaction' => false,
+        'current_level' => 0,
+        'savepoints' => 0,
+        'elapsed_time' => 0.0,
     ];
 
     public function __construct(
@@ -85,7 +85,7 @@ final class Transaction
             $this->connection->beginTransaction();
             $this->stats['total']++;
             $this->stats['in_transaction'] = true;
-            $this->startedAt               = microtime(true);
+            $this->startedAt = microtime(true);
             Events::dispatch('db.transaction.beginning', [new TransactionBeginning($this->connection)]);
         } else {
             $this->createSavepoint($this->level);
@@ -101,36 +101,21 @@ final class Transaction
      */
     public function commit(): void
     {
-        if ($this->level === 0) {
-            // Should not happen, but be defensive.
-            return;
-        }
-
-        $this->level--;
-        $this->stats['current_level'] = $this->level;
-
-        if ($this->level === 0) {
-            $this->connection->commit();
-            $this->stats['committed']++;
-            $durationMs = $this->transactionDurationMs();
-            $this->finishTopLevel();
-            Events::dispatch('db.transaction.committed', [
-                new TransactionCommitted($this->connection, $durationMs),
-            ]);
-        } else {
-            $this->releaseSavepoint($this->level);
-        }
+        $this->finishTransactionLevel(
+            $this->finalizeCommit(...),
+            $this->releaseSavepoint(...),
+        );
     }
 
     /**
      * Execute a callback within a transaction, with deadlock retries.
      *
-     * @param  callable(Connection):mixed  $callback
+     * @param callable(Connection):mixed $callback
      */
     public function execute(callable $callback, int $attempts = 1): mixed
     {
         $attempts = max(1, min($attempts, self::MAX_ATTEMPTS));
-        $attempt  = 0;
+        $attempt = 0;
 
         beginning:
 
@@ -207,15 +192,15 @@ final class Transaction
     public function resetStats(): void
     {
         $this->stats = [
-            'total'           => 0,
-            'committed'       => 0,
-            'rolled_back'     => 0,
-            'deadlocks'       => 0,
-            'timeouts'        => 0,
-            'in_transaction'  => $this->level > 0,
-            'current_level'   => $this->level,
-            'savepoints'      => 0,
-            'elapsed_time'    => 0.0,
+            'total' => 0,
+            'committed' => 0,
+            'rolled_back' => 0,
+            'deadlocks' => 0,
+            'timeouts' => 0,
+            'in_transaction' => $this->level > 0,
+            'current_level' => $this->level,
+            'savepoints' => 0,
+            'elapsed_time' => 0.0,
         ];
 
         $this->startedAt = $this->level > 0 ? (microtime(true)) : null;
@@ -226,24 +211,10 @@ final class Transaction
      */
     public function rollBack(): void
     {
-        if ($this->level === 0) {
-            return;
-        }
-
-        $this->level--;
-        $this->stats['current_level'] = $this->level;
-
-        if ($this->level === 0) {
-            $this->connection->rollBack();
-            $this->stats['rolled_back']++;
-            $durationMs = $this->transactionDurationMs();
-            $this->finishTopLevel();
-            Events::dispatch('db.transaction.rolled_back', [
-                new TransactionRolledBack($this->connection, $durationMs),
-            ]);
-        } else {
-            $this->rollbackToSavepoint($this->level);
-        }
+        $this->finishTransactionLevel(
+            $this->finalizeRollback(...),
+            $this->rollbackToSavepoint(...),
+        );
     }
 
     /**
@@ -273,11 +244,55 @@ final class Transaction
     {
         $supportsSavepoints = $this->connection->getCapabilities()->supportsSavepoints;
 
-        if (! $supportsSavepoints) {
+        if (!$supportsSavepoints) {
             return;
         }
 
         $this->connection->statement('SAVEPOINT trans_' . $level);
+    }
+
+    private function finalizeCommit(): void
+    {
+        $this->finalizeTopLevelChange(
+            fn(): bool => $this->connection->commit(),
+            'committed',
+            'db.transaction.committed',
+            fn(float $durationMs): TransactionCommitted => new TransactionCommitted($this->connection, $durationMs),
+        );
+    }
+
+    private function finalizeRollback(): void
+    {
+        $this->finalizeTopLevelChange(
+            fn(): bool => $this->connection->rollBack(),
+            'rolled_back',
+            'db.transaction.rolled_back',
+            fn(float $durationMs): TransactionRolledBack => new TransactionRolledBack($this->connection, $durationMs),
+        );
+    }
+
+    /**
+     * @param callable():bool $operation
+     * @param callable(float):object $eventFactory
+     * @param 'committed'|'rolled_back' $counterKey
+     */
+    private function finalizeTopLevelChange(
+        callable $operation,
+        string $counterKey,
+        string $eventName,
+        callable $eventFactory,
+    ): void {
+        $operation();
+
+        if ($counterKey === 'committed') {
+            $this->stats['committed']++;
+        } else {
+            $this->stats['rolled_back']++;
+        }
+
+        $durationMs = $this->transactionDurationMs();
+        $this->finishTopLevel();
+        Events::dispatch($eventName, [$eventFactory($durationMs)]);
     }
 
     /**
@@ -289,8 +304,32 @@ final class Transaction
             $this->stats['elapsed_time'] += microtime(true) - $this->startedAt;
         }
 
-        $this->startedAt              = null;
+        $this->startedAt = null;
         $this->stats['in_transaction'] = false;
+    }
+
+    /**
+     * Shared level transition for commit/rollback.
+     *
+     * @param callable():void $finalizeTopLevel
+     * @param callable(int):void $finalizeNested
+     */
+    private function finishTransactionLevel(callable $finalizeTopLevel, callable $finalizeNested): void
+    {
+        if ($this->level === 0) {
+            return;
+        }
+
+        $this->level--;
+        $this->stats['current_level'] = $this->level;
+
+        if ($this->level === 0) {
+            $finalizeTopLevel();
+
+            return;
+        }
+
+        $finalizeNested($this->level);
     }
 
     /**
@@ -300,7 +339,7 @@ final class Transaction
     {
         $supportsSavepoints = $this->connection->getCapabilities()->supportsSavepoints;
 
-        if (! $supportsSavepoints) {
+        if (!$supportsSavepoints) {
             return;
         }
 
@@ -314,7 +353,7 @@ final class Transaction
     {
         $supportsSavepoints = $this->connection->getCapabilities()->supportsSavepoints;
 
-        if (! $supportsSavepoints) {
+        if (!$supportsSavepoints) {
             return;
         }
 

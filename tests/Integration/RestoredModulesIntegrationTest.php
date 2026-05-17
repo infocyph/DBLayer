@@ -31,13 +31,28 @@ it('uses cachelayer file adapter through DB facade', function (string $driver): 
                 continue;
             }
 
-            @unlink($path);
+            if (is_file($path)) {
+                unlink($path);
+            }
         }
 
-        @rmdir($directory);
+        if (is_dir($directory)) {
+            rmdir($directory);
+        }
     };
 
-    $cacheDir = '/tmp/dblayer-file-cache-' . bin2hex(random_bytes(6));
+    $cacheDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'dblayer-file-cache-' . bin2hex(random_bytes(6));
+    $created = mkdir($cacheDir, 0700, true);
+    if ($created !== true && !is_dir($cacheDir)) {
+        throw new RuntimeException('Unable to create cache directory for test.');
+    }
+    chmod($cacheDir, 0700);
+
+    $perms = fileperms($cacheDir);
+    if ($perms !== false && (($perms & 0x0002) === 0x0002)) {
+        $removeDirectory($cacheDir);
+        test()->markTestSkipped('File permission world-writable checks are not supported in this environment.');
+    }
 
     $cache = DB::useFileCache($cacheDir);
     $stored = $cache->set('greeting', 'hello', 30);
@@ -127,7 +142,9 @@ it('records query logs and profiles through logger and profiler services', funct
 
     DB::disableLogger();
     DB::disableProfiler();
-    @unlink($logFile);
+    if (is_file($logFile)) {
+        unlink($logFile);
+    }
 })->with('dblayer_drivers');
 
 it('builds table repositories with normalized names and result processing', function (string $driver): void {
