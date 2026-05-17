@@ -1,6 +1,6 @@
 # DBLayer - High-Performance PHP Database Layer
 
-[![Security & Standards](https://github.com/infocyph/DBLayer/actions/workflows/build.yml/badge.svg)](https://github.com/infocyph/DBLayer/actions/workflows/build.yml)
+[![Security & Standards](https://github.com/infocyph/DBLayer/actions/workflows/security-standards.yml/badge.svg)](https://github.com/infocyph/DBLayer/actions/workflows/security-standards.yml)
 ![Packagist Downloads](https://img.shields.io/packagist/dt/infocyph/DBLayer?color=green\&link=https%3A%2F%2Fpackagist.org%2Fpackages%2Finfocyph%2FDBLayer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 ![Packagist Version](https://img.shields.io/packagist/v/infocyph/DBLayer)
@@ -13,18 +13,18 @@ A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with 
 ## Features
 
 ### Core Features
-- ✅ **Query Builder** - Fluent, Laravel-like API
-- ✅ **Repository Layer** - Thin class-based repositories on top of Query Builder
-- ✅ **Connection Manager** - Connection pooling + read replicas
-- ✅ **Replica Strategies** - `random`, `round_robin`, `least_latency`
-- ✅ **Multi-Driver** - MySQL, PostgreSQL, SQLite
-- ✅ **Security** - Multi-layer SQL injection protection
-- ✅ **Transactions** - Nested transactions with savepoints
-- ✅ **Caching** - Query result caching
-- ✅ **Profiling** - Performance monitoring
-- ✅ **Events** - Lifecycle hooks
-- ✅ **Telemetry** - Query + transaction observability export
-- ✅ **Pagination** - Length-aware, simple, and cursor pagination
+- **Query Builder** - Fluent, Laravel-like API
+- **Repository Layer** - Thin class-based repositories on top of Query Builder
+- **Connection Manager** - Connection pooling + read replicas
+- **Replica Strategies** - `random`, `round_robin`, `least_latency`
+- **Multi-Driver** - MySQL, PostgreSQL, SQLite
+- **Security** - Multi-layer SQL injection protection
+- **Transactions** - Nested transactions with savepoints
+- **Caching** - Query result caching
+- **Profiling** - Performance monitoring
+- **Events** - Lifecycle hooks
+- **Telemetry** - Query + transaction observability export
+- **Pagination** - Length-aware, simple, and cursor pagination
 
 ### Performance
 - Microsecond-level benchmark results for core query-builder and transaction paths
