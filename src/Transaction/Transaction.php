@@ -132,7 +132,7 @@ final class Transaction
         } catch (Throwable $e) {
             $this->rollBack();
 
-            if ($attempt < $attempts && $this->causedByDeadlock($e)) {
+            if ($attempt < $attempts && $this->causedByRetryableTransactionError($e)) {
                 $this->stats['deadlocks']++;
                 $this->backoff($attempt);
                 goto beginning;
@@ -228,13 +228,13 @@ final class Transaction
     }
 
     /**
-     * Determine if the given exception was caused by a deadlock.
+     * Determine if the given exception is a retryable transaction conflict.
      */
-    private function causedByDeadlock(Throwable $e): bool
+    private function causedByRetryableTransactionError(Throwable $e): bool
     {
         $driver = $this->connection->getDriverName();
 
-        return DriverProfile::causedByDeadlock($driver, $e);
+        return DriverProfile::causedByRetryableTransactionError($driver, $e);
     }
 
     /**

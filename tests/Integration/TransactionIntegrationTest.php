@@ -68,6 +68,16 @@ it('supports nested transactions with savepoint rollbacks', function (string $dr
     expect(DB::table($table)->pluck('name'))->toBe(['outer']);
 })->with('dblayer_drivers');
 
+it('supports read-only transaction callbacks', function (string $driver): void {
+    dblayerAddConnectionForDriver($driver);
+
+    $value = DB::readOnlyTransaction(
+        static fn($connection): int => (int) $connection->scalar('select 1'),
+    );
+
+    expect($value)->toBe(1);
+})->with('dblayer_drivers');
+
 it('retries transaction callbacks after deadlock-like failures', function (string $driver): void {
     dblayerAddConnectionForDriver($driver);
     $schemaDriver = dblayerConnectionDriver();

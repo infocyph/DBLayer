@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Connection;
 
 use Infocyph\DBLayer\Support\Numeric;
+use Infocyph\DBLayer\Support\RingBuffer;
 use Throwable;
 
 /**
@@ -61,11 +62,21 @@ final class HealthCheck
     ];
 
     /**
+     * Number of retained samples in the ring buffer.
+     */
+    private int $sampleCount = 0;
+
+    /**
      * Query performance samples.
      *
      * @var array<int,array{duration:float,success:bool,timestamp:float}>
      */
     private array $samples = [];
+
+    /**
+     * Ring-buffer start index for samples.
+     */
+    private int $sampleStart = 0;
 
     /**
      * Create a new health check instance.
@@ -172,7 +183,9 @@ final class HealthCheck
      */
     public function getPerformanceStats(): array
     {
-        if ($this->samples === []) {
+        $samples = $this->orderedSamples();
+
+        if ($samples === []) {
             return [
                 'avg_duration' => 0.0,
                 'min_duration' => 0.0,
@@ -184,13 +197,13 @@ final class HealthCheck
             ];
         }
 
-        $durations = array_column($this->samples, 'duration');
+        $durations = array_column($samples, 'duration');
         sort($durations);
 
-        $count = count($this->samples);
+        $count = count($samples);
         $successes = 0;
 
-        foreach ($this->samples as $sample) {
+        foreach ($samples as $sample) {
             if ($sample['success']) {
                 $successes++;
             }
@@ -267,16 +280,19 @@ final class HealthCheck
      */
     public function recordSample(float $duration, bool $success): void
     {
-        $this->samples[] = [
+        $sample = [
             'duration' => $duration,
             'success' => $success,
             'timestamp' => microtime(true),
         ];
 
-        // Keep only recent samples.
-        if (count($this->samples) > $this->config['sample_size']) {
-            array_shift($this->samples);
-        }
+        RingBuffer::append(
+            $this->samples,
+            $this->sampleStart,
+            $this->sampleCount,
+            (int) $this->config['sample_size'],
+            $sample,
+        );
     }
 
     /**
@@ -295,6 +311,36 @@ final class HealthCheck
         ];
 
         $this->samples = [];
+        $this->sampleStart = 0;
+        $this->sampleCount = 0;
+    }
+
+    /**
+     * @return array<int,array{duration:float,success:bool,timestamp:float}>
+     */
+    private function orderedSamples(): array
+    {
+        if ($this->sampleCount === 0) {
+            return [];
+        }
+
+        $max = (int) $this->config['sample_size'];
+        if ($max <= 0) {
+            return [];
+        }
+
+        if ($this->sampleCount < $max && $this->sampleStart === 0) {
+            return \array_values($this->samples);
+        }
+
+        $ordered = [];
+
+        for ($i = 0; $i < $this->sampleCount; $i++) {
+            $index = ($this->sampleStart + $i) % $max;
+            $ordered[] = $this->samples[$index];
+        }
+
+        return $ordered;
     }
 
     /**

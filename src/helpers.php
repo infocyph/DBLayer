@@ -42,6 +42,18 @@ if (!function_exists('db_transaction')) {
     }
 }
 
+if (!function_exists('db_read_only_transaction')) {
+    /**
+     * Execute a callback within a read-only database transaction.
+     *
+     * @throws Throwable
+     */
+    function db_read_only_transaction(callable $callback, int $attempts = 1, ?string $connection = null): mixed
+    {
+        return DB::connection($connection)->readOnlyTransaction($callback, $attempts);
+    }
+}
+
 if (!function_exists('db_select')) {
     /**
      * Execute a select query.
@@ -73,6 +85,40 @@ if (!function_exists('db_select_one')) {
         $results = db_select($query, $bindings, $connection);
 
         return $results[0] ?? null;
+    }
+}
+
+if (!function_exists('db_stream')) {
+    /**
+     * Stream a query result lazily as a generator.
+     *
+     * @param array<int,mixed> $bindings
+     * @return Generator<mixed>
+     */
+    function db_stream(
+        string $query,
+        array $bindings = [],
+        ?string $connection = null,
+        ?int $fetchMode = null,
+    ): Generator {
+        yield from DB::connection($connection)->stream($query, $bindings, $fetchMode);
+    }
+}
+
+if (!function_exists('db_yield_rows')) {
+    /**
+     * Generator alias for db_stream().
+     *
+     * @param array<int,mixed> $bindings
+     * @return Generator<mixed>
+     */
+    function db_yield_rows(
+        string $query,
+        array $bindings = [],
+        ?string $connection = null,
+        ?int $fetchMode = null,
+    ): Generator {
+        yield from db_stream($query, $bindings, $connection, $fetchMode);
     }
 }
 

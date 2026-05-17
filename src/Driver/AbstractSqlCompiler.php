@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Driver;
 
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
+use Infocyph\DBLayer\Driver\Support\MutationCompiler;
 use Infocyph\DBLayer\Query\Core\CompiledQuery;
 use Infocyph\DBLayer\Query\Core\QueryPayload;
 use Infocyph\DBLayer\Query\Core\QueryType;
@@ -15,9 +16,12 @@ use Stringable;
 /**
  * Generic AST-based SQL compiler.
  *
- * Currently focuses on SELECT + aggregates to keep things safe:
- * - INSERT/UPDATE/DELETE/TRUNCATE intentionally unsupported here for now.
- * - Engine-specific subclasses handle identifier quoting.
+ * Supports SELECT and core write operations:
+ * - INSERT
+ * - UPDATE
+ * - DELETE
+ * - TRUNCATE
+ * Engine-specific subclasses handle identifier quoting.
  */
 abstract class AbstractSqlCompiler implements QueryCompilerInterface
 {
@@ -32,20 +36,27 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
     public function compile(QueryPayload $payload): CompiledQuery
     {
         $type = $payload->type;
+        [$sql, $bindings] = match ($type) {
+            QueryType::SELECT => [$this->compileSelect($payload), $payload->bindings],
+            QueryType::INSERT => $this->compileInsert($payload),
+            QueryType::UPDATE => $this->compileUpdate($payload),
+            QueryType::DELETE => [$this->compileDelete($payload), $payload->bindings],
+            QueryType::TRUNCATE => [$this->compileTruncate($payload), []],
+        };
 
-        if ($type !== QueryType::SELECT) {
-            throw new LogicException(
-                sprintf(
-                    'Only SELECT queries are supported by %s currently (got %s).',
-                    static::class,
-                    $type->value,
-                ),
-            );
+        return new CompiledQuery($sql, $bindings, $payload->type);
+    }
+
+    protected function compileDelete(QueryPayload $payload): string
+    {
+        $sql = 'DELETE FROM ' . $this->wrapIdentifier($this->requireTable($payload));
+        $where = $this->compileWheres($payload);
+
+        if ($where !== '') {
+            $sql .= ' WHERE ' . $where;
         }
 
-        $sql = $this->compileSelect($payload);
-
-        return new CompiledQuery($sql, $payload->bindings, $payload->type);
+        return $sql;
     }
 
     protected function compileFrom(QueryPayload $payload): string
@@ -106,6 +117,18 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         }
 
         return implode(' ', $segments);
+    }
+
+    /**
+     * @return array{0:string,1:list<mixed>}
+     */
+    protected function compileInsert(QueryPayload $payload): array
+    {
+        return MutationCompiler::compileInsert(
+            $this->requireTable($payload),
+            $payload->insertRows,
+            fn(string $identifier): string => $this->wrapIdentifier($identifier),
+        );
     }
 
     protected function compileJoins(QueryPayload $payload): string
@@ -282,6 +305,32 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         return 'SELECT ' . implode(', ', $parts);
     }
 
+    protected function compileTruncate(QueryPayload $payload): string
+    {
+        return $this->truncateStatementForTable($this->wrapIdentifier($this->requireTable($payload)));
+    }
+
+    /**
+     * @return array{0:string,1:list<mixed>}
+     */
+    protected function compileUpdate(QueryPayload $payload): array
+    {
+        [$sql, $bindings] = MutationCompiler::compileUpdate(
+            $this->requireTable($payload),
+            $payload->updateValues,
+            $payload->bindings,
+            fn(string $identifier): string => $this->wrapIdentifier($identifier),
+        );
+
+        $where = $this->compileWheres($payload);
+
+        if ($where !== '') {
+            $sql .= ' WHERE ' . $where;
+        }
+
+        return [$sql, $bindings];
+    }
+
     /**
      * @param array<string,mixed> $where
      */
@@ -415,6 +464,24 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
     protected function expressionToSql(Expression $expression): string
     {
         return $expression->getValue();
+    }
+
+    protected function requireTable(QueryPayload $payload): string
+    {
+        $table = trim((string) $payload->table);
+
+        if ($table === '') {
+            throw new LogicException(
+                sprintf('Payload for %s requires a non-empty table name.', $payload->type->value),
+            );
+        }
+
+        return $table;
+    }
+
+    protected function truncateStatementForTable(string $wrappedTable): string
+    {
+        return 'TRUNCATE TABLE ' . $wrappedTable;
     }
 
     /**

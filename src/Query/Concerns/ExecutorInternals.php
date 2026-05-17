@@ -8,6 +8,7 @@ use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Query\JoinClause;
 use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Support\RingBuffer;
 
 trait ExecutorInternals
 {
@@ -35,16 +36,13 @@ trait ExecutorInternals
             return;
         }
 
-        if ($this->queryLogCount < $max) {
-            $index = ($this->queryLogStart + $this->queryLogCount) % $max;
-            $this->queryLog[$index] = $entry;
-            $this->queryLogCount++;
-
-            return;
-        }
-
-        $this->queryLog[$this->queryLogStart] = $entry;
-        $this->queryLogStart = ($this->queryLogStart + 1) % $max;
+        RingBuffer::append(
+            $this->queryLog,
+            $this->queryLogStart,
+            $this->queryLogCount,
+            $max,
+            $entry,
+        );
     }
 
     /**
@@ -85,6 +83,22 @@ trait ExecutorInternals
                 return false;
             }
         }
+
+        foreach ($components['wheres'] as $where) {
+            if (!$this->canCompileWhereClause($where)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Decide whether mutation WHERE clauses can safely use the driver compiler path.
+     */
+    private function canUseDriverCompilerForMutation(QueryBuilder $query): bool
+    {
+        $components = $query->getComponents();
 
         foreach ($components['wheres'] as $where) {
             if (!$this->canCompileWhereClause($where)) {
@@ -145,6 +159,35 @@ trait ExecutorInternals
     }
 
     /**
+     * Emit query-failed event preserving elapsed duration and attempts.
+     *
+     * @param list<mixed> $bindings
+     */
+    private function emitFailedEvent(
+        string $sql,
+        array $bindings,
+        float $elapsed,
+        \Throwable $error,
+        int $attempts = 1,
+    ): void {
+        if (!$this->dispatchEvents) {
+            return;
+        }
+
+        $this->dispatchEvent(
+            'db.query.failed',
+            new \Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed(
+                $sql,
+                $bindings,
+                $elapsed * 1000,
+                $this->connection,
+                $error,
+                $attempts,
+            ),
+        );
+    }
+
+    /**
      * Execute an affecting query (DELETE/UPDATE) with consistent instrumentation.
      *
      * @param list<mixed> $bindings
@@ -189,7 +232,6 @@ trait ExecutorInternals
         array $bindings,
         callable $operation,
         callable $resolveRowCount,
-        ?int $errorRowCount = 0,
     ): mixed {
         $this->validateBindingCount($sql, $bindings);
         $startTime = \microtime(true);
@@ -202,7 +244,9 @@ trait ExecutorInternals
         }
 
         try {
-            $result = $operation();
+            $result = $this->connection->withoutQueryEvents(
+                static fn(): mixed => $operation(),
+            );
             $elapsed = \microtime(true) - $startTime;
 
             $this->logQuery($sql, $bindings, $elapsed);
@@ -213,7 +257,7 @@ trait ExecutorInternals
             $elapsed = \microtime(true) - $startTime;
 
             $this->logQuery($sql, $bindings, $elapsed, $e->getMessage());
-            $this->emitExecutedEvent($sql, $bindings, $elapsed, $errorRowCount);
+            $this->emitFailedEvent($sql, $bindings, $elapsed, $e);
 
             throw QueryException::executionFailed($sql, $e->getMessage());
         }
@@ -240,7 +284,6 @@ trait ExecutorInternals
 
                 return null;
             },
-            null,
         );
 
         return true;
@@ -420,7 +463,7 @@ trait ExecutorInternals
         }
 
         if ($this->maxLogEntries === null) {
-            return $this->queryLog;
+            return \array_values($this->queryLog);
         }
 
         $ordered = [];

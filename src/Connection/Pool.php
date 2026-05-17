@@ -143,12 +143,6 @@ final class Pool
             }
         }
 
-        foreach ($this->idle as $connections) {
-            foreach ($connections as $data) {
-                $data['connection']->disconnect();
-            }
-        }
-
         $this->connections = [];
         $this->idle = [];
     }

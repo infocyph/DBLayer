@@ -13,6 +13,7 @@ use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
 use Infocyph\DBLayer\Query\Concerns\QueryBuilderInternals;
 use Infocyph\DBLayer\Query\Core\QueryPayload;
+use Infocyph\DBLayer\Query\Core\QueryType;
 
 /**
  * SQL Query Builder
@@ -324,22 +325,17 @@ class QueryBuilder
     }
 
     /**
-     * Iterate over the results using a simple cursor based on LIMIT/OFFSET.
+     * Iterate over rows lazily using the underlying PDO cursor.
      *
-     * This keeps memory usage bounded by $chunkSize.
-     *
-     * @return Generator<array<string,mixed>>
+     * @return Generator<mixed>
      */
     public function cursor(int $chunkSize = 1000): Generator
     {
         if ($chunkSize <= 0) {
             throw QueryException::invalidLimit($chunkSize);
         }
-        foreach ($this->offsetChunks($chunkSize) as [$results]) {
-            foreach ($results as $row) {
-                yield $row;
-            }
-        }
+
+        yield from $this->stream();
     }
 
     /**
@@ -1063,6 +1059,24 @@ class QueryBuilder
     }
 
     /**
+     * Stream rows lazily for this SELECT query.
+     *
+     * @return Generator<mixed>
+     */
+    public function stream(?int $fetchMode = null): Generator
+    {
+        if ($this->type === null) {
+            $this->type = 'select';
+        }
+
+        yield from $this->connection->stream(
+            $this->toSelectSql(),
+            $this->getBindings(),
+            $fetchMode,
+        );
+    }
+
+    /**
      * Get the sum of a column.
      */
     public function sum(string $column): mixed
@@ -1087,11 +1101,31 @@ class QueryBuilder
     }
 
     /**
+     * Build a compiler payload for DELETE.
+     */
+    public function toDeletePayload(): QueryPayload
+    {
+        return $this->toPayload()->with([
+            'type' => QueryType::DELETE,
+        ]);
+    }
+
+    /**
+     * Build a compiler payload for INSERT.
+     *
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     */
+    public function toInsertPayload(array $values): QueryPayload
+    {
+        return $this->toPayload()->with([
+            'type' => QueryType::INSERT,
+            'insertRows' => $this->normalizePayloadInsertRows($values),
+        ]);
+    }
+
+    /**
      * New pipeline: convert the current query into a QueryPayload
      * so the driver/compiler can generate SQL.
-     *
-     * NOTE: "distinct" is not yet represented in QueryPayload; the
-     * Grammar path remains the canonical source of truth for now.
      */
     public function toPayload(): QueryPayload
     {
@@ -1148,6 +1182,29 @@ class QueryBuilder
     public function toSql(): string
     {
         return $this->toSelectSql();
+    }
+
+    /**
+     * Build a compiler payload for TRUNCATE.
+     */
+    public function toTruncatePayload(): QueryPayload
+    {
+        return $this->toPayload()->with([
+            'type' => QueryType::TRUNCATE,
+        ]);
+    }
+
+    /**
+     * Build a compiler payload for UPDATE.
+     *
+     * @param array<string,mixed> $values
+     */
+    public function toUpdatePayload(array $values): QueryPayload
+    {
+        return $this->toPayload()->with([
+            'type' => QueryType::UPDATE,
+            'updateValues' => $this->normalizePayloadUpdateValues($values),
+        ]);
     }
 
     /**
@@ -1500,6 +1557,16 @@ class QueryBuilder
     }
 
     /**
+     * Generator alias for stream().
+     *
+     * @return Generator<mixed>
+     */
+    public function yieldRows(?int $fetchMode = null): Generator
+    {
+        yield from $this->stream($fetchMode);
+    }
+
+    /**
      * @param array<string,mixed> $where
      * @param list<mixed> $bindings
      */
@@ -1531,6 +1598,45 @@ class QueryBuilder
         $clone->limit = $chunkSize;
 
         return $clone->get();
+    }
+
+    /**
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @return list<array<string,mixed>>
+     */
+    private function normalizePayloadInsertRows(array $values): array
+    {
+        if ($values === []) {
+            return [];
+        }
+
+        if (!\is_array(\reset($values))) {
+            /** @var array<string,mixed> $row */
+            $row = $values;
+            $values = [$row];
+        }
+
+        /** @var list<array<string,mixed>> $values */
+        return $values;
+    }
+
+    /**
+     * @param array<string,mixed> $values
+     * @return array<string,mixed>
+     */
+    private function normalizePayloadUpdateValues(array $values): array
+    {
+        $normalized = [];
+
+        foreach ($values as $column => $value) {
+            if ($column === '') {
+                continue;
+            }
+
+            $normalized[$column] = $value;
+        }
+
+        return $normalized;
     }
 
     /**

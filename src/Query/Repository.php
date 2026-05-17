@@ -364,7 +364,7 @@ abstract class Repository
      * Iterate rows as a generator.
      *
      * @param callable(QueryBuilder):void|null $scope
-     * @return Generator<array<string,mixed>>
+     * @return Generator<mixed>
      */
     public function cursor(int $chunkSize = 1000, ?callable $scope = null): Generator
     {
@@ -684,7 +684,7 @@ abstract class Repository
      * Lazy generator alias for cursor().
      *
      * @param callable(QueryBuilder):void|null $scope
-     * @return Generator<array<string,mixed>>
+     * @return Generator<mixed>
      */
     public function lazy(int $chunkSize = 1000, ?callable $scope = null): Generator
     {
@@ -868,6 +868,22 @@ abstract class Repository
     }
 
     /**
+     * Stream rows lazily as a generator.
+     *
+     * @param callable(QueryBuilder):void|null $scope
+     * @return Generator<mixed>
+     */
+    public function stream(?callable $scope = null, ?int $fetchMode = null): Generator
+    {
+        $query = $this->applyScope(
+            $this->query(),
+            $scope,
+        );
+
+        return $query->stream($fetchMode);
+    }
+
+    /**
      * Update one row by primary key.
      *
      * @param array<string,mixed> $values
@@ -1027,6 +1043,17 @@ abstract class Repository
         $this->onlyTrashed = false;
 
         return $this;
+    }
+
+    /**
+     * Generator alias for stream().
+     *
+     * @param callable(QueryBuilder):void|null $scope
+     * @return Generator<mixed>
+     */
+    public function yieldRows(?callable $scope = null, ?int $fetchMode = null): Generator
+    {
+        yield from $this->stream($scope, $fetchMode);
     }
 
     /**

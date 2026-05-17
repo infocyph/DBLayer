@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Support;
 
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
+use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionBeginning;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionCommitted;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionRolledBack;
@@ -327,9 +328,34 @@ final class Telemetry
                 'sql' => $event->sql,
                 'bindings_count' => \count($event->bindings),
                 'duration_ms' => $event->time,
+                'success' => true,
                 'rows_affected' => $event->rowsAffected,
                 'connection' => $event->connection->getDriverName(),
                 'timestamp' => microtime(true),
+            ];
+            self::trimQueryBuffer();
+        });
+
+        Events::listen('db.query.failed', static function (QueryFailed $event): void {
+            if (!self::$enabled) {
+                return;
+            }
+
+            self::$sequence++;
+            self::$queries[] = [
+                'span_id' => 'q-' . self::$sequence,
+                'sql' => $event->sql,
+                'bindings_count' => \count($event->bindings),
+                'duration_ms' => $event->time,
+                'success' => false,
+                'rows_affected' => null,
+                'connection' => $event->connection->getDriverName(),
+                'timestamp' => microtime(true),
+                'error' => $event->error,
+                'statement' => $event->statement,
+                'fingerprint' => $event->fingerprint,
+                'attempts' => $event->attempts,
+                'exception' => $event->exceptionClass,
             ];
             self::trimQueryBuffer();
         });

@@ -23,10 +23,12 @@ final readonly class QueryPayload
      * @param list<string> $groups
      * @param list<array<string,mixed>> $havings
      * @param list<array{column:string,direction:string}> $orders
-     * @param list<array{query:QueryPayload,all:bool}> $unions
-     * @param array{function:string,column:string}|null $aggregate
-     * @param list<mixed> $bindings
-     */
+ * @param list<array{query:QueryPayload,all:bool}> $unions
+ * @param array{function:string,column:string}|null $aggregate
+ * @param list<mixed> $bindings
+ * @param list<array<string,mixed>> $insertRows
+ * @param array<string,mixed> $updateValues
+ */
     public function __construct(
         public QueryType $type,
         public ?string $table,
@@ -42,6 +44,8 @@ final readonly class QueryPayload
         public ?string $lock,
         public ?array $aggregate,
         public array $bindings,
+        public array $insertRows = [],
+        public array $updateValues = [],
     ) {}
 
     /**
@@ -61,7 +65,9 @@ final readonly class QueryPayload
      *   unions?:list<array{query:QueryPayload,all:bool}>,
      *   lock?:?string,
      *   aggregate?:array{function:string,column:string}|null,
-     *   bindings?:list<mixed>
+     *   bindings?:list<mixed>,
+     *   insertRows?:list<array<string,mixed>>,
+     *   updateValues?:array<string,mixed>
      * } $overrides
      */
     public function with(array $overrides): self
@@ -81,6 +87,8 @@ final readonly class QueryPayload
             $overrides['lock'] ?? $this->lock,
             self::normalizeAggregate($overrides['aggregate'] ?? $this->aggregate),
             self::normalizeMixedList($overrides['bindings'] ?? $this->bindings),
+            self::normalizeInsertRows($overrides['insertRows'] ?? $this->insertRows),
+            self::normalizeStringKeyMap($overrides['updateValues'] ?? $this->updateValues),
         );
     }
 
@@ -139,6 +147,25 @@ final readonly class QueryPayload
             }
 
             $normalized[] = $value;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param array<int|string,mixed> $values
+     * @return list<array<string,mixed>>
+     */
+    private static function normalizeInsertRows(array $values): array
+    {
+        $normalized = [];
+
+        foreach ($values as $value) {
+            if (!is_array($value)) {
+                continue;
+            }
+
+            $normalized[] = ArrayNormalizer::stringKeyArray($value);
         }
 
         return $normalized;
@@ -211,6 +238,15 @@ final readonly class QueryPayload
         }
 
         return $normalized;
+    }
+
+    /**
+     * @param array<int|string,mixed> $values
+     * @return array<string,mixed>
+     */
+    private static function normalizeStringKeyMap(array $values): array
+    {
+        return ArrayNormalizer::stringKeyArray($values);
     }
 
     /**

@@ -7,6 +7,7 @@ namespace Infocyph\DBLayer\Query;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuting;
+use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Grammar\Grammar;
@@ -52,7 +53,7 @@ final class Executor
      *  - timestamp (float, seconds)
      *  - error (string|null)
      *
-     * @var list<array{
+     * @var array<int,array{
      *   sql:string,
      *   bindings:list<mixed>,
      *   time:float,
@@ -106,8 +107,14 @@ final class Executor
      */
     public function delete(QueryBuilder $query): int
     {
-        $sql = $this->normalizeSql($this->grammar->compileDelete($query));
-        $bindings = $this->normalizeBindings($query->getBindings());
+        if ($this->canUseDriverCompilerForMutation($query)) {
+            $compiled = $this->connection->getCompiler()->compile($query->toDeletePayload());
+            $sql = $this->normalizeSql($compiled->sql);
+            $bindings = $this->normalizeBindings($compiled->bindings);
+        } else {
+            $sql = $this->normalizeSql($this->grammar->compileDelete($query));
+            $bindings = $this->normalizeBindings($query->getBindings());
+        }
 
         return $this->executeAffecting(
             $sql,
@@ -293,8 +300,9 @@ final class Executor
             return true;
         }
 
-        $sql = $this->normalizeSql($this->grammar->compileInsert($query, $rows));
-        $bindings = $this->getInsertBindings($rows);
+        $compiled = $this->connection->getCompiler()->compile($query->toInsertPayload($rows));
+        $sql = $this->normalizeSql($compiled->sql);
+        $bindings = $this->normalizeBindings($compiled->bindings);
 
         return $this->executeInsertLike($sql, $bindings, \count($rows));
     }
@@ -392,7 +400,9 @@ final class Executor
         }
 
         try {
-            $results = $this->connection->select($sql, $bindings);
+            $results = $this->connection->withoutQueryEvents(
+                fn(): array => $this->connection->select($sql, $bindings),
+            );
             $elapsed = \microtime(true) - $startTime;
 
             $this->logQuery($sql, $bindings, $elapsed);
@@ -412,8 +422,8 @@ final class Executor
 
             if ($this->dispatchEvents) {
                 $this->dispatchEvent(
-                    'db.query.executed',
-                    new QueryExecuted($sql, $bindings, $elapsed * 1000, $this->connection),
+                    'db.query.failed',
+                    new QueryFailed($sql, $bindings, $elapsed * 1000, $this->connection, $e, 1),
                 );
             }
 
@@ -486,7 +496,8 @@ final class Executor
      */
     public function truncate(QueryBuilder $query): bool
     {
-        $sql = $this->normalizeSql($this->grammar->compileTruncate($query));
+        $compiled = $this->connection->getCompiler()->compile($query->toTruncatePayload());
+        $sql = $this->normalizeSql($compiled->sql);
 
         return $this->executeStatementLike(
             $sql,
@@ -508,8 +519,14 @@ final class Executor
             return 0;
         }
 
-        $sql = $this->normalizeSql($this->grammar->compileUpdate($query, $values));
-        $bindings = $this->normalizeBindings(\array_merge(\array_values($values), $query->getBindings()));
+        if ($this->canUseDriverCompilerForMutation($query)) {
+            $compiled = $this->connection->getCompiler()->compile($query->toUpdatePayload($values));
+            $sql = $this->normalizeSql($compiled->sql);
+            $bindings = $this->normalizeBindings($compiled->bindings);
+        } else {
+            $sql = $this->normalizeSql($this->grammar->compileUpdate($query, $values));
+            $bindings = $this->normalizeBindings(\array_merge(\array_values($values), $query->getBindings()));
+        }
 
         return $this->executeAffecting(
             $sql,

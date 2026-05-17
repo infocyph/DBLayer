@@ -17,6 +17,7 @@ use Infocyph\DBLayer\Transaction\TransactionManager;
 use PDO;
 use PDOException;
 use PDOStatement;
+use Throwable;
 
 trait ConnectionInternals
 {
@@ -56,6 +57,79 @@ trait ConnectionInternals
             $pdo->exec('set statement_timeout = ' . $value);
         } catch (PDOException) {
             // Ignore when not supported by server role/config.
+        }
+    }
+
+    /**
+     * Build an optional SQL comment prefix for observability context.
+     */
+    private function applyQueryComment(string $sql): string
+    {
+        if (!$this->config->shouldUseQueryComments()) {
+            return $sql;
+        }
+
+        $context = $this->normalizeCommentContext($this->queryCommentContext);
+
+        if ($context === []) {
+            return $sql;
+        }
+
+        $parts = [];
+
+        foreach ($context as $key => $value) {
+            $normalized = $this->normalizeCommentValue($value);
+
+            if ($normalized === '') {
+                continue;
+            }
+
+            $parts[] = $key . '=' . $normalized;
+        }
+
+        if ($parts === []) {
+            return $sql;
+        }
+
+        $payload = implode(' ', $parts);
+        $maxLength = $this->config->getQueryCommentMaxLength();
+
+        if (strlen($payload) > $maxLength) {
+            $payload = substr($payload, 0, $maxLength);
+        }
+
+        return '/* ' . $payload . ' */ ' . $sql;
+    }
+
+    /**
+     * Apply best-effort read-only transaction mode for current transaction.
+     */
+    private function applyReadOnlyTransactionMode(): void
+    {
+        $driver = strtolower($this->config->getDriver());
+
+        if ($driver === 'sqlite') {
+            // SQLite has no transaction-scoped read-only switch; best effort is no-op.
+            return;
+        }
+
+        $pdo = $this->getPdo();
+
+        try {
+            if ($driver === 'pgsql') {
+                $pdo->exec('set transaction read only');
+
+                return;
+            }
+
+            if ($driver === 'mysql' || $driver === 'mariadb') {
+                $pdo->exec('set transaction read only');
+
+                return;
+            }
+
+        } catch (PDOException) {
+            // Best effort only.
         }
     }
 
@@ -197,19 +271,54 @@ trait ConnectionInternals
     }
 
     /**
+     * Clear statement cache for all read/write buckets.
+     */
+    private function clearStatementCache(): void
+    {
+        $this->clearStatementCacheBucket(true);
+        $this->clearStatementCacheBucket(false);
+    }
+
+    /**
+     * Clear statement cache for one bucket.
+     */
+    private function clearStatementCacheBucket(bool $isWrite): void
+    {
+        if ($isWrite) {
+            $this->statementCache['write'] = [];
+            $this->statementCacheLru['write'] = [];
+            $this->statementCachePdoIds['write'] = null;
+
+            return;
+        }
+
+        $this->statementCache['read'] = [];
+        $this->statementCacheLru['read'] = [];
+        $this->statementCachePdoIds['read'] = null;
+    }
+
+    /**
      * Establish write database connection via the driver.
      */
     private function connect(): void
     {
+        $this->dispatchBeforeConnect(true);
+
         try {
             $config = $this->resolveWriteConnectionConfig();
-            $this->pdo = $this->driver->createPdo($config, false);
-            $this->applyServerSideTimeoutToPdo($this->pdo);
+            $pdo = $this->driver->createPdo($config, false);
+            $this->pdo = $pdo;
+            $this->applyServerSideTimeoutToPdo($pdo);
+            $this->syncStatementCachePdoBucket(true, $pdo);
+            $this->dispatchAfterConnect(true);
         } catch (PDOException $e) {
-            throw ConnectionException::connectionFailed(
+            $exception = ConnectionException::connectionFailed(
                 $this->config->getDriver(),
                 $e->getMessage(),
             );
+            $this->dispatchConnectionFailure(true, 1, $exception);
+
+            throw $exception;
         }
     }
 
@@ -222,21 +331,32 @@ trait ConnectionInternals
 
         if ($readConfigs === []) {
             $this->readPdo = null;
+            $this->clearStatementCacheBucket(false);
             $this->readReplicaIndex = null;
             $this->readReplicaLatenciesMs = [];
 
             return;
         }
 
+        $this->dispatchBeforeConnect(false);
+
         try {
             [$index, $pdo] = $this->resolveReadReplicaPdo($readConfigs);
             $this->readReplicaIndex = $index;
             $this->readPdo = $pdo;
-            $this->applyServerSideTimeoutToPdo($this->readPdo);
-            ReadReplicaSessionPolicy::apply($this->config->getDriver(), $this->readPdo);
-        } catch (PDOException|ConnectionException) {
+            $this->applyServerSideTimeoutToPdo($pdo);
+            $this->syncStatementCachePdoBucket(false, $pdo);
+            ReadReplicaSessionPolicy::apply(
+                $this->config->getDriver(),
+                $this->readPdo,
+                $this->config->shouldEnforceReadSessionReadOnly(),
+            );
+            $this->dispatchAfterConnect(false);
+        } catch (PDOException|ConnectionException $e) {
             // Silent fallback to write connection; readPdo stays null.
+            $this->dispatchConnectionFailure(false, 1, $e);
             $this->readPdo = null;
+            $this->clearStatementCacheBucket(false);
             $this->readReplicaIndex = null;
         }
     }
@@ -265,6 +385,76 @@ trait ConnectionInternals
         $config = ConnectionConfig::fromArray($merged);
 
         return $this->driver->createPdo($config, true);
+    }
+
+    /**
+     * Trigger lifecycle hooks after connect.
+     */
+    private function dispatchAfterConnect(bool $isWrite): void
+    {
+        foreach ($this->lifecycleHooks['afterConnect'] as $hook) {
+            try {
+                $hook($this, $isWrite);
+            } catch (Throwable) {
+                // Hooks should never interrupt connection lifecycle.
+            }
+        }
+    }
+
+    /**
+     * Trigger lifecycle hooks after reconnect.
+     */
+    private function dispatchAfterReconnect(bool $isWrite, int $attempt): void
+    {
+        foreach ($this->lifecycleHooks['afterReconnect'] as $hook) {
+            try {
+                $hook($this, $isWrite, $attempt);
+            } catch (Throwable) {
+                // Hooks should never interrupt connection lifecycle.
+            }
+        }
+    }
+
+    /**
+     * Trigger lifecycle hooks before connect.
+     */
+    private function dispatchBeforeConnect(bool $isWrite): void
+    {
+        foreach ($this->lifecycleHooks['beforeConnect'] as $hook) {
+            try {
+                $hook($this, $isWrite);
+            } catch (Throwable) {
+                // Hooks should never interrupt connection lifecycle.
+            }
+        }
+    }
+
+    /**
+     * Trigger lifecycle hooks before reconnect.
+     */
+    private function dispatchBeforeReconnect(bool $isWrite, int $attempt): void
+    {
+        foreach ($this->lifecycleHooks['beforeReconnect'] as $hook) {
+            try {
+                $hook($this, $isWrite, $attempt);
+            } catch (Throwable) {
+                // Hooks should never interrupt connection lifecycle.
+            }
+        }
+    }
+
+    /**
+     * Trigger lifecycle hooks for connection failures.
+     */
+    private function dispatchConnectionFailure(bool $isWrite, int $attempt, Throwable $error): void
+    {
+        foreach ($this->lifecycleHooks['onConnectionFailure'] as $hook) {
+            try {
+                $hook($this, $isWrite, $attempt, $error);
+            } catch (Throwable) {
+                // Hooks should never interrupt connection lifecycle.
+            }
+        }
     }
 
     /**
@@ -323,6 +513,24 @@ trait ConnectionInternals
             $identifier,
             $limits,
         );
+    }
+
+    /**
+     * Evict least-recently-used statements beyond configured max size.
+     */
+    private function evictStatementCacheIfNeeded(bool $isWrite, int $maxSize): void
+    {
+        $bucket = $isWrite ? 'write' : 'read';
+
+        while (\count($this->statementCacheLru[$bucket]) > $maxSize) {
+            $oldest = array_shift($this->statementCacheLru[$bucket]);
+
+            if (!is_string($oldest)) {
+                continue;
+            }
+
+            unset($this->statementCache[$bucket][$oldest]);
+        }
     }
 
     /**
@@ -395,6 +603,16 @@ trait ConnectionInternals
     }
 
     /**
+     * Determine if any bindings contain stream/resources.
+     *
+     * @param array<int|string,mixed> $bindings
+     */
+    private function hasResourceBindings(array $bindings): bool
+    {
+        return array_any($bindings, fn($value) => is_resource($value));
+    }
+
+    /**
      * Classify PDOExceptions that look like connection errors.
      */
     private function isConnectionError(PDOException $e): bool
@@ -437,7 +655,26 @@ trait ConnectionInternals
 
         return in_array(
             $firstWord,
-            ['INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'REPLACE'],
+            [
+                'INSERT',
+                'UPDATE',
+                'DELETE',
+                'CREATE',
+                'ALTER',
+                'DROP',
+                'TRUNCATE',
+                'REPLACE',
+                'MERGE',
+                'CALL',
+                'GRANT',
+                'REVOKE',
+                'ANALYZE',
+                'VACUUM',
+                'PRAGMA',
+                'SET',
+                'LOCK',
+                'UNLOCK',
+            ],
             true,
         );
     }
@@ -448,6 +685,11 @@ trait ConnectionInternals
     private function markReadReplicaFailure(int $index): void
     {
         $cooldownSeconds = $this->config->getReadHealthCooldown();
+
+        if ($this->leastLatencyReplicaIndex === $index) {
+            $this->leastLatencyReplicaIndex = null;
+            $this->leastLatencyResolvedAt = null;
+        }
 
         if ($cooldownSeconds <= 0) {
             return;
@@ -472,6 +714,157 @@ trait ConnectionInternals
         $this->readReplicaCursor = ($slot + 1) % $count;
 
         return $indexes[$slot];
+    }
+
+    /**
+     * Normalize query comment context values to safe key/value pairs.
+     *
+     * @param array<string,mixed> $context
+     * @return array<string,string>
+     */
+    private function normalizeCommentContext(array $context): array
+    {
+        $normalized = [];
+
+        foreach ($context as $key => $value) {
+            $cleanKey = preg_replace('/[^a-z0-9_.:-]/i', '_', trim((string) $key));
+
+            if (!is_string($cleanKey) || $cleanKey === '') {
+                continue;
+            }
+
+            $cleanValue = $this->normalizeCommentValue($value);
+
+            if ($cleanValue === '') {
+                continue;
+            }
+
+            $normalized[$cleanKey] = $cleanValue;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Normalize one query comment scalar value.
+     */
+    private function normalizeCommentValue(mixed $value): string
+    {
+        if (is_bool($value)) {
+            $value = $value ? 'true' : 'false';
+        } elseif ($value === null) {
+            $value = 'null';
+        } elseif (is_scalar($value)) {
+            $value = (string) $value;
+        } elseif ($value instanceof \Stringable) {
+            $value = (string) $value;
+        } else {
+            return '';
+        }
+
+        $clean = preg_replace('/[^a-z0-9_.:@\\/-]/i', '_', trim($value));
+
+        return is_string($clean) ? $clean : '';
+    }
+
+    /**
+     * Prepare statement with optional statement cache lookup.
+     *
+     * @param array<int|string,mixed> $bindings
+     */
+    private function prepareStatementForExecution(
+        PDO $pdo,
+        string $sql,
+        array $bindings,
+        bool $isWrite,
+        ?string $cacheFingerprintSql = null,
+    ): PDOStatement {
+        $maxSize = $this->config->statementCacheSize();
+
+        if (
+            !$this->config->shouldUseStatementCache()
+            || $maxSize <= 0
+            || $this->getTransactionManager()->level($this) > 0
+            || $this->hasResourceBindings($bindings)
+        ) {
+            return $pdo->prepare($sql);
+        }
+
+        $this->syncStatementCachePdoBucket($isWrite, $pdo);
+        $stableSql = $cacheFingerprintSql ?? $this->stripLeadingCommentPrefix($sql);
+        $fingerprint = sha1((string) $stableSql);
+        $bucket = $isWrite ? 'write' : 'read';
+        $cached = $this->statementCache[$bucket][$fingerprint] ?? null;
+
+        if ($cached instanceof PDOStatement) {
+            $cached->closeCursor();
+            $this->touchStatementCacheEntry($isWrite, $fingerprint);
+
+            return $cached;
+        }
+
+        $statement = $pdo->prepare($sql);
+        $this->statementCache[$bucket][$fingerprint] = $statement;
+        $this->touchStatementCacheEntry($isWrite, $fingerprint);
+        $this->evictStatementCacheIfNeeded($isWrite, $maxSize);
+
+        return $statement;
+    }
+
+    /**
+     * Probe a single replica and capture latency for health-based selection.
+     *
+     * @param array<string,mixed> $readConfig
+     * @return array{latency_ms:float,pdo:PDO}|null
+     */
+    private function probeLeastLatencyReplica(int $index, array $readConfig): ?array
+    {
+        try {
+            $probeStart = microtime(true);
+            $pdo = $this->createReadReplicaPdo($readConfig);
+            $pdo->query('SELECT 1');
+            $latencyMs = (microtime(true) - $probeStart) * 1_000.0;
+
+            unset($this->readReplicaUnavailableUntil[$index]);
+
+            return ['latency_ms' => $latencyMs, 'pdo' => $pdo];
+        } catch (PDOException|ConnectionException) {
+            $this->markReadReplicaFailure($index);
+
+            return null;
+        }
+    }
+
+    /**
+     * Probe replica indexes and return the fastest healthy PDO.
+     *
+     * @param list<int> $indexes
+     * @param list<array<string,mixed>> $readConfigs
+     * @param array<int,float> $latencies
+     * @return array{0:int|null,1:PDO|null}
+     */
+    private function probeLeastLatencyReplicaIndexes(array $indexes, array $readConfigs, array &$latencies): array
+    {
+        $bestIndex = null;
+        $bestPdo = null;
+        $bestLatency = \INF;
+
+        foreach ($indexes as $index) {
+            $probe = $this->probeLeastLatencyReplica($index, $readConfigs[$index]);
+            if ($probe === null) {
+                continue;
+            }
+
+            $latencies[$index] = round($probe['latency_ms'], 4);
+
+            if ($probe['latency_ms'] < $bestLatency) {
+                $bestLatency = $probe['latency_ms'];
+                $bestIndex = $index;
+                $bestPdo = $probe['pdo'];
+            }
+        }
+
+        return [$bestIndex, $bestPdo];
     }
 
     /**
@@ -512,6 +905,18 @@ trait ConnectionInternals
     }
 
     /**
+     * Register one connection lifecycle hook.
+     */
+    private function registerLifecycleHook(string $name, callable $hook): void
+    {
+        if (!isset($this->lifecycleHooks[$name])) {
+            return;
+        }
+
+        $this->lifecycleHooks[$name][] = $hook;
+    }
+
+    /**
      * Resolve the effective query deadline from absolute and relative budgets.
      */
     private function resolveEffectiveDeadlineAt(float $startedAt): ?float
@@ -532,6 +937,44 @@ trait ConnectionInternals
     }
 
     /**
+     * Resolve least-latency replica from cached winner within TTL.
+     *
+     * @param list<array<string,mixed>> $readConfigs
+     * @param list<int> $availableIndexes
+     * @return array{0:int,1:PDO}|null
+     */
+    private function resolveLeastLatencyFromCachedReplica(array $readConfigs, array $availableIndexes): ?array
+    {
+        $cachedIndex = $this->leastLatencyReplicaIndex;
+        $cachedAt = $this->leastLatencyResolvedAt;
+
+        if ($cachedIndex === null || $cachedAt === null) {
+            return null;
+        }
+
+        $ttl = $this->config->getLeastLatencyCacheTtl();
+        if ($ttl <= 0 || (\time() - $cachedAt) > $ttl) {
+            return null;
+        }
+
+        if (!\in_array($cachedIndex, $availableIndexes, true) || !isset($readConfigs[$cachedIndex])) {
+            return null;
+        }
+
+        try {
+            $pdo = $this->createReadReplicaPdo($readConfigs[$cachedIndex]);
+            unset($this->readReplicaUnavailableUntil[$cachedIndex]);
+            $this->readReplicaLatenciesMs = [];
+
+            return [$cachedIndex, $pdo];
+        } catch (PDOException|ConnectionException) {
+            $this->markReadReplicaFailure($cachedIndex);
+
+            return null;
+        }
+    }
+
+    /**
      * Resolve the fastest healthy read replica by probing each replica.
      *
      * @param list<array<string,mixed>> $readConfigs
@@ -539,9 +982,6 @@ trait ConnectionInternals
      */
     private function resolveLeastLatencyReadReplica(array $readConfigs): array
     {
-        $bestIndex = null;
-        $bestPdo = null;
-        $bestLatency = \INF;
         $latencies = [];
         $indexes = $this->availableReadReplicaIndexes(\count($readConfigs));
 
@@ -549,28 +989,18 @@ trait ConnectionInternals
             $indexes = \range(0, \count($readConfigs) - 1);
         }
 
-        foreach ($indexes as $index) {
-            $readConfig = $readConfigs[$index];
+        $cached = $this->resolveLeastLatencyFromCachedReplica($readConfigs, $indexes);
+        if ($cached !== null) {
+            return $cached;
+        }
 
-            try {
-                $probeStart = microtime(true);
-                $pdo = $this->createReadReplicaPdo($readConfig);
-                $pdo->query('SELECT 1');
-                $latencyMs = (microtime(true) - $probeStart) * 1_000.0;
+        $probeIndexes = $this->sampleLeastLatencyProbeIndexes($indexes);
+        $fallbackProbeIndexes = \array_values(\array_diff($indexes, $probeIndexes));
+        [$bestIndex, $bestPdo] = $this->probeLeastLatencyReplicaIndexes($probeIndexes, $readConfigs, $latencies);
 
-                $latencies[$index] = round($latencyMs, 4);
-                unset($this->readReplicaUnavailableUntil[$index]);
-
-                if ($latencyMs < $bestLatency) {
-                    $bestLatency = $latencyMs;
-                    $bestIndex = $index;
-                    $bestPdo = $pdo;
-                }
-            } catch (PDOException|ConnectionException) {
-                $this->markReadReplicaFailure($index);
-
-                continue;
-            }
+        // If sampled probes all failed, try remaining replicas.
+        if ($bestIndex === null || !$bestPdo instanceof PDO) {
+            [$bestIndex, $bestPdo] = $this->probeLeastLatencyReplicaIndexes($fallbackProbeIndexes, $readConfigs, $latencies);
         }
 
         $this->readReplicaLatenciesMs = $latencies;
@@ -581,6 +1011,9 @@ trait ConnectionInternals
                 'No healthy read replica available for least_latency strategy.',
             );
         }
+
+        $this->leastLatencyReplicaIndex = $bestIndex;
+        $this->leastLatencyResolvedAt = \time();
 
         return [$bestIndex, $bestPdo];
     }
@@ -677,9 +1110,20 @@ trait ConnectionInternals
      *
      * @param array<int|string,mixed> $bindings
      */
-    private function runStatement(PDO $pdo, string $sql, array $bindings): PDOStatement
-    {
-        $statement = $pdo->prepare($sql);
+    private function runStatement(
+        PDO $pdo,
+        string $sql,
+        array $bindings,
+        bool $isWrite,
+        ?string $cacheFingerprintSql = null,
+    ): PDOStatement {
+        $statement = $this->prepareStatementForExecution(
+            $pdo,
+            $sql,
+            $bindings,
+            $isWrite,
+            $cacheFingerprintSql,
+        );
         $resourceBindings = [];
 
         foreach ($bindings as $key => $value) {
@@ -699,6 +1143,24 @@ trait ConnectionInternals
         $statement->execute();
 
         return $statement;
+    }
+
+    /**
+     * @param list<int> $indexes
+     * @return list<int>
+     */
+    private function sampleLeastLatencyProbeIndexes(array $indexes): array
+    {
+        $sampleSize = $this->config->getReadProbeSampleSize();
+        $count = \count($indexes);
+
+        if ($sampleSize <= 0 || $sampleSize >= $count) {
+            return $indexes;
+        }
+
+        \shuffle($indexes);
+
+        return \array_slice($indexes, 0, $sampleSize);
     }
 
     /**
@@ -745,7 +1207,7 @@ trait ConnectionInternals
     }
 
     /**
-     * Decide whether a failed connection-level query attempt should be retried.
+     * Decide whether a failed query attempt should be retried.
      *
      * @param array<int|string,mixed> $bindings
      */
@@ -759,8 +1221,12 @@ trait ConnectionInternals
             return (bool) ($this->queryRetryPolicy)($e, $attempt, $sql, $bindings);
         }
 
-        // Backward-compatible default: a single reconnect retry.
-        return $attempt < 2;
+        if ($this->isConnectionError($e)) {
+            // Backward-compatible default: a single reconnect retry.
+            return $attempt < 2;
+        }
+
+        return DriverProfile::causedByRetryableTransactionError($this->config->getDriver(), $e);
     }
 
     /**
@@ -780,11 +1246,67 @@ trait ConnectionInternals
     }
 
     /**
+     * Strip one leading SQL comment prefix used by DBLayer query-context injection.
+     */
+    private function stripLeadingCommentPrefix(string $sql): string
+    {
+        $trimmed = ltrim($sql);
+
+        if (!str_starts_with($trimmed, '/*')) {
+            return $sql;
+        }
+
+        $closing = strpos($trimmed, '*/');
+
+        if ($closing === false) {
+            return $sql;
+        }
+
+        return ltrim(substr($trimmed, $closing + 2));
+    }
+
+    /**
      * Synchronize server-side statement timeout for already-open PDO handles.
      */
     private function syncServerSideStatementTimeouts(): void
     {
         $this->applyServerSideTimeoutToPdo($this->pdo);
         $this->applyServerSideTimeoutToPdo($this->readPdo);
+    }
+
+    /**
+     * Ensure statement cache bucket maps to the currently active PDO handle.
+     */
+    private function syncStatementCachePdoBucket(bool $isWrite, PDO $pdo): void
+    {
+        $bucket = $isWrite ? 'write' : 'read';
+        $id = spl_object_id($pdo);
+        $cachedId = $this->statementCachePdoIds[$bucket];
+
+        if ($cachedId === $id) {
+            return;
+        }
+
+        $this->clearStatementCacheBucket($isWrite);
+        $this->statementCachePdoIds[$bucket] = $id;
+    }
+
+    /**
+     * Update LRU order for one cached statement entry.
+     */
+    private function touchStatementCacheEntry(bool $isWrite, string $fingerprint): void
+    {
+        $bucket = $isWrite ? 'write' : 'read';
+        $current = $this->statementCacheLru[$bucket];
+        $filtered = [];
+
+        foreach ($current as $entry) {
+            if ($entry !== $fingerprint) {
+                $filtered[] = $entry;
+            }
+        }
+
+        $filtered[] = $fingerprint;
+        $this->statementCacheLru[$bucket] = $filtered;
     }
 }

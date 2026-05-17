@@ -14,6 +14,12 @@ use Infocyph\DBLayer\Driver\AbstractSqlCompiler;
 final class PostgreSQLCompiler extends AbstractSqlCompiler
 {
     #[\Override]
+    protected function truncateStatementForTable(string $wrappedTable): string
+    {
+        return 'TRUNCATE TABLE ' . $wrappedTable . ' RESTART IDENTITY CASCADE';
+    }
+
+    #[\Override]
     protected function wrapIdentifier(string $identifier): string
     {
         return $this->wrapDelimitedIdentifier($identifier, '"');

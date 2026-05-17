@@ -6,6 +6,7 @@ use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
+use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\QueryException;
@@ -182,6 +183,50 @@ it('supports associative read replica configuration', function (): void {
     expect($config->getReadStrategy())->toBe('round_robin');
 });
 
+it('recursively redacts sensitive values in safe config export', function (): void {
+    $config = ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'password' => 'root-secret',
+        'token' => 'root-token',
+        'read' => [
+            [
+                'database' => ':memory:',
+                'password' => 'read-secret',
+                'options' => [
+                    'ssl_key' => '/tmp/read.key',
+                ],
+            ],
+        ],
+        'write' => [
+            [
+                'database' => ':memory:',
+                'private_key' => 'write-private',
+            ],
+        ],
+        'options' => [
+            'ssl_ca' => '/tmp/ca.pem',
+            'nested' => [
+                'passphrase' => 'nested-secret',
+            ],
+        ],
+        'security' => [
+            'rate_limit_key' => 'safe-visible',
+        ],
+    ]);
+
+    $safe = $config->toSafeArray();
+
+    expect(data_get($safe, 'password'))->toBe('[redacted]');
+    expect(data_get($safe, 'token'))->toBe('[redacted]');
+    expect(data_get($safe, 'read.0.password'))->toBe('[redacted]');
+    expect(data_get($safe, 'read.0.options.ssl_key'))->toBe('[redacted]');
+    expect(data_get($safe, 'write.0.private_key'))->toBe('[redacted]');
+    expect(data_get($safe, 'options.ssl_ca'))->toBe('[redacted]');
+    expect(data_get($safe, 'options.nested.passphrase'))->toBe('[redacted]');
+    expect(data_get($safe, 'security.rate_limit_key'))->toBe('safe-visible');
+});
+
 it('preserves null values for ArrayAccess lookups in data_get', function (): void {
     $payload = new \ArrayObject(['key' => null]);
 
@@ -273,6 +318,70 @@ it('captures latency probes when least_latency read strategy is used', function 
     expect($info['latencies_ms'])->toHaveCount(2);
 })->with('dblayer_drivers');
 
+it('reuses cached least-latency replica within ttl and re-probes after ttl expiry', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'read_strategy' => 'least_latency',
+        'read_latency_ttl' => 30,
+        'read' => [
+            ['database' => ':memory:'],
+            ['database' => ':memory:'],
+        ],
+    ], 'regression_least_latency_ttl_cached');
+
+    $cachedConnection = DB::connection('regression_least_latency_ttl_cached');
+    $cachedConnection->select('select 1');
+    $first = $cachedConnection->getReadReplicaInfo();
+    $cachedConnection->select('select 1');
+    $second = $cachedConnection->getReadReplicaInfo();
+
+    expect($first['selected_index'])->toBeInt();
+    expect($first['latencies_ms'])->toHaveCount(2);
+    expect($second['selected_index'])->toBe($first['selected_index']);
+    expect($second['latencies_ms'])->toBe($first['latencies_ms']);
+
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'read_strategy' => 'least_latency',
+        'read_latency_ttl' => 0,
+        'read' => [
+            ['database' => ':memory:'],
+            ['database' => ':memory:'],
+        ],
+    ], 'regression_least_latency_ttl_expired');
+
+    $reprobeConnection = DB::connection('regression_least_latency_ttl_expired');
+    $reprobeConnection->select('select 1');
+    $reprobeConnection->select('select 1');
+    $reprobed = $reprobeConnection->getReadReplicaInfo();
+
+    expect($reprobed['latencies_ms'])->toHaveCount(2);
+});
+
+it('respects least-latency probe sample size when healthy replicas are found', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'read_strategy' => 'least_latency',
+        'read_latency_ttl' => 0,
+        'read_probe_sample_size' => 1,
+        'read' => [
+            ['database' => ':memory:'],
+            ['database' => ':memory:'],
+            ['database' => ':memory:'],
+        ],
+    ], 'regression_least_latency_sample_size');
+
+    $connection = DB::connection('regression_least_latency_sample_size');
+    $connection->select('select 1');
+
+    $info = $connection->getReadReplicaInfo();
+
+    expect($info['latencies_ms'])->toHaveCount(1);
+});
+
 it('routes subsequent reads to write pdo when sticky mode is enabled', function (string $driver): void {
     $baseConfig = dblayerRequireDriver($driver);
 
@@ -308,6 +417,142 @@ it('routes subsequent reads to write pdo when sticky mode is enabled', function 
     expect(spl_object_id($readPdoAfter))->toBe(spl_object_id($connection->getPdo()));
 })->with('dblayer_drivers');
 
+it('supports optional prepared statement caching with bounded lru size', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'statement_cache_enabled' => true,
+        'statement_cache_size' => 1,
+    ], 'regression_statement_cache');
+
+    $connection = DB::connection('regression_statement_cache');
+
+    $connection->select('select 1 as one');
+    $connection->select('select 2 as two');
+
+    $reflection = new \ReflectionClass($connection);
+    $cacheProperty = $reflection->getProperty('statementCache');
+
+    /** @var array{read:array<string,\PDOStatement>,write:array<string,\PDOStatement>} $cache */
+    $cache = $cacheProperty->getValue($connection);
+    expect($cache['read'])->toHaveCount(1);
+
+    $connection->transaction(static function ($conn): void {
+        $conn->select('select 3 as three');
+    });
+
+    /** @var array{read:array<string,\PDOStatement>,write:array<string,\PDOStatement>} $cacheAfter */
+    $cacheAfter = $cacheProperty->getValue($connection);
+    expect($cacheAfter['read'])->toHaveCount(1);
+});
+
+it('uses stable statement-cache keys when query comments change dynamically', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'statement_cache_enabled' => true,
+        'statement_cache_size' => 8,
+        'query_comment_enabled' => true,
+        'query_comment_context' => [
+            'app' => 'regression',
+        ],
+    ], 'regression_statement_cache_comments');
+
+    $connection = DB::connection('regression_statement_cache_comments');
+
+    $connection->setQueryCommentContext([
+        'app' => 'regression',
+        'trace' => 'first',
+    ]);
+    $connection->select('select 1 as one');
+
+    $connection->setQueryCommentContext([
+        'app' => 'regression',
+        'trace' => 'second',
+    ]);
+    $connection->select('select 1 as one');
+
+    $reflection = new \ReflectionClass($connection);
+    $cacheProperty = $reflection->getProperty('statementCache');
+
+    /** @var array{read:array<string,\PDOStatement>,write:array<string,\PDOStatement>} $cache */
+    $cache = $cacheProperty->getValue($connection);
+
+    expect($cache['read'])->toHaveCount(1);
+});
+
+it('applies prepared statement cache lifecycle rules safely', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'statement_cache_enabled' => true,
+        'statement_cache_size' => 2,
+    ], 'regression_statement_cache_lifecycle');
+
+    $connection = DB::connection('regression_statement_cache_lifecycle');
+    $reflection = new \ReflectionClass($connection);
+    $cacheProperty = $reflection->getProperty('statementCache');
+
+    $connection->select('select 1 as one');
+
+    /** @var array{read:array<string,\PDOStatement>,write:array<string,\PDOStatement>} $cacheAfterFirst */
+    $cacheAfterFirst = $cacheProperty->getValue($connection);
+    $firstStatement = reset($cacheAfterFirst['read']);
+    expect($cacheAfterFirst['read'])->toHaveCount(1);
+    expect($firstStatement)->toBeInstanceOf(\PDOStatement::class);
+
+    $connection->select('select 1 as one');
+
+    /** @var array{read:array<string,\PDOStatement>,write:array<string,\PDOStatement>} $cacheAfterSecond */
+    $cacheAfterSecond = $cacheProperty->getValue($connection);
+    $secondStatement = reset($cacheAfterSecond['read']);
+    expect($cacheAfterSecond['read'])->toHaveCount(1);
+    expect(spl_object_id($secondStatement))->toBe(spl_object_id($firstStatement));
+
+    $connection->transaction(static function (Connection $conn): void {
+        $conn->select('select 2 as two');
+    });
+
+    /** @var array{read:array<string,\PDOStatement>,write:array<string,\PDOStatement>} $cacheAfterTransaction */
+    $cacheAfterTransaction = $cacheProperty->getValue($connection);
+    expect($cacheAfterTransaction['read'])->toHaveCount(1);
+
+    $table = dblayerTable('statement_cache_lifecycle_items');
+    $connection->statement(sprintf('create table %s (payload blob)', $table));
+
+    $stream = fopen('php://temp', 'rb+');
+    expect($stream)->not->toBeFalse();
+    fwrite($stream, 'payload');
+    rewind($stream);
+    $connection->statement(sprintf('insert into %s (payload) values (?)', $table), [$stream]);
+    fclose($stream);
+
+    /** @var array{read:array<string,\PDOStatement>,write:array<string,\PDOStatement>} $cacheAfterResourceBinding */
+    $cacheAfterResourceBinding = $cacheProperty->getValue($connection);
+    expect($cacheAfterResourceBinding['write'])->toHaveCount(1);
+
+    $connection->reconnect(false);
+
+    /** @var array{read:array<string,\PDOStatement>,write:array<string,\PDOStatement>} $cacheAfterReadReconnect */
+    $cacheAfterReadReconnect = $cacheProperty->getValue($connection);
+    expect($cacheAfterReadReconnect['read'])->toHaveCount(0);
+
+    $connection->select('select 3 as three');
+    $connection->select('select 4 as four');
+    $connection->select('select 5 as five');
+
+    /** @var array{read:array<string,\PDOStatement>,write:array<string,\PDOStatement>} $cacheAfterEviction */
+    $cacheAfterEviction = $cacheProperty->getValue($connection);
+    expect($cacheAfterEviction['read'])->toHaveCount(2);
+
+    $connection->disconnect();
+
+    /** @var array{read:array<string,\PDOStatement>,write:array<string,\PDOStatement>} $cacheAfterDisconnect */
+    $cacheAfterDisconnect = $cacheProperty->getValue($connection);
+    expect($cacheAfterDisconnect['read'])->toHaveCount(0);
+    expect($cacheAfterDisconnect['write'])->toHaveCount(0);
+});
+
 it('keeps reads on read pdo when sticky mode is disabled', function (string $driver): void {
     $baseConfig = dblayerRequireDriver($driver);
 
@@ -342,6 +587,138 @@ it('keeps reads on read pdo when sticky mode is disabled', function (string $dri
     $readPdoAfter = $connection->getReadPdo();
     expect(spl_object_id($readPdoAfter))->not->toBe(spl_object_id($connection->getPdo()));
 })->with('dblayer_drivers');
+
+it('routes expanded write and control keywords away from read classification', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_write_keyword_routing');
+
+    $connection = DB::connection('regression_write_keyword_routing');
+
+    $sqlStatements = [
+        'MERGE INTO users USING tmp ON users.id = tmp.id WHEN MATCHED THEN UPDATE SET id = tmp.id',
+        'CALL do_work()',
+        'GRANT SELECT ON users TO app',
+        'REVOKE SELECT ON users FROM app',
+        'ANALYZE users',
+        'VACUUM',
+        'PRAGMA journal_mode = WAL',
+        'SET search_path = public',
+        'LOCK TABLE users',
+        'UNLOCK TABLES',
+        'WITH c AS (SELECT 1) UPDATE users SET id = 1',
+        'WITH c AS (SELECT 1) DELETE FROM users',
+    ];
+
+    $connection->pretend(static function (Connection $conn) use ($sqlStatements): void {
+        foreach ($sqlStatements as $sql) {
+            $conn->execute($sql);
+        }
+
+        $conn->execute('select 1');
+    });
+
+    $stats = $connection->getStats();
+
+    expect($stats['writes'])->toBe(count($sqlStatements));
+    expect($stats['reads'])->toBe(1);
+});
+
+it('adds sanitized query comments when configured', function (string $driver): void {
+    $connectionName = 'regression_query_comment_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName, [
+        'query_comment_enabled' => true,
+        'query_comment_max_length' => 24,
+        'query_comment_context' => [
+            'app' => 'api-service',
+            'route' => 'merchant/list',
+            'trace' => 'abc*/--123',
+        ],
+    ]);
+
+    $connection = DB::connection($connectionName);
+    $logged = $connection->pretend(static function (Connection $conn): void {
+        $conn->select('select 1 as ok');
+    });
+
+    $sql = (string) ($logged[0]['sql'] ?? '');
+    expect($sql)->toStartWith('/* ');
+    expect($sql)->toContain('app=api-service');
+
+    preg_match('#/\*\s*(.*?)\s*\*/#', $sql, $matches);
+    $commentPayload = (string) ($matches[1] ?? '');
+
+    expect(strlen($commentPayload))->toBeLessThanOrEqual(32);
+    expect($commentPayload)->not->toContain('*');
+})->with('dblayer_drivers');
+
+it('sanitizes and bounds query comment context against delimiter and control characters', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'query_comment_enabled' => true,
+        'query_comment_max_length' => 48,
+        'query_comment_context' => [
+            'trace' => "abc*/\nnext;\"quoted\"",
+            'unicode' => "merchant-\u{1F680}",
+            'path' => '../tenant/alpha',
+        ],
+    ], 'regression_query_comment_safety');
+
+    $connection = DB::connection('regression_query_comment_safety');
+    $logged = $connection->pretend(static function (Connection $conn): void {
+        $conn->select('select 1');
+    });
+
+    $sql = (string) ($logged[0]['sql'] ?? '');
+    expect($sql)->toStartWith('/* ');
+
+    preg_match('#/\*\s*(.*?)\s*\*/#', $sql, $matches);
+    $commentPayload = (string) ($matches[1] ?? '');
+
+    expect(strlen($commentPayload))->toBeLessThanOrEqual(48);
+    expect($commentPayload)->not->toContain('*/');
+    expect($commentPayload)->not->toContain("\n");
+    expect($commentPayload)->not->toContain(';');
+    expect($commentPayload)->not->toContain('"');
+});
+
+it('invokes connection lifecycle hooks around connect and reconnect', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_lifecycle_hooks');
+
+    $connection = DB::connection('regression_lifecycle_hooks');
+
+    $beforeConnect = 0;
+    $afterConnect = 0;
+    $beforeReconnect = 0;
+    $afterReconnect = 0;
+
+    $connection
+        ->beforeConnect(static function () use (&$beforeConnect): void {
+            $beforeConnect++;
+        })
+        ->afterConnect(static function () use (&$afterConnect): void {
+            $afterConnect++;
+        })
+        ->beforeReconnect(static function () use (&$beforeReconnect): void {
+            $beforeReconnect++;
+        })
+        ->afterReconnect(static function () use (&$afterReconnect): void {
+            $afterReconnect++;
+        });
+
+    $connection->select('select 1');
+    $connection->reconnect(true);
+
+    expect($beforeConnect)->toBeGreaterThanOrEqual(2);
+    expect($afterConnect)->toBeGreaterThanOrEqual(2);
+    expect($beforeReconnect)->toBe(1);
+    expect($afterReconnect)->toBe(1);
+});
 
 it('enforces read-only sqlite read replica sessions', function (): void {
     $databaseFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
@@ -431,6 +808,59 @@ it('supports scalar and selectResultSets query helpers', function (string $drive
     expect($resultSets)->toHaveCount(1);
     expect($resultSets[0][0]['one'] ?? null)->toBe(1);
 })->with('dblayer_drivers');
+
+it('streams rows through facade helpers', function (string $driver): void {
+    $connection = 'regression_stream_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connection);
+    $table = dblayerTable('stream_rows');
+
+    DB::statement(sprintf('create table %s (value integer)', $table), [], $connection);
+    DB::statement(sprintf('insert into %s (value) values (1), (2), (3)', $table), [], $connection);
+
+    $values = [];
+    foreach (DB::stream(sprintf('select value from %s order by value asc', $table), [], $connection) as $row) {
+        $values[] = (int) ($row['value'] ?? 0);
+    }
+
+    $yielded = [];
+    foreach (DB::yieldRows(sprintf('select value from %s order by value asc', $table), [], $connection) as $row) {
+        $yielded[] = (int) ($row['value'] ?? 0);
+    }
+
+    expect($values)->toBe([1, 2, 3]);
+    expect($yielded)->toBe([1, 2, 3]);
+})->with('dblayer_drivers');
+
+it('closes stream cursors on early break and loop exceptions', function (): void {
+    $connectionName = 'regression_stream_cursor_cleanup';
+    dblayerAddConnectionForDriver('sqlite', $connectionName);
+    $table = dblayerTable('stream_cleanup_rows');
+
+    DB::statement(sprintf('create table %s (value integer)', $table), [], $connectionName);
+    DB::statement(sprintf('insert into %s (value) values (1), (2), (3)', $table), [], $connectionName);
+
+    foreach (DB::stream(sprintf('select value from %s order by value asc', $table), [], $connectionName) as $row) {
+        unset($row);
+
+        break;
+    }
+
+    // Should remain operable after early stream termination.
+    DB::statement(sprintf('insert into %s (value) values (4)', $table), [], $connectionName);
+
+    try {
+        foreach (DB::yieldRows(sprintf('select value from %s order by value asc', $table), [], $connectionName) as $row) {
+            if ((int) ($row['value'] ?? 0) === 2) {
+                throw new RuntimeException('stop');
+            }
+        }
+    } catch (RuntimeException $e) {
+        expect($e->getMessage())->toBe('stop');
+    }
+
+    $count = (int) DB::scalar(sprintf('select count(*) from %s', $table), [], $connectionName);
+    expect($count)->toBe(4);
+});
 
 it('fires cumulative query-time threshold callback once', function (string $driver): void {
     $connectionName = 'regression_query_time_' . $driver;
@@ -584,6 +1014,46 @@ it('redacts query bindings in logger output by default', function (string $drive
         unlink($logFile);
     }
 })->with('dblayer_drivers');
+
+it('logs query failures with sanitized context and without raw binding leakage', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_failure_logging_sanitized');
+
+    $records = new \ArrayObject();
+    $psrLogger = new class($records) extends AbstractLogger {
+        public function __construct(private \ArrayObject $records) {}
+
+        public function log($level, \Stringable|string $message, array $context = []): void
+        {
+            $this->records->append([
+                'level' => (string) $level,
+                'message' => (string) $message,
+                'context' => $context,
+            ]);
+        }
+    };
+
+    DB::enableLogger(null, $psrLogger);
+
+    expect(static fn(): array => DB::select(
+        'select * from missing_failure_table where token = ?',
+        ['super-secret-token'],
+        'regression_failure_logging_sanitized',
+    ))->toThrow(ConnectionException::class);
+
+    $lastRecord = $records[(int) ($records->count() - 1)] ?? null;
+    $serializedContext = json_encode(is_array($lastRecord) ? ($lastRecord['context'] ?? []) : []) ?: '';
+
+    expect(is_array($lastRecord))->toBeTrue();
+    expect(($lastRecord['level'] ?? null) === 'error' || ($lastRecord['level'] ?? null) === 'ERROR')->toBeTrue();
+    expect((string) ($lastRecord['message'] ?? ''))->toContain('fingerprint');
+    expect($serializedContext)->not->toContain('super-secret-token');
+
+    DB::disableLogger();
+    DB::setPsrLogger(null);
+});
 
 it('forwards logger entries to configured PSR-3 backend', function (string $driver): void {
     $connectionName = 'regression_logger_psr3_' . $driver;
@@ -856,6 +1326,139 @@ it('collects and flushes telemetry payloads', function (string $driver): void {
 
     DB::disableTelemetry();
 })->with('dblayer_drivers');
+
+it('does not duplicate facade query tracking when lifecycle events are enabled', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_no_duplicate_facade_tracking');
+
+    $records = new \ArrayObject();
+    $psrLogger = new class($records) extends AbstractLogger {
+        public function __construct(private \ArrayObject $records) {}
+
+        public function log($level, \Stringable|string $message, array $context = []): void
+        {
+            $this->records->append([
+                'level' => (string) $level,
+                'message' => (string) $message,
+                'context' => $context,
+            ]);
+        }
+    };
+
+    DB::enableQueryLog();
+    DB::enableProfiler();
+    DB::enableLogger(null, $psrLogger);
+
+    DB::select('select 1', [], 'regression_no_duplicate_facade_tracking');
+
+    expect(DB::getQueryLog())->toHaveCount(1);
+    expect(DB::profiler()->profiles())->toHaveCount(1);
+    expect($records->count())->toBe(1);
+
+    DB::disableLogger();
+    DB::disableProfiler();
+    DB::disableQueryLog();
+});
+
+it('emits explicit query lifecycle events for success and failure paths', function (): void {
+    Events::forgetAll();
+
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_query_lifecycle_events');
+
+    $sequence = [];
+    $failedEvents = [];
+
+    Events::listen('db.query.executing', static function () use (&$sequence): void {
+        $sequence[] = 'executing';
+    });
+    Events::listen('db.query.executed', static function () use (&$sequence): void {
+        $sequence[] = 'executed';
+    });
+    Events::listen('db.query.failed', static function (QueryFailed $event) use (&$sequence, &$failedEvents): void {
+        $sequence[] = 'failed';
+        $failedEvents[] = $event;
+    });
+
+    DB::select('select 1', [], 'regression_query_lifecycle_events');
+
+    expect(static fn(): array => DB::select('select * from missing_table', [], 'regression_query_lifecycle_events'))
+        ->toThrow(ConnectionException::class);
+
+    expect($sequence)->toBe(['executing', 'executed', 'executing', 'failed']);
+    expect($failedEvents)->toHaveCount(1);
+    expect($failedEvents[0]->statement)->toBe('SELECT');
+    expect($failedEvents[0]->attempts)->toBe(1);
+});
+
+it('emits one final success event after retry recovery and no duplicate success on exhaustion', function (): void {
+    Events::forgetAll();
+
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_retry_lifecycle_events');
+
+    $connection = DB::connection('regression_retry_lifecycle_events');
+    $table = dblayerTable('retry_events_items');
+
+    $executed = 0;
+    $failed = [];
+    $executing = 0;
+
+    Events::listen('db.query.executing', static function () use (&$executing): void {
+        $executing++;
+    });
+    Events::listen('db.query.executed', static function () use (&$executed): void {
+        $executed++;
+    });
+    Events::listen('db.query.failed', static function (QueryFailed $event) use (&$failed): void {
+        $failed[] = $event;
+    });
+
+    $connection->withQueryRetryPolicy(
+        static function (\Throwable $error, int $attempt) use ($connection, $table): bool {
+            unset($error);
+
+            if ($attempt !== 1) {
+                return false;
+            }
+
+            $connection->getPdo()->exec(sprintf('create table %s (id integer)', $table));
+
+            return true;
+        },
+        static function () use ($connection, $table): void {
+            $connection->statement(sprintf('insert into %s (id) values (1)', $table));
+        },
+    );
+
+    expect($executing)->toBe(1);
+    expect($executed)->toBe(1);
+    expect($failed)->toHaveCount(0);
+
+    $executed = 0;
+    $failed = [];
+    $executing = 0;
+
+    expect(static function () use ($connection): void {
+        $connection->withQueryRetryPolicy(
+            static fn(): bool => true,
+            static function () use ($connection): void {
+                $connection->statement('select * from');
+            },
+        );
+    })->toThrow(ConnectionException::class);
+
+    expect($executing)->toBe(1);
+    expect($executed)->toBe(0);
+    expect($failed)->toHaveCount(1);
+    expect($failed[0]->attempts)->toBe(5);
+});
 
 it('does not flag legitimate unions and still catches injected union payloads', function (): void {
     $validator = new QueryValidator();

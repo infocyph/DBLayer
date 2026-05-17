@@ -206,6 +206,20 @@ it('supports repository pagination and streaming helpers', function (string $dri
         $lazyCount++;
     }
     expect($lazyCount)->toBe(6);
+
+    $streamCount = 0;
+    foreach ($repository->stream() as $row) {
+        expect($row['tenant_id'] ?? null)->toBe(20);
+        $streamCount++;
+    }
+    expect($streamCount)->toBe(6);
+
+    $yieldedCount = 0;
+    foreach ($repository->yieldRows() as $row) {
+        expect($row['tenant_id'] ?? null)->toBe(20);
+        $yieldedCount++;
+    }
+    expect($yieldedCount)->toBe(6);
 })->with('dblayer_drivers');
 
 it('covers repository read helpers and grouping accessors', function (string $driver): void {
