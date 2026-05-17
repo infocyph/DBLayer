@@ -53,6 +53,7 @@ as lookup pages after reading the guides.
    transactions
    caching
    security
+   limitations
    observability
    events-helpers
    benchmarks

@@ -8,15 +8,19 @@ use Infocyph\DBLayer\Security\QueryValidator;
 
 require __DIR__ . '/../vendor/autoload.php';
 
+$writeLine = static function (string $message): void {
+    fwrite(STDOUT, $message . PHP_EOL);
+};
+
 // data_get / data_set helper usage
 $payload = new stdClass();
 data_set($payload, 'profile.name', 'Alice');
 
-echo 'Name: ' . (string) data_get($payload, 'profile.name', 'unknown') . PHP_EOL;
+$writeLine('Name: ' . (string) data_get($payload, 'profile.name', 'unknown'));
 
 // Event listener registration/removal
 $listener = static function (): void {
-    echo "custom.event triggered\n";
+    fwrite(STDOUT, "custom.event triggered\n");
 };
 
 Events::listen('custom.event', $listener);
@@ -29,5 +33,5 @@ $validator = new QueryValidator();
 try {
     $validator->detectSqlInjection('select * from users where name = "x" or 1=1 union select password from admins');
 } catch (SecurityException $e) {
-    echo 'Blocked suspicious SQL: ' . $e->getMessage() . PHP_EOL;
+    $writeLine('Blocked suspicious SQL: ' . $e->getMessage());
 }

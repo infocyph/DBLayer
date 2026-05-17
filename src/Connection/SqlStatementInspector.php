@@ -21,7 +21,7 @@ final class SqlStatementInspector
     public static function leadingStatementKeyword(string $sql): string
     {
         $length = strlen($sql);
-        $index  = 0;
+        $index = 0;
 
         self::skipIgnorable($sql, $index, $length);
         $first = self::readKeyword($sql, $index, $length);
@@ -33,7 +33,7 @@ final class SqlStatementInspector
         self::skipOptionalRecursiveKeyword($sql, $index, $length);
 
         while (self::consumeOneCte($sql, $index, $length)) {
-            if (! self::consumeCteSeparator($sql, $index, $length)) {
+            if (!self::consumeCteSeparator($sql, $index, $length)) {
                 break;
             }
         }
@@ -105,7 +105,7 @@ final class SqlStatementInspector
             return '';
         }
 
-        if (! preg_match('/[A-Za-z_]/', $sql[$index])) {
+        if (!preg_match('/[A-Za-z_]/', $sql[$index])) {
             return '';
         }
 

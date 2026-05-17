@@ -185,9 +185,9 @@ function dblayerRequireDriver(string $driver): array
 function dblayerMysqlConfigFromEnv(): ?array
 {
     $host = dblayerEnvFirst(['DBLAYER_MYSQL_HOST', 'MYSQL_HOST']);
-    $database = dblayerEnvFirst(['DBLAYER_MYSQL_DATABASE', 'MYSQL_DATABASE']);
-    $username = dblayerEnvFirst(['DBLAYER_MYSQL_USERNAME', 'MYSQL_USERNAME', 'MYSQL_USER']);
-    $password = dblayerEnvFirst(['DBLAYER_MYSQL_PASSWORD', 'MYSQL_PASSWORD']) ?? '';
+    $database = dblayerEnvFirst(['DBLAYER_MYSQL_DATABASE', 'IC_SERVICE_DATABASE', 'MYSQL_DATABASE']);
+    $username = dblayerEnvFirst(['DBLAYER_MYSQL_USERNAME', 'IC_SERVICE_USERNAME', 'MYSQL_USERNAME', 'MYSQL_USER']);
+    $password = dblayerEnvFirst(['DBLAYER_MYSQL_PASSWORD', 'IC_SERVICE_PASSWORD', 'MYSQL_PASSWORD']) ?? '';
 
     if ($host === null || $database === null || $username === null) {
         return null;
@@ -214,9 +214,9 @@ function dblayerMysqlConfigFromEnv(): ?array
 function dblayerPgsqlConfigFromEnv(): ?array
 {
     $host = dblayerEnvFirst(['DBLAYER_PGSQL_HOST', 'PGSQL_HOST', 'POSTGRES_HOST']);
-    $database = dblayerEnvFirst(['DBLAYER_PGSQL_DATABASE', 'PGSQL_DATABASE', 'POSTGRES_DB']);
-    $username = dblayerEnvFirst(['DBLAYER_PGSQL_USERNAME', 'PGSQL_USERNAME', 'POSTGRES_USER']);
-    $password = dblayerEnvFirst(['DBLAYER_PGSQL_PASSWORD', 'PGSQL_PASSWORD', 'POSTGRES_PASSWORD']) ?? '';
+    $database = dblayerEnvFirst(['DBLAYER_PGSQL_DATABASE', 'IC_SERVICE_DATABASE', 'PGSQL_DATABASE', 'POSTGRES_DB']);
+    $username = dblayerEnvFirst(['DBLAYER_PGSQL_USERNAME', 'IC_SERVICE_USERNAME', 'PGSQL_USERNAME', 'POSTGRES_USER']);
+    $password = dblayerEnvFirst(['DBLAYER_PGSQL_PASSWORD', 'IC_SERVICE_PASSWORD', 'PGSQL_PASSWORD', 'POSTGRES_PASSWORD']) ?? '';
 
     if ($host === null || $database === null || $username === null) {
         return null;

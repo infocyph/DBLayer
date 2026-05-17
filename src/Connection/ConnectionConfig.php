@@ -7,6 +7,7 @@ namespace Infocyph\DBLayer\Connection;
 use Infocyph\DBLayer\Driver\Support\DriverProfile;
 use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
+use Infocyph\DBLayer\Support\ArrayNormalizer;
 
 /**
  * Immutable connection configuration wrapper.
@@ -25,23 +26,32 @@ final class ConnectionConfig
      * @var array<string,mixed>
      */
     private const array DEFAULTS = [
-        'driver'    => 'mysql',
-        'host'      => '127.0.0.1',
-        'port'      => null,
-        'database'  => '',
-        'username'  => '',
-        'password'  => '',
-        'charset'   => null,
+        'driver' => 'mysql',
+        'host' => '127.0.0.1',
+        'port' => null,
+        'database' => '',
+        'username' => '',
+        'password' => '',
+        'charset' => null,
         'collation' => null,
-        'schema'    => null,
-        'prefix'    => '',
-        'options'   => [],
-        'write'     => [],
-        'read'      => [],
+        'schema' => null,
+        'prefix' => '',
+        'options' => [],
+        'write' => [],
+        'read' => [],
         'read_strategy' => 'random',
         'read_health_cooldown' => 30,
-        'sticky'    => false,
-        'security'  => [],
+        'read_latency_ttl' => 15,
+        'read_probe_sample_size' => 0,
+        'least_latency_ttl' => 15,
+        'read_session_read_only' => false,
+        'statement_cache_enabled' => false,
+        'statement_cache_size' => 64,
+        'query_comment_enabled' => false,
+        'query_comment_max_length' => 160,
+        'query_comment_context' => [],
+        'sticky' => false,
+        'security' => [],
     ];
 
     /**
@@ -50,15 +60,35 @@ final class ConnectionConfig
      * @var array<string,string>
      */
     private const array DRIVER_ALIASES = [
-        'pdo_mysql'  => 'mysql',
-        'mysqli'     => 'mysql',
-        'mariadb'    => 'mysql',
+        'pdo_mysql' => 'mysql',
+        'mysqli' => 'mysql',
+        'mariadb' => 'mysql',
 
-        'pgsql'      => 'pgsql',
-        'postgres'   => 'pgsql',
+        'pgsql' => 'pgsql',
+        'postgres' => 'pgsql',
         'postgresql' => 'pgsql',
 
-        'sqlite3'    => 'sqlite',
+        'sqlite3' => 'sqlite',
+    ];
+
+    /**
+     * Case-insensitive key names treated as secrets for safe-export redaction.
+     *
+     * @var list<string>
+     */
+    private const array SAFE_EXPORT_REDACT_KEYS = [
+        'password',
+        'passwd',
+        'pwd',
+        'secret',
+        'token',
+        'ssl_key',
+        'ssl_cert',
+        'ssl_ca',
+        'tls_key',
+        'private_key',
+        'ssl_passphrase',
+        'passphrase',
     ];
 
     /**
@@ -67,9 +97,9 @@ final class ConnectionConfig
      * @var array<string,mixed>
      */
     private const array SECURITY_DEFAULT = [
-        'enabled'         => true,
-        'max_sql_length'  => 16_384,
-        'max_params'      => 512,
+        'enabled' => true,
+        'max_sql_length' => 16_384,
+        'max_params' => 512,
         'max_param_bytes' => 1_024,
         'queries_per_second' => 0,
         'queries_per_minute' => 0,
@@ -92,7 +122,7 @@ final class ConnectionConfig
     /**
      * Create a new configuration instance.
      *
-     * @param  array<string,mixed>  $config
+     * @param array<string,mixed> $config
      */
     public function __construct(array $config)
     {
@@ -105,12 +135,10 @@ final class ConnectionConfig
         $config = array_replace(self::DEFAULTS, $config);
 
         // Normalize security configuration.
-        $security = $config['security'] ?? [];
-        if (! is_array($security)) {
-            $security = [];
-        }
-
-        $config['security'] = array_replace(self::SECURITY_DEFAULT, $security);
+        $config['security'] = array_replace(
+            self::SECURITY_DEFAULT,
+            $this->normalizeStringKeyArray($config['security'] ?? []),
+        );
         $this->validateSecurityConfig($config['security']);
 
         // Apply driver-specific connection defaults via DriverProfile.
@@ -128,7 +156,7 @@ final class ConnectionConfig
     /**
      * Convenience factory.
      *
-     * @param  array<string,mixed>  $config
+     * @param array<string,mixed> $config
      */
     public static function fromArray(array $config): self
     {
@@ -160,11 +188,49 @@ final class ConnectionConfig
     {
         $driver = $this->config['driver'] ?? '';
 
-        if (! is_string($driver) || $driver === '') {
+        if (!is_string($driver) || $driver === '') {
             throw ConnectionException::invalidConfiguration('Database driver is required.');
         }
 
         return $driver;
+    }
+
+    /**
+     * Get least-latency replica cache TTL in seconds.
+     */
+    public function getLeastLatencyCacheTtl(): int
+    {
+        $seconds = $this->config['read_latency_ttl'] ?? ($this->config['least_latency_ttl'] ?? 15);
+
+        if (!is_int($seconds) && !is_numeric($seconds)) {
+            return 15;
+        }
+
+        return max(0, (int) $seconds);
+    }
+
+    /**
+     * Initial SQL query comment context map.
+     *
+     * @return array<string,mixed>
+     */
+    public function getQueryCommentContext(): array
+    {
+        return $this->normalizeStringKeyArray($this->config['query_comment_context'] ?? []);
+    }
+
+    /**
+     * Maximum length for injected SQL query comments.
+     */
+    public function getQueryCommentMaxLength(): int
+    {
+        $max = $this->config['query_comment_max_length'] ?? 160;
+
+        if (!is_int($max) && !is_numeric($max)) {
+            return 160;
+        }
+
+        return max(32, (int) $max);
     }
 
     /**
@@ -192,15 +258,7 @@ final class ConnectionConfig
      */
     public function getReadConfigs(): array
     {
-        $read = $this->config['read'] ?? [];
-
-        if (! is_array($read) || $read === []) {
-            return [];
-        }
-
-        return $this->expandReplicaHostVariants(
-            $this->normalizeReplicaConfigs($read),
-        );
+        return $this->resolveReplicaConfigs('read');
     }
 
     /**
@@ -210,11 +268,25 @@ final class ConnectionConfig
     {
         $seconds = $this->config['read_health_cooldown'] ?? 30;
 
-        if (! is_int($seconds) && ! is_numeric($seconds)) {
+        if (!is_int($seconds) && !is_numeric($seconds)) {
             return 30;
         }
 
         return max(0, (int) $seconds);
+    }
+
+    /**
+     * Get least-latency probe sample size (0 = probe all available replicas).
+     */
+    public function getReadProbeSampleSize(): int
+    {
+        $size = $this->config['read_probe_sample_size'] ?? 0;
+
+        if (!is_int($size) && !is_numeric($size)) {
+            return 0;
+        }
+
+        return max(0, (int) $size);
     }
 
     /**
@@ -230,7 +302,7 @@ final class ConnectionConfig
     {
         $strategy = $this->config['read_strategy'] ?? 'random';
 
-        if (! is_string($strategy)) {
+        if (!is_string($strategy)) {
             return 'random';
         }
 
@@ -272,15 +344,7 @@ final class ConnectionConfig
      */
     public function getWriteConfigs(): array
     {
-        $write = $this->config['write'] ?? [];
-
-        if (! is_array($write) || $write === []) {
-            return [];
-        }
-
-        return $this->expandReplicaHostVariants(
-            $this->normalizeReplicaConfigs($write),
-        );
+        return $this->resolveReplicaConfigs('write');
     }
 
     /**
@@ -306,7 +370,7 @@ final class ConnectionConfig
     {
         $security = $this->config['security'] ?? [];
 
-        return is_array($security) && ! empty($security['enabled']);
+        return is_array($security) && !empty($security['enabled']);
     }
 
     /**
@@ -324,9 +388,48 @@ final class ConnectionConfig
      */
     public function securityConfig(): array
     {
-        $security = $this->config['security'] ?? [];
+        return array_replace(
+            self::SECURITY_DEFAULT,
+            $this->normalizeStringKeyArray($this->config['security'] ?? []),
+        );
+    }
 
-        return is_array($security) ? $security : self::SECURITY_DEFAULT;
+    /**
+     * Whether to enforce read-only session mode on non-SQLite read replicas.
+     */
+    public function shouldEnforceReadSessionReadOnly(): bool
+    {
+        return (bool) ($this->config['read_session_read_only'] ?? false);
+    }
+
+    /**
+     * Whether SQL query comments are enabled.
+     */
+    public function shouldUseQueryComments(): bool
+    {
+        return (bool) ($this->config['query_comment_enabled'] ?? false);
+    }
+
+    /**
+     * Whether prepared statement cache is enabled.
+     */
+    public function shouldUseStatementCache(): bool
+    {
+        return (bool) ($this->config['statement_cache_enabled'] ?? false);
+    }
+
+    /**
+     * Prepared statement cache size per PDO handle bucket.
+     */
+    public function statementCacheSize(): int
+    {
+        $size = $this->config['statement_cache_size'] ?? 64;
+
+        if (!is_int($size) && !is_numeric($size)) {
+            return 64;
+        }
+
+        return max(0, (int) $size);
     }
 
     /**
@@ -340,11 +443,27 @@ final class ConnectionConfig
     }
 
     /**
+     * Export a redacted configuration array safe for logs/debug output.
+     *
+     * @return array<string,mixed>
+     */
+    public function toSafeArray(): array
+    {
+        $safe = [];
+
+        foreach ($this->config as $key => $value) {
+            $safe[$key] = $this->redactSensitiveValue($key, $value);
+        }
+
+        return $safe;
+    }
+
+    /**
      * Return a new instance with one key changed.
      */
     public function with(string $key, mixed $value): self
     {
-        $config       = $this->config;
+        $config = $this->config;
         $config[$key] = $value;
 
         return new self($config);
@@ -353,7 +472,7 @@ final class ConnectionConfig
     /**
      * Expand config fragments that define host as a list into one fragment per host.
      *
-     * @param  list<array<string,mixed>>  $replicas
+     * @param list<array<string,mixed>> $replicas
      * @return list<array<string,mixed>>
      */
     private function expandReplicaHostVariants(array $replicas): array
@@ -363,7 +482,7 @@ final class ConnectionConfig
         foreach ($replicas as $replica) {
             $hosts = $replica['host'] ?? null;
 
-            if (! is_array($hosts)) {
+            if (!is_array($hosts)) {
                 $expanded[] = $replica;
 
                 continue;
@@ -372,7 +491,7 @@ final class ConnectionConfig
             $hasExpandedHost = false;
 
             foreach ($hosts as $host) {
-                if (! is_string($host) || trim($host) === '') {
+                if (!is_string($host) || trim($host) === '') {
                     continue;
                 }
 
@@ -382,14 +501,13 @@ final class ConnectionConfig
                 $hasExpandedHost = true;
             }
 
-            if (! $hasExpandedHost) {
+            if (!$hasExpandedHost) {
                 $expanded[] = $replica;
             }
         }
 
         return $expanded;
     }
-
 
     /**
      * Normalize a driver name (aliases → canonical).
@@ -404,7 +522,7 @@ final class ConnectionConfig
     /**
      * Normalize replica configuration into a list of associative arrays.
      *
-     * @param  array<int|string,mixed>  $replicas
+     * @param array<int|string,mixed> $replicas
      * @return list<array<string,mixed>>
      */
     private function normalizeReplicaConfigs(array $replicas): array
@@ -433,23 +551,96 @@ final class ConnectionConfig
     }
 
     /**
+     * @return array<string,mixed>
+     */
+    private function normalizeStringKeyArray(mixed $value): array
+    {
+        return ArrayNormalizer::stringKeyArray($value);
+    }
+
+    /**
+     * Recursively redact sensitive config values by key name.
+     *
+     * @param array<array-key,mixed> $config
+     * @return array<array-key,mixed>
+     */
+    private function redactSensitiveConfig(array $config): array
+    {
+        $redacted = [];
+
+        foreach ($config as $key => $value) {
+            if (is_string($key) && $this->shouldRedactConfigKey($key)) {
+                $redacted[$key] = '[redacted]';
+
+                continue;
+            }
+
+            if (is_array($value)) {
+                $redacted[$key] = $this->redactSensitiveConfig($value);
+
+                continue;
+            }
+
+            $redacted[$key] = $value;
+        }
+
+        return $redacted;
+    }
+
+    private function redactSensitiveValue(string $key, mixed $value): mixed
+    {
+        if ($this->shouldRedactConfigKey($key)) {
+            return '[redacted]';
+        }
+
+        if (is_array($value)) {
+            return $this->redactSensitiveConfig($value);
+        }
+
+        return $value;
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private function resolveReplicaConfigs(string $key): array
+    {
+        $replica = $this->config[$key] ?? [];
+
+        if (!is_array($replica) || $replica === []) {
+            return [];
+        }
+
+        return $this->expandReplicaHostVariants(
+            $this->normalizeReplicaConfigs($replica),
+        );
+    }
+
+    private function shouldRedactConfigKey(string $key): bool
+    {
+        $normalized = strtolower(trim($key));
+
+        return in_array($normalized, self::SAFE_EXPORT_REDACT_KEYS, true);
+    }
+
+    /**
      * Basic validation that does not depend on any particular driver.
      *
-     * @param  array<string,mixed>  $config
+     * @param array<string,mixed> $config
      */
     private function validateConfig(array $config): void
     {
         $driver = $config['driver'] ?? null;
 
-        if (! is_string($driver) || $driver === '') {
+        if (!is_string($driver) || $driver === '') {
             throw ConnectionException::invalidConfiguration('Database driver must be a non-empty string.');
         }
 
         // Built-in relational engines: require database name.
         if (in_array($driver, ['mysql', 'pgsql', 'sqlite'], true)) {
             if (
-                ! isset($config['database'])
-                || ! is_string($config['database'])
+                !isset($config['database'])
+                || !is_string($config['database'])
                 || $config['database'] === ''
             ) {
                 throw ConnectionException::invalidConfiguration(
@@ -462,8 +653,8 @@ final class ConnectionConfig
         if (in_array($driver, ['mysql', 'pgsql'], true)) {
             foreach (['host', 'username'] as $key) {
                 if (
-                    ! isset($config[$key])
-                    || ! is_string($config[$key])
+                    !isset($config[$key])
+                    || !is_string($config[$key])
                     || $config[$key] === ''
                 ) {
                     throw ConnectionException::invalidConfiguration(
@@ -475,150 +666,25 @@ final class ConnectionConfig
     }
 
     /**
-     * @param  array<string,mixed>  $security
-     */
-    private function validateRawSqlPolicy(array $security): void
-    {
-        $rawSqlPolicy = $security['raw_sql_policy'] ?? 'allow';
-
-        if (! is_string($rawSqlPolicy)) {
-            throw ConnectionException::invalidConfiguration("Security config key 'raw_sql_policy' must be a string.");
-        }
-
-        $rawSqlPolicy = strtolower(trim($rawSqlPolicy));
-
-        if (! \in_array($rawSqlPolicy, ['allow', 'deny', 'allowlist'], true)) {
-            throw ConnectionException::invalidConfiguration(
-                "Security config key 'raw_sql_policy' must be one of: allow, deny, allowlist.",
-            );
-        }
-
-        $rawSqlAllowlist = $security['raw_sql_allowlist'] ?? [];
-
-        if (! is_array($rawSqlAllowlist)) {
-            throw ConnectionException::invalidConfiguration(
-                "Security config key 'raw_sql_allowlist' must be an array of patterns.",
-            );
-        }
-
-        foreach ($rawSqlAllowlist as $pattern) {
-            if (! is_string($pattern) || trim($pattern) === '') {
-                throw ConnectionException::invalidConfiguration(
-                    "Security config key 'raw_sql_allowlist' must contain only non-empty string patterns.",
-                );
-            }
-        }
-
-        if ($rawSqlPolicy === 'allowlist' && $rawSqlAllowlist === []) {
-            throw ConnectionException::invalidConfiguration(
-                "Security config key 'raw_sql_allowlist' cannot be empty when 'raw_sql_policy' is set to 'allowlist'.",
-            );
-        }
-    }
-
-    /**
      * Validate normalized security configuration values.
      *
-     * @param  array<string,mixed>  $security
+     * @param array<string,mixed> $security
      */
     private function validateSecurityConfig(array $security): void
     {
-        $this->validateSecurityEnabled($security);
-        $this->validateSecurityNumericLimits($security);
-        $this->validateSecurityScalarTypes($security);
-        $this->validateRawSqlPolicy($security);
-        $this->validateSecurityTlsPolicy($security);
-    }
-
-    /**
-     * @param  array<string,mixed>  $security
-     */
-    private function validateSecurityEnabled(array $security): void
-    {
-        $enabled = $security['enabled'] ?? true;
-        $allowInsecure = (bool) ($security['allow_insecure'] ?? false);
-
-        if (! is_bool($enabled)) {
-            throw ConnectionException::invalidConfiguration("Security config key 'enabled' must be a boolean.");
-        }
-
-        if ($enabled === false && ! $allowInsecure) {
-            throw ConnectionException::invalidConfiguration(
-                "Security config key 'enabled=false' requires 'allow_insecure=true' in the same security block.",
-            );
-        }
-    }
-
-    /**
-     * @param  array<string,mixed>  $security
-     */
-    private function validateSecurityNumericLimits(array $security): void
-    {
-        foreach (['max_sql_length', 'max_params', 'max_param_bytes', 'queries_per_second', 'queries_per_minute'] as $key) {
-            $value = $security[$key] ?? null;
-
-            if ($value !== null && ! is_int($value) && ! is_numeric($value)) {
-                throw ConnectionException::invalidConfiguration(
-                    sprintf("Security config key '%s' must be numeric.", $key),
-                );
-            }
-        }
-    }
-
-    /**
-     * @param  array<string,mixed>  $security
-     */
-    private function validateSecurityScalarTypes(array $security): void
-    {
-        if (isset($security['rate_limit_key']) && ! is_string($security['rate_limit_key'])) {
-            throw ConnectionException::invalidConfiguration("Security config key 'rate_limit_key' must be a string or null.");
-        }
-
-        if (isset($security['rate_limit_callback']) && ! is_callable($security['rate_limit_callback'])) {
-            throw ConnectionException::invalidConfiguration("Security config key 'rate_limit_callback' must be callable or null.");
-        }
-
-        if (array_key_exists('strict_identifiers', $security) && ! is_bool($security['strict_identifiers'])) {
-            throw ConnectionException::invalidConfiguration("Security config key 'strict_identifiers' must be a boolean.");
-        }
-
-        if (isset($security['require_tls']) && ! is_bool($security['require_tls'])) {
-            throw ConnectionException::invalidConfiguration("Security config key 'require_tls' must be a boolean or null.");
-        }
-
-        if (array_key_exists('allow_insecure', $security) && ! is_bool($security['allow_insecure'])) {
-            throw ConnectionException::invalidConfiguration("Security config key 'allow_insecure' must be a boolean.");
-        }
-    }
-
-    /**
-     * @param  array<string,mixed>  $security
-     */
-    private function validateSecurityTlsPolicy(array $security): void
-    {
-        if (($security['require_tls'] ?? null) !== false) {
-            return;
-        }
-
-        if ((bool) ($security['allow_insecure'] ?? false)) {
-            return;
-        }
-
-        throw ConnectionException::invalidConfiguration(
-            "Security config key 'require_tls=false' requires 'allow_insecure=true' in the same security block.",
-        );
+        ConnectionSecurityConfigValidator::validate($security);
     }
 
     /**
      * Delegate advanced validation / normalization to driver when registered.
      *
-     * @param  array<string,mixed>  $config
+     * @param array<string,mixed> $config
      */
     private function validateWithDriver(array $config): void
     {
         $driverName = $config['driver'] ?? null;
 
-        if (! is_string($driverName) || $driverName === '') {
+        if (!is_string($driverName) || $driverName === '') {
             return;
         }
 

@@ -83,16 +83,16 @@ final class Str
 
         if (
             str_ends_with($value, 'y')
-            && ! str_ends_with($value, 'ay')
-            && ! str_ends_with($value, 'ey')
-            && ! str_ends_with($value, 'iy')
-            && ! str_ends_with($value, 'oy')
-            && ! str_ends_with($value, 'uy')
+            && !str_ends_with($value, 'ay')
+            && !str_ends_with($value, 'ey')
+            && !str_ends_with($value, 'iy')
+            && !str_ends_with($value, 'oy')
+            && !str_ends_with($value, 'uy')
         ) {
             return substr($value, 0, -1) . 'ies';
         }
 
-        if (! str_ends_with($value, 's')) {
+        if (!str_ends_with($value, 's')) {
             return $value . 's';
         }
 
@@ -109,7 +109,7 @@ final class Str
         }
 
         $pool = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-        $max  = strlen($pool) - 1;
+        $max = strlen($pool) - 1;
 
         $result = '';
 

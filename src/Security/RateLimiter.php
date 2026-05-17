@@ -24,9 +24,9 @@ final class RateLimiter
     /**
      * Check a rate limit for a key within a given time window.
      *
-     * @param string $key         Logical identifier (e.g. "db:merchant:123")
-     * @param int    $maxAttempts Maximum allowed attempts per window
-     * @param int    $ttlSeconds  Window size in seconds
+     * @param string $key Logical identifier (e.g. "db:merchant:123")
+     * @param int $maxAttempts Maximum allowed attempts per window
+     * @param int $ttlSeconds Window size in seconds
      *
      * @throws SecurityException
      */
@@ -37,7 +37,7 @@ final class RateLimiter
             return;
         }
 
-        $bucket     = intdiv(time(), $ttlSeconds);
+        $bucket = intdiv(time(), $ttlSeconds);
         $storageKey = $key . ':' . $ttlSeconds . ':' . $bucket;
 
         $count = ($this->storage[$storageKey] ?? 0) + 1;
@@ -65,7 +65,7 @@ final class RateLimiter
             return 0;
         }
 
-        $bucket     = intdiv(time(), $ttlSeconds);
+        $bucket = intdiv(time(), $ttlSeconds);
         $storageKey = $key . ':' . $ttlSeconds . ':' . $bucket;
 
         return $this->storage[$storageKey] ?? 0;
@@ -79,7 +79,7 @@ final class RateLimiter
     public function getStats(): array
     {
         return [
-            'total_keys'     => count($this->storage),
+            'total_keys' => count($this->storage),
             'total_requests' => array_sum($this->storage),
         ];
     }

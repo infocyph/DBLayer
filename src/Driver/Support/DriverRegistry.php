@@ -30,12 +30,12 @@ final class DriverRegistry
      */
     private static array $map = [
         // defaults; concrete classes implemented in driver sub-namespaces
-        'mysql'    => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
-        'mariadb'  => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
-        'pgsql'    => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
+        'mysql' => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
+        'mariadb' => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
+        'pgsql' => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
         'postgres' => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
-        'sqlite'   => \Infocyph\DBLayer\Driver\SQLite\SQLiteDriver::class,
-        'sqlite3'  => \Infocyph\DBLayer\Driver\SQLite\SQLiteDriver::class,
+        'sqlite' => \Infocyph\DBLayer\Driver\SQLite\SQLiteDriver::class,
+        'sqlite3' => \Infocyph\DBLayer\Driver\SQLite\SQLiteDriver::class,
     ];
 
     /**
@@ -59,13 +59,13 @@ final class DriverRegistry
     /**
      * Register or override a driver.
      *
-     * @param  class-string<DriverInterface>  $class
+     * @param class-string<DriverInterface> $class
      */
     public static function register(string $name, string $class): void
     {
         $name = strtolower($name);
 
-        if (! is_subclass_of($class, DriverInterface::class)) {
+        if (!is_subclass_of($class, DriverInterface::class)) {
             throw new InvalidArgumentException(sprintf(
                 'Driver class "%s" must implement %s.',
                 $class,
@@ -88,7 +88,7 @@ final class DriverRegistry
             return self::$cache[$driver];
         }
 
-        if (! isset(self::$map[$driver])) {
+        if (!isset(self::$map[$driver])) {
             throw ConnectionException::unsupportedDriver($driver);
         }
 

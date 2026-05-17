@@ -7,7 +7,7 @@ namespace Infocyph\DBLayer\Security;
 use Infocyph\DBLayer\Exceptions\SecurityException;
 
 /**
- * Security Validator
+ * Query Guard Validator
  *
  * Stateless helpers for database security checks:
  *  - input sanitization
@@ -23,7 +23,7 @@ final class SecurityValidator
      */
     public static function sanitizeInput(mixed $value): mixed
     {
-        if (! is_string($value)) {
+        if (!is_string($value)) {
             return $value;
         }
 
@@ -62,7 +62,7 @@ final class SecurityValidator
     public static function validateColumnName(string $column): void
     {
         // First char must be letter or underscore; rest can include dots.
-        if (! preg_match('/^[a-zA-Z_][a-zA-Z0-9_.]*$/', $column)) {
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_.]*$/', $column)) {
             throw SecurityException::invalidConfiguration(
                 "Invalid column name [{$column}].",
             );
@@ -77,6 +77,8 @@ final class SecurityValidator
 
     /**
      * Validate IN clause size.
+     *
+     * @param list<mixed> $values
      *
      * @throws SecurityException
      */
@@ -116,7 +118,7 @@ final class SecurityValidator
      */
     public static function validateTableName(string $table): void
     {
-        if (! preg_match('/^[a-zA-Z_][a-zA-Z0-9_.]*$/', $table)) {
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_.]*$/', $table)) {
             throw SecurityException::invalidConfiguration(
                 "Invalid table name [{$table}].",
             );

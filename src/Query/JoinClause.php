@@ -134,11 +134,11 @@ final class JoinClause
         $operator = $this->assertValidOperator($operator);
 
         $this->conditions[] = [
-            'type'     => 'basic',
-            'first'    => $first,
+            'type' => 'basic',
+            'first' => $first,
             'operator' => $operator,
-            'second'   => $second,
-            'boolean'  => $boolean,
+            'second' => $second,
+            'boolean' => $boolean,
         ];
 
         return $this;
@@ -169,11 +169,11 @@ final class JoinClause
         $operator = $this->assertValidOperator($operator);
 
         $this->conditions[] = [
-            'type'     => 'where',
-            'column'   => $column,
+            'type' => 'where',
+            'column' => $column,
             'operator' => $operator,
-            'value'    => $value,
-            'boolean'  => $boolean,
+            'value' => $value,
+            'boolean' => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -191,9 +191,9 @@ final class JoinClause
         $this->validateColumnIdentifier($column);
 
         $this->conditions[] = [
-            'type'    => 'whereIn',
-            'column'  => $column,
-            'values'  => $values,
+            'type' => 'whereIn',
+            'column' => $column,
+            'values' => $values,
             'boolean' => $boolean,
         ];
 
@@ -212,8 +212,8 @@ final class JoinClause
         $this->validateColumnIdentifier($column);
 
         $this->conditions[] = [
-            'type'    => 'whereNotNull',
-            'column'  => $column,
+            'type' => 'whereNotNull',
+            'column' => $column,
             'boolean' => $boolean,
         ];
 
@@ -228,8 +228,8 @@ final class JoinClause
         $this->validateColumnIdentifier($column);
 
         $this->conditions[] = [
-            'type'    => 'whereNull',
-            'column'  => $column,
+            'type' => 'whereNull',
+            'column' => $column,
             'boolean' => $boolean,
         ];
 
@@ -244,7 +244,7 @@ final class JoinClause
         $normalized = preg_replace('/\s+/', ' ', trim($operator));
         $normalized = strtolower($normalized ?? $operator);
 
-        if (! \in_array($normalized, self::ALLOWED_OPERATORS, true)) {
+        if (!\in_array($normalized, self::ALLOWED_OPERATORS, true)) {
             throw QueryException::invalidOperator($operator);
         }
 

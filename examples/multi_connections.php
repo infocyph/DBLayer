@@ -9,6 +9,16 @@ use Infocyph\DBLayer\DB;
 
 require __DIR__ . '/bootstrap.php';
 
+$writeLine = static function (string $message): void {
+    fwrite(STDOUT, $message . PHP_EOL);
+};
+
+$writeDump = static function (mixed $value): void {
+    $encoded = json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+    fwrite(STDOUT, ($encoded === false ? '[unserializable]' : $encoded) . PHP_EOL);
+};
+
 // Explicit connection instances if you prefer
 /** @var Connection $mysql */
 $mysql = DB::connection('mysql_main');
@@ -22,8 +32,9 @@ $user = $mysql->table('users')
   ->first();
 
 if ($user === null) {
-    echo "User not found.\n";
-    exit;
+    $writeLine('User not found.');
+
+    return;
 }
 
 // Read from PostgreSQL using the connection name directly
@@ -33,8 +44,8 @@ $userEvents = DB::table('user_events', 'pgsql_reporting')
   ->limit(50)
   ->get();
 
-echo "User:\n";
-var_dump($user);
+$writeLine('User:');
+$writeDump($user);
 
-echo "Last 50 events (from reporting DB):\n";
-var_dump($userEvents);
+$writeLine('Last 50 events (from reporting DB):');
+$writeDump($userEvents);

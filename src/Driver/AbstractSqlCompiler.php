@@ -5,18 +5,23 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Driver;
 
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
+use Infocyph\DBLayer\Driver\Support\MutationCompiler;
 use Infocyph\DBLayer\Query\Core\CompiledQuery;
 use Infocyph\DBLayer\Query\Core\QueryPayload;
 use Infocyph\DBLayer\Query\Core\QueryType;
 use Infocyph\DBLayer\Query\Expression;
 use LogicException;
+use Stringable;
 
 /**
  * Generic AST-based SQL compiler.
  *
- * Currently focuses on SELECT + aggregates to keep things safe:
- * - INSERT/UPDATE/DELETE/TRUNCATE intentionally unsupported here for now.
- * - Engine-specific subclasses handle identifier quoting.
+ * Supports SELECT and core write operations:
+ * - INSERT
+ * - UPDATE
+ * - DELETE
+ * - TRUNCATE
+ * Engine-specific subclasses handle identifier quoting.
  */
 abstract class AbstractSqlCompiler implements QueryCompilerInterface
 {
@@ -31,20 +36,27 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
     public function compile(QueryPayload $payload): CompiledQuery
     {
         $type = $payload->type;
+        [$sql, $bindings] = match ($type) {
+            QueryType::SELECT => [$this->compileSelect($payload), $payload->bindings],
+            QueryType::INSERT => $this->compileInsert($payload),
+            QueryType::UPDATE => $this->compileUpdate($payload),
+            QueryType::DELETE => [$this->compileDelete($payload), $payload->bindings],
+            QueryType::TRUNCATE => [$this->compileTruncate($payload), []],
+        };
 
-        if ($type !== QueryType::SELECT) {
-            throw new LogicException(
-                sprintf(
-                    'Only SELECT queries are supported by %s currently (got %s).',
-                    static::class,
-                    $type->value,
-                ),
-            );
+        return new CompiledQuery($sql, $bindings, $payload->type);
+    }
+
+    protected function compileDelete(QueryPayload $payload): string
+    {
+        $sql = 'DELETE FROM ' . $this->wrapIdentifier($this->requireTable($payload));
+        $where = $this->compileWheres($payload);
+
+        if ($where !== '') {
+            $sql .= ' WHERE ' . $where;
         }
 
-        $sql = $this->compileSelect($payload);
-
-        return new CompiledQuery($sql, $payload->bindings, $payload->type);
+        return $sql;
     }
 
     protected function compileFrom(QueryPayload $payload): string
@@ -65,7 +77,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $columns = [];
 
         foreach ($payload->groups as $column) {
-            $columns[] = $this->wrapIdentifier((string) $column);
+            $columns[] = $this->wrapIdentifier($column);
         }
 
         return 'GROUP BY ' . implode(', ', $columns);
@@ -78,13 +90,13 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         }
 
         $segments = [];
-        $first    = true;
+        $first = true;
 
         foreach ($payload->havings as $having) {
-            $column   = (string) ($having['column'] ?? '');
-            $operator = (string) ($having['operator'] ?? '=');
-            $boolean  = strtolower((string) ($having['boolean'] ?? 'and'));
-            $boolean  = $boolean === 'or' ? 'OR' : 'AND';
+            $column = $this->arrayString($having, 'column');
+            $operator = $this->arrayString($having, 'operator', '=');
+            $boolean = strtolower($this->arrayString($having, 'boolean', 'and'));
+            $boolean = $boolean === 'or' ? 'OR' : 'AND';
 
             if ($column === '') {
                 continue;
@@ -96,15 +108,27 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
                 $operator,
             );
 
-            if (! $first) {
+            if (!$first) {
                 $segments[] = $boolean . ' ' . $segment;
             } else {
                 $segments[] = $segment;
-                $first      = false;
+                $first = false;
             }
         }
 
         return implode(' ', $segments);
+    }
+
+    /**
+     * @return array{0:string,1:list<mixed>}
+     */
+    protected function compileInsert(QueryPayload $payload): array
+    {
+        return MutationCompiler::compileInsert(
+            $this->requireTable($payload),
+            $payload->insertRows,
+            fn(string $identifier): string => $this->wrapIdentifier($identifier),
+        );
     }
 
     protected function compileJoins(QueryPayload $payload): string
@@ -117,11 +141,11 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
         foreach ($payload->joins as $join) {
             if (is_array($join)) {
-                $type  = strtolower((string) ($join['type'] ?? 'inner'));
-                $table = (string) ($join['table'] ?? '');
+                $type = strtolower($this->arrayString($join, 'type', 'inner'));
+                $table = $this->arrayString($join, 'table');
 
                 $type = match ($type) {
-                    'left'  => 'LEFT',
+                    'left' => 'LEFT',
                     'right' => 'RIGHT',
                     'cross' => 'CROSS',
                     default => 'INNER',
@@ -132,13 +156,13 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
                 if (isset($join['first'], $join['operator'], $join['second'])) {
                     $sql .= sprintf(
                         ' ON %s %s %s',
-                        (string) $join['first'],
-                        (string) $join['operator'],
-                        (string) $join['second'],
+                        $this->stringValue($join['first']),
+                        $this->stringValue($join['operator']),
+                        $this->stringValue($join['second']),
                     );
                 }
-            } elseif (is_object($join) && method_exists($join, '__toString')) {
-                $sql .= ' ' . $join;
+            } elseif ($join instanceof Stringable) {
+                $sql .= ' ' . $join->__toString();
             } else {
                 throw new LogicException('Unsupported JOIN representation in payload.');
             }
@@ -149,7 +173,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
     protected function compileLimitOffset(QueryPayload $payload): string
     {
-        $limit  = $payload->limit;
+        $limit = $payload->limit;
         $offset = $payload->offset;
 
         if ($limit === null && $offset === null) {
@@ -182,7 +206,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $segments = [];
 
         foreach ($payload->orders as $order) {
-            $column    = $order['column'];
+            $column = $order['column'];
             $direction = strtoupper($order['direction']);
 
             if ($direction !== 'ASC' && $direction !== 'DESC') {
@@ -250,14 +274,11 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $aggregate = $payload->aggregate;
 
         if ($aggregate !== null) {
-            $function = strtoupper($aggregate['function'] ?? '');
-            $column   = $aggregate['column'] ?? '*';
+            $function = strtoupper($aggregate['function']);
+            $column = $aggregate['column'];
+            $columnSql = $column === '*' ? '*' : $this->wrapIdentifier($column);
 
-            if ($column !== '*') {
-                $column = $this->wrapIdentifier((string) $column);
-            }
-
-            return sprintf('SELECT %s(%s) AS aggregate', $function, $column);
+            return sprintf('SELECT %s(%s) AS aggregate', $function, $columnSql);
         }
 
         $columns = $payload->columns;
@@ -278,21 +299,45 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
                 } else {
                     $parts[] = $this->wrapIdentifier($column);
                 }
-            } else {
-                $parts[] = (string) $column;
             }
         }
 
         return 'SELECT ' . implode(', ', $parts);
     }
 
+    protected function compileTruncate(QueryPayload $payload): string
+    {
+        return $this->truncateStatementForTable($this->wrapIdentifier($this->requireTable($payload)));
+    }
+
     /**
-     * @param  array<string,mixed>  $where
+     * @return array{0:string,1:list<mixed>}
+     */
+    protected function compileUpdate(QueryPayload $payload): array
+    {
+        [$sql, $bindings] = MutationCompiler::compileUpdate(
+            $this->requireTable($payload),
+            $payload->updateValues,
+            $payload->bindings,
+            fn(string $identifier): string => $this->wrapIdentifier($identifier),
+        );
+
+        $where = $this->compileWheres($payload);
+
+        if ($where !== '') {
+            $sql .= ' WHERE ' . $where;
+        }
+
+        return [$sql, $bindings];
+    }
+
+    /**
+     * @param array<string,mixed> $where
      */
     protected function compileWhereBasic(array $where): string
     {
-        $column   = (string) ($where['column'] ?? '');
-        $operator = (string) ($where['operator'] ?? '=');
+        $column = $this->arrayString($where, 'column');
+        $operator = $this->arrayString($where, 'operator', '=');
 
         if ($column === '') {
             return '';
@@ -306,14 +351,14 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
     }
 
     /**
-     * @param  array<string,mixed>  $where
+     * @param array<string,mixed> $where
      */
     protected function compileWhereBetween(array $where): string
     {
-        $column = (string) ($where['column'] ?? '');
+        $column = $this->arrayString($where, 'column');
         /** @var array{0:mixed,1:mixed}|list<mixed> $values */
         $values = $where['values'] ?? [];
-        $not    = (bool) ($where['not'] ?? false);
+        $not = (bool) ($where['not'] ?? false);
 
         if ($column === '' || count($values) < 2) {
             return '';
@@ -327,14 +372,14 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
     }
 
     /**
-     * @param  array<string,mixed>  $where
+     * @param array<string,mixed> $where
      */
     protected function compileWhereIn(array $where): string
     {
-        $column = (string) ($where['column'] ?? '');
+        $column = $this->arrayString($where, 'column');
         /** @var list<mixed> $values */
         $values = $where['values'] ?? [];
-        $not    = (bool) ($where['not'] ?? false);
+        $not = (bool) ($where['not'] ?? false);
 
         if ($column === '' || $values === []) {
             return '';
@@ -351,12 +396,12 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
     }
 
     /**
-     * @param  array<string,mixed>  $where
+     * @param array<string,mixed> $where
      */
     protected function compileWhereNull(array $where): string
     {
-        $column = (string) ($where['column'] ?? '');
-        $not    = (bool) ($where['not'] ?? false);
+        $column = $this->arrayString($where, 'column');
+        $not = (bool) ($where['not'] ?? false);
 
         if ($column === '') {
             return '';
@@ -370,11 +415,11 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
     }
 
     /**
-     * @param  array<string,mixed>  $where
+     * @param array<string,mixed> $where
      */
     protected function compileWhereRaw(array $where): string
     {
-        return (string) ($where['sql'] ?? '');
+        return $this->arrayString($where, 'sql');
     }
 
     protected function compileWheres(QueryPayload $payload): string
@@ -384,32 +429,32 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         }
 
         $segments = [];
-        $first    = true;
+        $first = true;
 
         foreach ($payload->wheres as $where) {
-            $type    = $where['type'] ?? 'basic';
-            $boolean = strtolower((string) ($where['boolean'] ?? 'and'));
+            $type = $this->arrayString($where, 'type', 'basic');
+            $boolean = strtolower($this->arrayString($where, 'boolean', 'and'));
 
             $boolean = $boolean === 'or' ? 'OR' : 'AND';
 
             $segment = match ($type) {
-                'basic'   => $this->compileWhereBasic($where),
-                'in'      => $this->compileWhereIn($where),
+                'basic' => $this->compileWhereBasic($where),
+                'in' => $this->compileWhereIn($where),
                 'between' => $this->compileWhereBetween($where),
-                'null'    => $this->compileWhereNull($where),
-                'raw'     => $this->compileWhereRaw($where),
-                default   => throw new LogicException("Unsupported WHERE type: {$type}"),
+                'null' => $this->compileWhereNull($where),
+                'raw' => $this->compileWhereRaw($where),
+                default => throw new LogicException("Unsupported WHERE type: {$type}"),
             };
 
             if ($segment === '') {
                 continue;
             }
 
-            if (! $first) {
+            if (!$first) {
                 $segments[] = $boolean . ' ' . $segment;
             } else {
                 $segments[] = $segment;
-                $first      = false;
+                $first = false;
             }
         }
 
@@ -418,18 +463,74 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
     protected function expressionToSql(Expression $expression): string
     {
-        // Prefer explicit accessor if available (your Expression has getValue()).
-        if (method_exists($expression, 'getValue')) {
-            /** @var mixed $value */
-            $value = $expression->getValue();
+        return $expression->getValue();
+    }
 
+    protected function requireTable(QueryPayload $payload): string
+    {
+        $table = trim((string) $payload->table);
+
+        if ($table === '') {
+            throw new LogicException(
+                sprintf('Payload for %s requires a non-empty table name.', $payload->type->value),
+            );
+        }
+
+        return $table;
+    }
+
+    protected function truncateStatementForTable(string $wrappedTable): string
+    {
+        return 'TRUNCATE TABLE ' . $wrappedTable;
+    }
+
+    /**
+     * Shared identifier wrapping for quote-delimited dialects.
+     */
+    protected function wrapDelimitedIdentifier(string $identifier, string $quote): string
+    {
+        $identifier = trim($identifier);
+
+        if ($identifier === '' || $identifier === '*') {
+            return $identifier;
+        }
+
+        if (str_contains($identifier, '(') || str_contains($identifier, ' ')) {
+            return $identifier;
+        }
+
+        $parts = explode('.', $identifier);
+
+        $wrapped = array_map(
+            static fn(string $part): string => $part === '*' ? '*' : $quote . $part . $quote,
+            $parts,
+        );
+
+        return implode('.', $wrapped);
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     */
+    private function arrayString(array $data, string $key, string $default = ''): string
+    {
+        if (!array_key_exists($key, $data)) {
+            return $default;
+        }
+
+        return $this->stringValue($data[$key], $default);
+    }
+
+    private function stringValue(mixed $value, string $default = ''): string
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value) || is_bool($value)) {
             return (string) $value;
         }
 
-        if (method_exists($expression, '__toString')) {
-            return (string) $expression;
-        }
-
-        return '';
+        return $default;
     }
 }

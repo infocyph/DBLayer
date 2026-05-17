@@ -32,7 +32,7 @@ final class DriverProfile
      */
     private const array DEADLOCK_ERROR_CODES = [
         // MySQL / MariaDB: ER_LOCK_DEADLOCK
-        'mysql'   => ['1213'],
+        'mysql' => ['1213'],
         'mariadb' => ['1213'],
         // PostgreSQL typically uses only SQLSTATE for deadlock ⇒ no extra here
     ];
@@ -75,11 +75,11 @@ final class DriverProfile
      */
     private const array DEADLOCK_SQLSTATES = [
         // MySQL / MariaDB
-        'mysql'   => ['40001'],
+        'mysql' => ['40001'],
         'mariadb' => ['40001'],
 
         // PostgreSQL
-        'pgsql'    => ['40P01', '40001'],
+        'pgsql' => ['40P01', '40001'],
         'postgres' => ['40P01', '40001'],
     ];
 
@@ -89,11 +89,87 @@ final class DriverProfile
      * @var array<string,int|null>
      */
     private const array DEFAULT_PORTS = [
-        'mysql'   => 3306,
+        'mysql' => 3306,
         'mariadb' => 3306,
-        'pgsql'   => 5432,
+        'pgsql' => 5432,
         'postgres' => 5432,
-        'sqlite'  => null,
+        'sqlite' => null,
+    ];
+
+    /**
+     * Vendor-specific error codes that are generally safe to retry in transactions.
+     *
+     * @var array<string,list<string>>
+     */
+    private const array RETRYABLE_TX_ERROR_CODES = [
+        // MySQL / MariaDB.
+        'mysql' => ['1213', '1205'],
+        'mariadb' => ['1213', '1205'],
+
+        // SQLite.
+        'sqlite' => ['5', '6'],
+    ];
+
+    /**
+     * Message fragments that strongly suggest retryable transaction conflicts.
+     *
+     * @var array<string,list<string>>
+     */
+    private const array RETRYABLE_TX_MESSAGE_HINTS = [
+        'mysql' => [
+            'deadlock found when trying to get lock',
+            'lock wait timeout exceeded',
+            'serialization failure',
+            'try restarting transaction',
+        ],
+        'mariadb' => [
+            'deadlock',
+            'lock wait timeout exceeded',
+            'serialization failure',
+        ],
+        'pgsql' => [
+            'deadlock detected',
+            'could not serialize access',
+            'serialization failure',
+        ],
+        'postgres' => [
+            'deadlock detected',
+            'could not serialize access',
+            'serialization failure',
+        ],
+        'postgresql' => [
+            'deadlock detected',
+            'could not serialize access',
+            'serialization failure',
+        ],
+        'sqlite' => [
+            'database is locked',
+            'database is busy',
+            'sqlstate[hy000]: general error: 5',
+            'sqlstate[hy000]: general error: 6',
+            'sqlite_busy',
+            'sqlite_locked',
+        ],
+        'default' => [
+            'deadlock',
+            'serialization failure',
+            'could not serialize access',
+            'database is locked',
+            'database is busy',
+        ],
+    ];
+
+    /**
+     * SQLSTATE codes that are generally safe to retry in transactions.
+     *
+     * @var array<string,list<string>>
+     */
+    private const array RETRYABLE_TX_SQLSTATES = [
+        'mysql' => ['40001', '41000'],
+        'mariadb' => ['40001', '41000'],
+        'pgsql' => ['40P01', '40001'],
+        'postgres' => ['40P01', '40001'],
+        'postgresql' => ['40P01', '40001'],
     ];
 
     private function __construct()
@@ -107,7 +183,7 @@ final class DriverProfile
      * This is intended to be called from ConnectionConfig, after base defaults
      * and user config are merged.
      *
-     * @param  array<string,mixed>  $config
+     * @param array<string,mixed> $config
      * @return array<string,mixed>
      */
     public static function applyConnectionDefaults(array $config): array
@@ -121,7 +197,7 @@ final class DriverProfile
         }
 
         // Default port.
-        if (! array_key_exists('port', $config) || $config['port'] === null || $config['port'] === '') {
+        if (!array_key_exists('port', $config) || $config['port'] === null || $config['port'] === '') {
             $port = self::DEFAULT_PORTS[$driver] ?? null;
 
             if ($port !== null) {
@@ -133,11 +209,11 @@ final class DriverProfile
         switch ($driver) {
             case 'mysql':
             case 'mariadb':
-                if (! isset($config['charset']) || ! is_string($config['charset']) || $config['charset'] === '') {
+                if (!isset($config['charset']) || !is_string($config['charset']) || $config['charset'] === '') {
                     $config['charset'] = 'utf8mb4';
                 }
 
-                if (! isset($config['collation']) || ! is_string($config['collation']) || $config['collation'] === '') {
+                if (!isset($config['collation']) || !is_string($config['collation']) || $config['collation'] === '') {
                     $config['collation'] = 'utf8mb4_unicode_ci';
                 }
 
@@ -146,11 +222,11 @@ final class DriverProfile
             case 'pgsql':
             case 'postgres':
             case 'postgresql':
-                if (! isset($config['charset']) || ! is_string($config['charset']) || $config['charset'] === '') {
+                if (!isset($config['charset']) || !is_string($config['charset']) || $config['charset'] === '') {
                     $config['charset'] = 'utf8';
                 }
 
-                if (! isset($config['schema']) || ! is_string($config['schema']) || $config['schema'] === '') {
+                if (!isset($config['schema']) || !is_string($config['schema']) || $config['schema'] === '') {
                     $config['schema'] = 'public';
                 }
 
@@ -170,17 +246,25 @@ final class DriverProfile
      */
     public static function causedByDeadlock(string $driver, Throwable $e): bool
     {
-        $driver = strtolower($driver);
+        return self::causedByDriverClassifier(
+            $driver,
+            $e,
+            self::messageSuggestsDeadlock(...),
+            self::metadataSuggestsDeadlock(...),
+        );
+    }
 
-        if (self::messageSuggestsDeadlock($driver, $e->getMessage())) {
-            return true;
-        }
-
-        if (! $e instanceof PDOException) {
-            return false;
-        }
-
-        return self::metadataSuggestsDeadlock($driver, $e);
+    /**
+     * Classify whether a Throwable is retryable as a transaction conflict.
+     */
+    public static function causedByRetryableTransactionError(string $driver, Throwable $e): bool
+    {
+        return self::causedByDriverClassifier(
+            $driver,
+            $e,
+            self::messageSuggestsRetryableTransactionConflict(...),
+            self::metadataSuggestsRetryableTransactionConflict(...),
+        );
     }
 
     /**
@@ -191,17 +275,40 @@ final class DriverProfile
         $driver = strtolower($driver);
 
         return match ($driver) {
-            'mysql', 'mariadb'              => new MySQLGrammar(),
+            'mysql', 'mariadb' => new MySQLGrammar(),
             'pgsql', 'postgres', 'postgresql' => new PostgreSQLGrammar(),
-            'sqlite', 'sqlite3'             => new SQLiteGrammar(),
-            default                         => throw ConnectionException::unsupportedDriver($driver),
+            'sqlite', 'sqlite3' => new SQLiteGrammar(),
+            default => throw ConnectionException::unsupportedDriver($driver),
         };
+    }
+
+    /**
+     * @param callable(string,string):bool $messageClassifier
+     * @param callable(string,PDOException):bool $metadataClassifier
+     */
+    private static function causedByDriverClassifier(
+        string $driver,
+        Throwable $e,
+        callable $messageClassifier,
+        callable $metadataClassifier,
+    ): bool {
+        $driver = strtolower($driver);
+
+        if ($messageClassifier($driver, $e->getMessage())) {
+            return true;
+        }
+
+        if (!$e instanceof PDOException) {
+            return false;
+        }
+
+        return $metadataClassifier($driver, $e);
     }
 
     /**
      * Determine if a non-empty code exists in the known deadlock code list.
      *
-     * @param  list<string>  $knownCodes
+     * @param list<string> $knownCodes
      */
     private static function matchesKnownDeadlockCode(?string $code, array $knownCodes): bool
     {
@@ -215,7 +322,35 @@ final class DriverProfile
     {
         $hints = self::DEADLOCK_MESSAGE_HINTS[$driver]
           ?? self::DEADLOCK_MESSAGE_HINTS['default'];
-        return array_any($hints, fn($needle) => $needle !== '' && stripos($message, (string) $needle) !== false);
+
+        return array_any($hints, fn(string $needle): bool => stripos($message, $needle) !== false);
+    }
+
+    /**
+     * Check retryable transaction conflict by message hints.
+     */
+    private static function messageSuggestsRetryableTransactionConflict(string $driver, string $message): bool
+    {
+        $hints = self::RETRYABLE_TX_MESSAGE_HINTS[$driver]
+          ?? self::RETRYABLE_TX_MESSAGE_HINTS['default'];
+
+        return array_any($hints, fn(string $needle): bool => stripos($message, $needle) !== false);
+    }
+
+    /**
+     * @param list<string> $states
+     * @param list<string> $codes
+     */
+    private static function metadataMatchesStateAndCodeSets(PDOException $e, array $states, array $codes): bool
+    {
+        $errorInfo = $e->errorInfo;
+        $sqlState = is_array($errorInfo) && isset($errorInfo[0]) ? self::nullableString($errorInfo[0]) : null;
+        $vendorCode = is_array($errorInfo) && isset($errorInfo[1]) ? self::nullableString($errorInfo[1]) : null;
+        $code = (string) $e->getCode();
+
+        return self::matchesKnownDeadlockCode($sqlState, $states)
+          || self::matchesKnownDeadlockCode($vendorCode, $codes)
+          || self::matchesKnownDeadlockCode($code, $codes);
     }
 
     /**
@@ -223,16 +358,35 @@ final class DriverProfile
      */
     private static function metadataSuggestsDeadlock(string $driver, PDOException $e): bool
     {
-        $errorInfo  = $e->errorInfo;
-        $sqlState   = is_array($errorInfo) && isset($errorInfo[0]) ? (string) $errorInfo[0] : null;
-        $vendorCode = is_array($errorInfo) && isset($errorInfo[1]) ? (string) $errorInfo[1] : null;
-        $code       = (string) $e->getCode();
+        return self::metadataMatchesStateAndCodeSets(
+            $e,
+            self::DEADLOCK_SQLSTATES[$driver] ?? [],
+            self::DEADLOCK_ERROR_CODES[$driver] ?? [],
+        );
+    }
 
-        $states = self::DEADLOCK_SQLSTATES[$driver] ?? [];
-        $codes  = self::DEADLOCK_ERROR_CODES[$driver] ?? [];
+    /**
+     * Check retryable transaction conflict by SQLSTATE / vendor code metadata.
+     */
+    private static function metadataSuggestsRetryableTransactionConflict(string $driver, PDOException $e): bool
+    {
+        return self::metadataMatchesStateAndCodeSets(
+            $e,
+            self::RETRYABLE_TX_SQLSTATES[$driver] ?? [],
+            self::RETRYABLE_TX_ERROR_CODES[$driver] ?? [],
+        );
+    }
 
-        return self::matchesKnownDeadlockCode($sqlState, $states)
-          || self::matchesKnownDeadlockCode($vendorCode, $codes)
-          || self::matchesKnownDeadlockCode($code, $codes);
+    private static function nullableString(mixed $value): ?string
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value) || is_bool($value)) {
+            return (string) $value;
+        }
+
+        return null;
     }
 }

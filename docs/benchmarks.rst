@@ -25,6 +25,13 @@ Current benchmark subjects are defined in ``benchmarks/DBLayerBench.php``:
 - ``benchSelectByPrimaryKey``
 - ``benchTransactionTwoPointReads``
 - ``benchUpdateSingleColumn``
+- ``benchExecuteRaw``
+- ``benchTypedRunCompiled``
+- ``benchStatementCacheOff`` / ``benchStatementCacheOn``
+- ``benchWithQueryCommentDisabled`` / ``benchWithQueryCommentEnabled``
+- ``benchEventDispatchOff`` / ``benchEventDispatchOn``
+- ``benchSelectRowsBuffered`` / ``benchStreamRows``
+- ``benchWithLeastLatencyCachedReplica`` / ``benchWithLeastLatencyUncachedReplica``
 
 Report Interpretation
 ---------------------
@@ -32,6 +39,18 @@ Report Interpretation
 - Prefer comparing results from the same machine and PHP version.
 - Watch for drift in mode/mean and RSD.
 - Use ``bench:quick`` for local iteration and ``bench:run`` for fuller runs.
+
+Do Not Assume Feature Speedups
+------------------------------
+
+Do not assume statement cache or observability toggles always improve
+throughput. Compare paired benchmark subjects on the same machine/run:
+
+- ``benchStatementCacheOff`` vs ``benchStatementCacheOn``
+- ``benchWithQueryCommentDisabled`` vs ``benchWithQueryCommentEnabled``
+- ``benchEventDispatchOff`` vs ``benchEventDispatchOn``
+
+Treat these as measured tradeoffs, not guaranteed improvements.
 
 Chart Output
 ------------

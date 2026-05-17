@@ -16,9 +16,9 @@ final class ValidationException extends DBException
      */
     public function __construct(
         string $message = 'Validation failed.',
-        protected array $errors = [],
         int $code = 0,
         ?Throwable $previous = null,
+        protected array $errors = [],
     ) {
         parent::__construct($message, $code, $previous);
     }
@@ -30,7 +30,7 @@ final class ValidationException extends DBException
      */
     public static function withErrors(array $errors): self
     {
-        return new self('Validation failed.', $errors);
+        return new self('Validation failed.', 0, null, $errors);
     }
 
     /**

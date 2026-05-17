@@ -7,14 +7,13 @@ namespace Infocyph\DBLayer\Query;
 use Generator;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Exceptions\QueryException;
-use Infocyph\DBLayer\Exceptions\SecurityException;
 use Infocyph\DBLayer\Grammar\Grammar;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
+use Infocyph\DBLayer\Query\Concerns\QueryBuilderInternals;
 use Infocyph\DBLayer\Query\Core\QueryPayload;
 use Infocyph\DBLayer\Query\Core\QueryType;
-use Infocyph\DBLayer\Security\Security;
 
 /**
  * SQL Query Builder
@@ -33,6 +32,8 @@ use Infocyph\DBLayer\Security\Security;
  */
 class QueryBuilder
 {
+    use QueryBuilderInternals;
+
     /**
      * Allowed operators for where/having/join clauses.
      *
@@ -203,7 +204,7 @@ class QueryBuilder
             $this->validateColumnIdentifier($column, true);
         }
 
-        if (! \in_array($column, $this->columns, true)) {
+        if (!\in_array($column, $this->columns, true)) {
             $this->columns[] = $column;
         }
 
@@ -217,6 +218,11 @@ class QueryBuilder
      */
     public function aggregate(string $function, string $column = '*'): mixed
     {
+        $function = trim($function);
+        if ($function === '') {
+            throw QueryException::invalidParameter('function', 'Aggregate function must not be empty.');
+        }
+
         return $this->runAggregate($function, $column, false);
     }
 
@@ -233,7 +239,7 @@ class QueryBuilder
      *
      * The callback receives (list<row>, pageNumber) and may return false to stop.
      *
-     * @param  callable(list<array<string,mixed>>,int):bool  $callback
+     * @param callable(list<array<string,mixed>>,int):bool $callback
      */
     public function chunk(int $count, callable $callback): bool
     {
@@ -241,26 +247,11 @@ class QueryBuilder
             throw QueryException::invalidLimit($count);
         }
 
-        $page = 1;
-
-        do {
-            $clone         = $this->cloneBuilder();
-            $clone->offset = ($page - 1) * $count;
-            $clone->limit  = $count;
-
-            $results = $clone->get();
-            $num     = \count($results);
-
-            if ($num === 0) {
-                break;
-            }
-
+        foreach ($this->offsetChunks($count) as [$results, $page]) {
             if ($callback($results, $page) === false) {
                 return false;
             }
-
-            $page++;
-        } while ($num === $count);
+        }
 
         return true;
     }
@@ -270,8 +261,8 @@ class QueryBuilder
      *
      * Safer for large tables than OFFSET-based chunk() when rows are inserted/deleted.
      *
-     * @param  mixed  $fromId  Initial cursor value for the chunk column.
-     * @param  callable(list<array<string,mixed>>,int):bool  $callback
+     * @param mixed $fromId Initial cursor value for the chunk column.
+     * @param callable(list<array<string,mixed>>,int):bool $callback
      */
     public function chunkById(
         int $count,
@@ -284,36 +275,22 @@ class QueryBuilder
         }
 
         $lastId = $fromId;
-        $page   = 1;
+        $column = $this->requireNonEmptyString($column, 'column');
 
-        while (true) {
-            $clone = $this->cloneBuilder();
+        for ($page = 1; ; $page++) {
+            $results = $this->fetchChunkById($count, $column, $lastId);
 
-            if ($lastId !== null) {
-                $clone->where($column, '>', $lastId);
-            }
-
-            $clone->orderBy($column, 'asc');
-            $clone->limit = $count;
-
-            $results = $clone->get();
-            $num     = \count($results);
-
-            if ($num === 0) {
-                break;
+            if ($results === []) {
+                return true;
             }
 
             if ($callback($results, $page) === false) {
                 return false;
             }
 
-            $lastRow = $results[$num - 1];
-            $lastId  = $lastRow[$column] ?? $lastId;
-
-            $page++;
+            $lastRow = $results[\count($results) - 1];
+            $lastId = $lastRow[$column] ?? $lastId;
         }
-
-        return true;
     }
 
     /**
@@ -329,7 +306,7 @@ class QueryBuilder
      */
     public function count(string $column = '*'): int
     {
-        return (int) ($this->runAggregate('COUNT', $column, true) ?? 0);
+        return $this->toInt($this->runAggregate('COUNT', $column, true), 0);
     }
 
     /**
@@ -340,7 +317,7 @@ class QueryBuilder
         $this->validateTableIdentifier($table);
 
         $this->joins[] = [
-            'type'  => 'cross',
+            'type' => 'cross',
             'table' => $table,
         ];
 
@@ -348,11 +325,9 @@ class QueryBuilder
     }
 
     /**
-     * Iterate over the results using a simple cursor based on LIMIT/OFFSET.
+     * Iterate over rows lazily using the underlying PDO cursor.
      *
-     * This keeps memory usage bounded by $chunkSize.
-     *
-     * @return Generator<array<string,mixed>>
+     * @return Generator<mixed>
      */
     public function cursor(int $chunkSize = 1000): Generator
     {
@@ -360,30 +335,7 @@ class QueryBuilder
             throw QueryException::invalidLimit($chunkSize);
         }
 
-        $page = 1;
-
-        while (true) {
-            $clone         = $this->cloneBuilder();
-            $clone->offset = ($page - 1) * $chunkSize;
-            $clone->limit  = $chunkSize;
-
-            $results = $clone->get();
-            $num     = \count($results);
-
-            if ($num === 0) {
-                break;
-            }
-
-            foreach ($results as $row) {
-                yield $row;
-            }
-
-            if ($num < $chunkSize) {
-                break;
-            }
-
-            $page++;
-        }
+        yield from $this->stream();
     }
 
     /**
@@ -392,10 +344,10 @@ class QueryBuilder
      * This assumes a stable ordering by $column. For large datasets this is
      * more efficient than OFFSET-based pagination.
      *
-     * @param  int  $perPage  Items per page
-     * @param  mixed  $cursor  Last seen value for $column (raw DB value)
-     * @param  string  $column  Ordered column used as the cursor (default: "id")
-     * @param  non-empty-string  $direction  "asc" or "desc"
+     * @param int $perPage Items per page
+     * @param mixed $cursor Last seen value for $column (raw DB value)
+     * @param string $column Ordered column used as the cursor (default: "id")
+     * @param non-empty-string $direction "asc" or "desc"
      *
      * @throws QueryException
      */
@@ -411,46 +363,37 @@ class QueryBuilder
 
         $direction = \strtolower($direction);
 
-        if (! \in_array($direction, ['asc', 'desc'], true)) {
+        if (!\in_array($direction, ['asc', 'desc'], true)) {
             throw QueryException::invalidOrderDirection($direction);
         }
 
         $operator = $direction === 'asc' ? '>' : '<';
 
-        $clone            = $this->cloneBuilder();
-        $clone->aggregate = null;
-        $clone->limit     = null;
-        $clone->offset    = null;
-        $clone->orders    = [];
+        $clone = $this->cloneBuilder();
+        $this->resetCursorWindow($clone);
 
         if ($cursor !== null) {
-            $clone->where($column, $operator, $cursor);
+            $clone->where($this->requireNonEmptyString($column, 'column'), $operator, $cursor);
         }
 
         $clone->orderBy($column, $direction);
         $clone->limit = $perPage + 1;
 
         $results = $clone->get();
-        $hasMore = \count($results) > $perPage;
-
-        if ($hasMore) {
-            $items = \array_slice($results, 0, $perPage);
-        } else {
-            $items = $results;
-        }
+        [$items, $hasMore] = $this->resolvePaginatedItems($results, $perPage);
 
         $nextCursor = null;
 
         if ($hasMore && $items !== []) {
-            $lastRow       = $items[\count($items) - 1];
+            $lastRow = $items[\count($items) - 1];
             $nextCursorVal = $lastRow[$column] ?? null;
 
             if ($nextCursorVal !== null) {
-                $nextCursor = (string) $nextCursorVal;
+                $nextCursor = $this->stringifyScalar($nextCursorVal);
             }
         }
 
-        $currentCursor = $cursor !== null ? (string) $cursor : null;
+        $currentCursor = $cursor !== null ? $this->stringifyScalar($cursor) : null;
 
         return new CursorPaginator(
             $items,
@@ -496,7 +439,7 @@ class QueryBuilder
     {
         $clone = $this->cloneBuilder();
 
-        return $clone->where($column, '=', $id)->first();
+        return $clone->where($this->requireNonEmptyString($column, 'column'), '=', $id)->first();
     }
 
     /**
@@ -512,7 +455,7 @@ class QueryBuilder
     /**
      * Execute the query and get the first result matching the constraint.
      *
-     * @param  callable(self):void|non-empty-string  $column
+     * @param callable(self):void|non-empty-string $column
      * @return array<string,mixed>|null
      */
     public function firstWhere(
@@ -557,8 +500,8 @@ class QueryBuilder
     /**
      * Set table source to a subquery.
      *
-     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
-     * @param  list<mixed>  $bindings
+     * @param QueryBuilder|callable(QueryBuilder):void|string $query
+     * @param list<mixed> $bindings
      */
     public function fromSub(QueryBuilder|callable|string $query, string $as, array $bindings = []): self
     {
@@ -628,20 +571,20 @@ class QueryBuilder
     public function getComponents(): array
     {
         return [
-            'type'      => $this->type,
-            'ctes'      => $this->ctes,
-            'columns'   => $this->columns,
-            'distinct'  => $this->distinct,
-            'from'      => $this->from,
-            'joins'     => $this->joins,
-            'wheres'    => $this->wheres,
-            'groups'    => $this->groups,
-            'havings'   => $this->havings,
-            'orders'    => $this->orders,
-            'limit'     => $this->limit,
-            'offset'    => $this->offset,
-            'unions'    => $this->unions,
-            'lock'      => $this->lock,
+            'type' => $this->type,
+            'ctes' => $this->ctes,
+            'columns' => $this->columns,
+            'distinct' => $this->distinct,
+            'from' => $this->from,
+            'joins' => $this->joins,
+            'wheres' => $this->wheres,
+            'groups' => $this->groups,
+            'havings' => $this->havings,
+            'orders' => $this->orders,
+            'limit' => $this->limit,
+            'offset' => $this->offset,
+            'unions' => $this->unions,
+            'lock' => $this->lock,
             'aggregate' => $this->aggregate,
         ];
     }
@@ -671,7 +614,9 @@ class QueryBuilder
             $this->validateColumnIdentifier($group, false);
         }
 
-        $this->groups = \array_merge($this->groups, $groups);
+        foreach ($groups as $group) {
+            $this->groups[] = $group;
+        }
 
         return $this;
     }
@@ -686,23 +631,23 @@ class QueryBuilder
         string $boolean = 'and',
     ): self {
         if (\func_num_args() === 2) {
-            $value    = $operator;
+            $value = $operator;
             $operator = '=';
         }
 
-        if (! is_string($operator)) {
-            throw QueryException::invalidOperator((string) $operator);
+        if (!is_string($operator)) {
+            throw QueryException::invalidOperator($this->stringifyScalar($operator));
         }
 
         $operator = $this->assertValidOperator($operator);
         $this->validateColumnIdentifier($column, false);
 
         $this->havings[] = [
-            'type'     => 'basic',
-            'column'   => $column,
+            'type' => 'basic',
+            'column' => $column,
             'operator' => $operator,
-            'value'    => $value,
-            'boolean'  => $boolean,
+            'value' => $value,
+            'boolean' => $boolean,
         ];
 
         $this->bindings[] = $value;
@@ -713,7 +658,7 @@ class QueryBuilder
     /**
      * Insert a new record (single or multiple rows).
      *
-     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
      */
     public function insert(array $values): bool
     {
@@ -726,7 +671,7 @@ class QueryBuilder
      * Uses insertReturning() when supported to avoid extra round trips.
      * Falls back to insert() + lastInsertId().
      *
-     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
      */
     public function insertGetId(array $values, ?string $sequence = null): string
     {
@@ -735,7 +680,7 @@ class QueryBuilder
         $row = $this->insertReturning($values, $column);
 
         if ($row !== null && \array_key_exists($column, $row)) {
-            return (string) $row[$column];
+            return $this->stringifyScalar($row[$column]);
         }
 
         $this->insert($values);
@@ -748,7 +693,7 @@ class QueryBuilder
      *
      * Falls back to insert() on drivers without native support.
      *
-     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
      */
     public function insertIgnore(array $values): bool
     {
@@ -761,7 +706,7 @@ class QueryBuilder
      * On PostgreSQL, uses INSERT ... RETURNING.
      * On other drivers, falls back to lastInsertId() and synthesizes a row.
      *
-     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
      * @return array<string,mixed>|null
      */
     public function insertReturning(array $values, ?string $column = null): ?array
@@ -785,11 +730,11 @@ class QueryBuilder
         $operator = $this->assertValidOperator($operator);
 
         $this->joins[] = [
-            'type'     => $type,
-            'table'    => $table,
-            'first'    => $first,
+            'type' => $type,
+            'table' => $table,
+            'first' => $first,
             'operator' => $operator,
-            'second'   => $second,
+            'second' => $second,
         ];
 
         return $this;
@@ -800,7 +745,7 @@ class QueryBuilder
      *
      * The callback receives a JoinClause instance.
      *
-     * @param  callable(JoinClause):void  $callback
+     * @param callable(JoinClause):void $callback
      */
     public function joinComplex(string $table, callable $callback, string $type = 'inner'): self
     {
@@ -913,12 +858,12 @@ class QueryBuilder
 
         $direction = \strtolower($direction);
 
-        if (! \in_array($direction, ['asc', 'desc'], true)) {
+        if (!\in_array($direction, ['asc', 'desc'], true)) {
             throw QueryException::invalidOrderDirection($direction);
         }
 
         $this->orders[] = [
-            'column'    => $column,
+            'column' => $column,
             'direction' => $direction,
         ];
 
@@ -935,12 +880,18 @@ class QueryBuilder
 
     /**
      * Add an OR WHERE clause.
+     *
+     * @param callable(QueryBuilder):void|non-empty-string $column
      */
     public function orWhere(string|callable $column, mixed $operator = null, mixed $value = null): self
     {
         if (\func_num_args() === 2) {
-            $value    = $operator;
+            $value = $operator;
             $operator = '=';
+        }
+
+        if (is_string($column)) {
+            $column = $this->requireNonEmptyString($column, 'column');
         }
 
         return $this->where($column, $operator, $value, 'or');
@@ -963,11 +914,11 @@ class QueryBuilder
         $total = $this->count();
 
         // Page items.
-        $clone            = $this->cloneBuilder();
+        $clone = $this->cloneBuilder();
         $clone->aggregate = null;
 
         $clone->offset = ($page - 1) * $perPage;
-        $clone->limit  = $perPage;
+        $clone->limit = $perPage;
 
         $items = $clone->get();
 
@@ -982,7 +933,7 @@ class QueryBuilder
     public function pluck(string $column, ?string $key = null): array
     {
         $results = $this->get();
-        $values  = [];
+        $values = [];
 
         foreach ($results as $row) {
             $value = $row[$column] ?? null;
@@ -993,11 +944,16 @@ class QueryBuilder
                 continue;
             }
 
-            if (! \array_key_exists($key, $row)) {
+            if (!\array_key_exists($key, $row)) {
                 continue;
             }
 
-            $values[$row[$key]] = $value;
+            $resolvedKey = $row[$key];
+            if (!is_int($resolvedKey) && !is_string($resolvedKey)) {
+                continue;
+            }
+
+            $values[$resolvedKey] = $value;
         }
 
         return $values;
@@ -1012,36 +968,9 @@ class QueryBuilder
     }
 
     /**
-     * Set the columns to select.
-     *
-     * @param  array<int,string|Expression>|string|Expression  ...$columns
-     */
-    public function select(array|string|Expression ...$columns): self
-    {
-        if ($columns === []) {
-            return $this;
-        }
-
-        $resolvedColumns = \is_array($columns[0]) ? $columns[0] : $columns;
-
-        foreach ($resolvedColumns as $column) {
-            if (! \is_string($column)) {
-                continue;
-            }
-
-            $this->validateColumnIdentifier($column, true);
-        }
-
-        $this->type    = 'select';
-        $this->columns = $resolvedColumns;
-
-        return $this;
-    }
-
-    /**
      * Add a raw select expression.
      *
-     * @param  list<mixed>  $bindings
+     * @param list<mixed> $bindings
      */
     public function selectRaw(string $expression, array $bindings = []): self
     {
@@ -1061,8 +990,8 @@ class QueryBuilder
     /**
      * Add a convenience window-function expression into the SELECT list.
      *
-     * @param  list<string>  $partitionBy
-     * @param  list<string>  $orderBy
+     * @param list<string> $partitionBy
+     * @param list<string> $orderBy
      */
     public function selectWindow(
         string $functionExpression,
@@ -1108,21 +1037,15 @@ class QueryBuilder
 
         $page = \max(1, $page ?? 1);
 
-        $clone            = $this->cloneBuilder();
+        $clone = $this->cloneBuilder();
         $clone->aggregate = null;
 
-        $offset        = ($page - 1) * $perPage;
+        $offset = ($page - 1) * $perPage;
         $clone->offset = $offset;
-        $clone->limit  = $perPage + 1; // fetch one extra row
+        $clone->limit = $perPage + 1; // fetch one extra row
 
         $results = $clone->get();
-        $hasMore = \count($results) > $perPage;
-
-        if ($hasMore) {
-            $items = \array_slice($results, 0, $perPage);
-        } else {
-            $items = $results;
-        }
+        [$items, $hasMore] = $this->resolvePaginatedItems($results, $perPage);
 
         return new SimplePaginator($items, $perPage, $page, $hasMore);
     }
@@ -1133,6 +1056,24 @@ class QueryBuilder
     public function skip(int $offset): self
     {
         return $this->offset($offset);
+    }
+
+    /**
+     * Stream rows lazily for this SELECT query.
+     *
+     * @return Generator<mixed>
+     */
+    public function stream(?int $fetchMode = null): Generator
+    {
+        if ($this->type === null) {
+            $this->type = 'select';
+        }
+
+        yield from $this->connection->stream(
+            $this->toSelectSql(),
+            $this->getBindings(),
+            $fetchMode,
+        );
     }
 
     /**
@@ -1160,11 +1101,31 @@ class QueryBuilder
     }
 
     /**
+     * Build a compiler payload for DELETE.
+     */
+    public function toDeletePayload(): QueryPayload
+    {
+        return $this->toPayload()->with([
+            'type' => QueryType::DELETE,
+        ]);
+    }
+
+    /**
+     * Build a compiler payload for INSERT.
+     *
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     */
+    public function toInsertPayload(array $values): QueryPayload
+    {
+        return $this->toPayload()->with([
+            'type' => QueryType::INSERT,
+            'insertRows' => $this->normalizePayloadInsertRows($values),
+        ]);
+    }
+
+    /**
      * New pipeline: convert the current query into a QueryPayload
      * so the driver/compiler can generate SQL.
-     *
-     * NOTE: "distinct" is not yet represented in QueryPayload; the
-     * Grammar path remains the canonical source of truth for now.
      */
     public function toPayload(): QueryPayload
     {
@@ -1177,7 +1138,7 @@ class QueryBuilder
 
             $unionPayloads[] = [
                 'query' => $unionQuery->toPayload(),
-                'all'   => (bool) $union['all'],
+                'all' => (bool) $union['all'],
             ];
         }
 
@@ -1224,6 +1185,29 @@ class QueryBuilder
     }
 
     /**
+     * Build a compiler payload for TRUNCATE.
+     */
+    public function toTruncatePayload(): QueryPayload
+    {
+        return $this->toPayload()->with([
+            'type' => QueryType::TRUNCATE,
+        ]);
+    }
+
+    /**
+     * Build a compiler payload for UPDATE.
+     *
+     * @param array<string,mixed> $values
+     */
+    public function toUpdatePayload(array $values): QueryPayload
+    {
+        return $this->toPayload()->with([
+            'type' => QueryType::UPDATE,
+            'updateValues' => $this->normalizePayloadUpdateValues($values),
+        ]);
+    }
+
+    /**
      * Truncate the table.
      */
     public function truncate(): bool
@@ -1234,7 +1218,7 @@ class QueryBuilder
     /**
      * Add a UNION query.
      *
-     * @param  QueryBuilder|callable(QueryBuilder):void  $query
+     * @param QueryBuilder|callable(QueryBuilder):void $query
      */
     public function union(QueryBuilder|callable $query, bool $all = false): self
     {
@@ -1246,7 +1230,7 @@ class QueryBuilder
 
         $this->unions[] = [
             'query' => $query,
-            'all'   => $all,
+            'all' => $all,
         ];
 
         $this->bindings = \array_merge($this->bindings, $query->getBindings());
@@ -1257,7 +1241,7 @@ class QueryBuilder
     /**
      * Add a UNION ALL query.
      *
-     * @param  QueryBuilder|callable(QueryBuilder):void  $query
+     * @param QueryBuilder|callable(QueryBuilder):void $query
      */
     public function unionAll(QueryBuilder|callable $query): self
     {
@@ -1267,12 +1251,12 @@ class QueryBuilder
     /**
      * Inverse of when(): apply callback only if the value is "falsey".
      *
-     * @param  callable(self,mixed):void  $callback
-     * @param  callable(self,mixed):void|null  $default
+     * @param callable(self,mixed):void $callback
+     * @param callable(self,mixed):void|null $default
      */
     public function unless(mixed $value, callable $callback, ?callable $default = null): self
     {
-        if (! $value) {
+        if (!$value) {
             $callback($this, $value);
         } elseif ($default !== null) {
             $default($this, $value);
@@ -1284,7 +1268,7 @@ class QueryBuilder
     /**
      * Update records.
      *
-     * @param  array<string,mixed>  $values
+     * @param array<string,mixed> $values
      */
     public function update(array $values): int
     {
@@ -1298,9 +1282,9 @@ class QueryBuilder
     /**
      * Upsert helper: INSERT ... ON DUPLICATE KEY UPDATE / ON CONFLICT.
      *
-     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
-     * @param  list<string>  $uniqueBy
-     * @param  list<string>|null  $update
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @param list<string> $uniqueBy
+     * @param list<string>|null $update
      */
     public function upsert(array $values, array $uniqueBy, ?array $update = null): bool
     {
@@ -1310,10 +1294,10 @@ class QueryBuilder
     /**
      * Upsert and return affected rows when possible.
      *
-     * @param  array<string,mixed>|array<int,array<string,mixed>>  $values
-     * @param  list<string>  $uniqueBy
-     * @param  list<string>|null  $update
-     * @param  list<string>  $returning
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @param list<string> $uniqueBy
+     * @param list<string>|null $update
+     * @param list<string> $returning
      * @return list<array<string,mixed>>
      */
     public function upsertReturning(
@@ -1343,8 +1327,8 @@ class QueryBuilder
      *      ->when($search, fn ($q, $search) => $q->where('name', 'like', "%$search%"))
      *      ->when($active, fn ($q) => $q->where('active', 1));
      *
-     * @param  callable(self,mixed):void  $callback
-     * @param  callable(self,mixed):void|null  $default
+     * @param callable(self,mixed):void $callback
+     * @param callable(self,mixed):void|null $default
      */
     public function when(mixed $value, callable $callback, ?callable $default = null): self
     {
@@ -1360,7 +1344,7 @@ class QueryBuilder
     /**
      * Add a WHERE clause.
      *
-     * @param  callable(QueryBuilder):void|non-empty-string  $column
+     * @param callable(QueryBuilder):void|non-empty-string $column
      */
     public function where(
         string|callable $column,
@@ -1375,101 +1359,97 @@ class QueryBuilder
 
         // Handle two arguments (column, value).
         if (\func_num_args() === 2) {
-            $value    = $operator;
+            $value = $operator;
             $operator = '=';
         }
 
         $this->validateColumnIdentifier($column, false);
 
-        if (! is_string($operator)) {
-            throw QueryException::invalidOperator((string) $operator);
+        if (!is_string($operator)) {
+            throw QueryException::invalidOperator($this->stringifyScalar($operator));
         }
 
         $operator = $this->assertValidOperator($operator);
 
-        $this->wheres[] = [
-            'type'     => 'basic',
-            'column'   => $column,
-            'operator' => $operator,
-            'value'    => $value,
-            'boolean'  => $boolean,
-        ];
-
-        $this->bindings[] = $value;
-
-        return $this;
+        return $this->appendWhere(
+            [
+                'type' => 'basic',
+                'column' => $column,
+                'operator' => $operator,
+                'value' => $value,
+                'boolean' => $boolean,
+            ],
+            [$value],
+        );
     }
 
     /**
      * Add a WHERE BETWEEN clause.
      *
-     * @param  array{0:mixed,1:mixed}  $values
+     * @param array{0:mixed,1:mixed} $values
      */
     public function whereBetween(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->validateColumnIdentifier($column, false);
 
-        $this->wheres[] = [
-            'type'    => 'between',
-            'column'  => $column,
-            'values'  => $values,
-            'boolean' => $boolean,
-            'not'     => $not,
-        ];
-
-        $this->bindings = \array_merge($this->bindings, $values);
-
-        return $this;
+        return $this->appendWhere(
+            [
+                'type' => 'between',
+                'column' => $column,
+                'values' => $values,
+                'boolean' => $boolean,
+                'not' => $not,
+            ],
+            $values,
+        );
     }
 
     /**
      * Add a WHERE EXISTS clause.
      *
-     * @param  callable(QueryBuilder):void  $callback
+     * @param callable(QueryBuilder):void $callback
      */
     public function whereExists(callable $callback, string $boolean = 'and', bool $not = false): self
     {
         $query = $this->newQuery();
         $callback($query);
 
-        $this->wheres[] = [
-            'type'    => 'exists',
-            'query'   => $query,
-            'boolean' => $boolean,
-            'not'     => $not,
-        ];
-
-        $this->bindings = \array_merge($this->bindings, $query->getBindings());
-
-        return $this;
+        return $this->appendWhere(
+            [
+                'type' => 'exists',
+                'query' => $query,
+                'boolean' => $boolean,
+                'not' => $not,
+            ],
+            $query->getBindings(),
+        );
     }
 
     /**
      * Add a WHERE IN clause.
      *
-     * @param  list<mixed>  $values
+     * @param list<mixed> $values
      */
     public function whereIn(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
         $this->validateColumnIdentifier($column, false);
 
-        $this->wheres[] = [
-            'type'    => 'in',
-            'column'  => $column,
-            'values'  => $values,
-            'boolean' => $boolean,
-            'not'     => $not,
-        ];
-
-        $this->bindings = \array_merge($this->bindings, $values);
-
-        return $this;
+        return $this->appendWhere(
+            [
+                'type' => 'in',
+                'column' => $column,
+                'values' => $values,
+                'boolean' => $boolean,
+                'not' => $not,
+            ],
+            $values,
+        );
     }
 
     /**
      * Add a nested WHERE clause.
      *
-     * @param  callable(QueryBuilder):void  $callback
+     * @param callable(QueryBuilder):void $callback
      */
     public function whereNested(callable $callback, string $boolean = 'and'): self
     {
@@ -1478,8 +1458,8 @@ class QueryBuilder
 
         if ($query->wheres !== []) {
             $this->wheres[] = [
-                'type'    => 'nested',
-                'query'   => $query,
+                'type' => 'nested',
+                'query' => $query,
                 'boolean' => $boolean,
             ];
 
@@ -1492,7 +1472,7 @@ class QueryBuilder
     /**
      * Add a WHERE BETWEEN NOT clause.
      *
-     * @param  array{0:mixed,1:mixed}  $values
+     * @param array{0:mixed,1:mixed} $values
      */
     public function whereNotBetween(string $column, array $values, string $boolean = 'and'): self
     {
@@ -1502,7 +1482,7 @@ class QueryBuilder
     /**
      * Add a WHERE NOT IN clause.
      *
-     * @param  list<mixed>  $values
+     * @param list<mixed> $values
      */
     public function whereNotIn(string $column, array $values, string $boolean = 'and'): self
     {
@@ -1525,10 +1505,10 @@ class QueryBuilder
         $this->validateColumnIdentifier($column, false);
 
         $this->wheres[] = [
-            'type'    => 'null',
-            'column'  => $column,
+            'type' => 'null',
+            'column' => $column,
             'boolean' => $boolean,
-            'not'     => $not,
+            'not' => $not,
         ];
 
         return $this;
@@ -1537,15 +1517,15 @@ class QueryBuilder
     /**
      * Add a raw WHERE clause.
      *
-     * @param  list<mixed>  $bindings
+     * @param list<mixed> $bindings
      */
     public function whereRaw(string $sql, array $bindings = [], string $boolean = 'and'): self
     {
         $this->validateRawFragment($sql, $bindings);
 
         $this->wheres[] = [
-            'type'    => 'raw',
-            'sql'     => $sql,
+            'type' => 'raw',
+            'sql' => $sql,
             'boolean' => $boolean,
         ];
 
@@ -1557,8 +1537,8 @@ class QueryBuilder
     /**
      * Add a common table expression.
      *
-     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
-     * @param  list<mixed>  $bindings
+     * @param QueryBuilder|callable(QueryBuilder):void|string $query
+     * @param list<mixed> $bindings
      */
     public function with(string $name, QueryBuilder|callable|string $query, array $bindings = []): self
     {
@@ -1568,8 +1548,8 @@ class QueryBuilder
     /**
      * Add a recursive common table expression.
      *
-     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
-     * @param  list<mixed>  $bindings
+     * @param QueryBuilder|callable(QueryBuilder):void|string $query
+     * @param list<mixed> $bindings
      */
     public function withRecursive(string $name, QueryBuilder|callable|string $query, array $bindings = []): self
     {
@@ -1577,267 +1557,145 @@ class QueryBuilder
     }
 
     /**
-     * Register a CTE and preserve placeholder binding order.
+     * Generator alias for stream().
      *
-     * @param  QueryBuilder|callable(QueryBuilder):void|string  $query
-     * @param  list<mixed>  $bindings
+     * @return Generator<mixed>
      */
-    private function addCte(
-        string $name,
-        QueryBuilder|callable|string $query,
-        bool $recursive,
-        array $bindings,
-    ): self {
-        if (\is_callable($query)) {
-            $builder = $this->newQuery();
-            $query($builder);
-            $query = $builder;
+    public function yieldRows(?int $fetchMode = null): Generator
+    {
+        yield from $this->stream($fetchMode);
+    }
+
+    /**
+     * @param array<string,mixed> $where
+     * @param list<mixed> $bindings
+     */
+    private function appendWhere(array $where, array $bindings = []): self
+    {
+        $this->wheres[] = $where;
+
+        if ($bindings === []) {
+            return $this;
         }
 
-        if (\is_string($query)) {
-            $this->validateRawFragment($query, $bindings);
-        }
-
-        $this->ctes[] = [
-            'name' => $name,
-            'query' => $query,
-            'recursive' => $recursive,
-        ];
-
-        if ($query instanceof self) {
-            $this->cteBindings = \array_merge($this->cteBindings, $query->getBindings());
-        }
-
-        if ($bindings !== []) {
-            $this->cteBindings = \array_merge($this->cteBindings, $bindings);
-        }
+        $this->bindings = \array_merge($this->bindings, $bindings);
 
         return $this;
     }
 
     /**
-     * Validate and normalize a comparison operator.
+     * @return list<array<string,mixed>>
      */
-    private function assertValidOperator(string $operator): string
+    private function fetchChunkById(int $chunkSize, string $column, mixed $lastId): array
     {
-        $normalized = $this->normalizeOperator($operator);
+        $clone = $this->cloneBuilder();
 
-        if (! \in_array($normalized, self::ALLOWED_OPERATORS, true)) {
-            throw QueryException::invalidOperator($operator);
+        if ($lastId !== null) {
+            $clone->where($this->requireNonEmptyString($column, 'column'), '>', $lastId);
+        }
+
+        $clone->orderBy($column, 'asc');
+        $clone->limit = $chunkSize;
+
+        return $clone->get();
+    }
+
+    /**
+     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @return list<array<string,mixed>>
+     */
+    private function normalizePayloadInsertRows(array $values): array
+    {
+        if ($values === []) {
+            return [];
+        }
+
+        if (!\is_array(\reset($values))) {
+            /** @var array<string,mixed> $row */
+            $row = $values;
+            $values = [$row];
+        }
+
+        /** @var list<array<string,mixed>> $values */
+        return $values;
+    }
+
+    /**
+     * @param array<string,mixed> $values
+     * @return array<string,mixed>
+     */
+    private function normalizePayloadUpdateValues(array $values): array
+    {
+        $normalized = [];
+
+        foreach ($values as $column => $value) {
+            if ($column === '') {
+                continue;
+            }
+
+            $normalized[$column] = $value;
         }
 
         return $normalized;
     }
 
     /**
-     * Enforce connection-level policy for raw SQL fragments.
+     * @return Generator<array{0:list<array<string,mixed>>,1:int}>
      */
-    private function enforceRawSqlPolicy(string $sql): void
+    private function offsetChunks(int $chunkSize): Generator
     {
-        $security = $this->connection->getConfig()->securityConfig();
-        $policy = strtolower(trim((string) ($security['raw_sql_policy'] ?? 'allow')));
+        for ($page = 1; ; $page++) {
+            $clone = $this->cloneBuilder();
+            $clone->offset = ($page - 1) * $chunkSize;
+            $clone->limit = $chunkSize;
 
-        if ($policy === 'allow') {
-            return;
-        }
+            $results = $clone->get();
+            $count = \count($results);
 
-        if ($policy === 'deny') {
-            throw QueryException::buildingFailed(
-                'Raw SQL fragments are disabled by security.raw_sql_policy=deny.',
-            );
-        }
-
-        if ($policy !== 'allowlist') {
-            throw QueryException::buildingFailed(
-                sprintf('Unsupported raw SQL policy [%s].', $policy),
-            );
-        }
-
-        $allowlist = $security['raw_sql_allowlist'] ?? [];
-
-        if (! is_array($allowlist) || $allowlist === []) {
-            throw QueryException::buildingFailed(
-                'Raw SQL allowlist policy requires security.raw_sql_allowlist patterns.',
-            );
-        }
-
-        foreach ($allowlist as $pattern) {
-            if (! is_string($pattern)) {
-                continue;
+            if ($count === 0) {
+                break;
             }
 
-            $rule = trim($pattern);
-            if ($rule === '') {
-                continue;
-            }
+            yield [$results, $page];
 
-            if ($this->matchesRawPolicyRule($sql, $rule)) {
-                return;
+            if ($count < $chunkSize) {
+                break;
             }
         }
-
-        throw QueryException::buildingFailed(
-            'Raw SQL fragment is not allowlisted by security.raw_sql_allowlist.',
-        );
     }
 
-    /**
-     * Map legacy string type to QueryType enum.
-     */
-    private function mapTypeToEnum(?string $type): QueryType
+    private function resetAggregateWindow(self $builder): void
     {
-        $type = $type !== null ? \strtolower($type) : 'select';
+        foreach (['limit', 'offset', 'lock'] as $key) {
+            $builder->{$key} = null;
+        }
 
-        return match ($type) {
-            'insert'   => QueryType::INSERT,
-            'update'   => QueryType::UPDATE,
-            'delete'   => QueryType::DELETE,
-            'truncate' => QueryType::TRUNCATE,
-            'select', '' => QueryType::SELECT,
-            default    => QueryType::SELECT,
-        };
+        $builder->orders = [];
+        $builder->unions = [];
     }
 
-    /**
-     * Match one allowlist rule against a raw SQL fragment.
-     */
-    private function matchesRawPolicyRule(string $sql, string $rule): bool
+    private function resetCursorWindow(self $builder): void
     {
-        // Treat /.../modifiers rules as regex patterns.
-        if (strlen($rule) >= 3 && $rule[0] === '/' && strrpos($rule, '/') !== 0) {
-            $matched = @preg_match($rule, $sql);
+        $builder->aggregate = null;
+        $builder->orders = [];
 
-            return $matched === 1;
-        }
-
-        return str_contains(strtolower($sql), strtolower($rule));
-    }
-
-    /**
-     * Normalize operator token before validation/storage.
-     */
-    private function normalizeOperator(string $operator): string
-    {
-        $normalized = preg_replace('/\s+/', ' ', trim($operator));
-
-        return strtolower($normalized ?? $operator);
-    }
-
-    /**
-     * Internal helper to run aggregate queries.
-     *
-     * @param  non-empty-string  $function
-     */
-    private function runAggregate(string $function, string $column = '*', bool $ignoreLimitOffset = false): mixed
-    {
-        $clone = clone $this;
-
-        if ($ignoreLimitOffset) {
-            $clone->limit  = null;
-            $clone->offset = null;
-            $clone->orders = [];
-            $clone->unions = [];
-            $clone->lock   = null;
-        }
-
-        $clone->aggregate = [
-            'function' => \strtoupper($function),
-            'column'   => $column,
-        ];
-
-        $results = $this->executor->select($clone);
-
-        if ($results === []) {
-            return null;
-        }
-
-        $row = $results[0];
-
-        return $row['aggregate'] ?? (\array_values($row)[0] ?? null);
-    }
-
-    /**
-     * Whether strict identifier policy is enabled on this connection.
-     */
-    private function shouldValidateIdentifiers(): bool
-    {
-        if (! $this->connection->getConfig()->isSecurityEnabled()) {
-            return false;
-        }
-
-        $security = $this->connection->getConfig()->securityConfig();
-
-        if (! array_key_exists('strict_identifiers', $security)) {
-            return true;
-        }
-
-        return (bool) $security['strict_identifiers'];
-    }
-
-    /**
-     * Validate a column/alias identifier when strict identifier policy is enabled.
-     */
-    private function validateColumnIdentifier(string $column, bool $allowWildcard): void
-    {
-        if (! $this->shouldValidateIdentifiers()) {
-            return;
-        }
-
-        $trimmed = trim($column);
-
-        if ($trimmed === '') {
-            throw QueryException::invalidParameter('column', 'Column identifier must not be empty.');
-        }
-
-        if ($allowWildcard && $trimmed === '*') {
-            return;
-        }
-
-        if ($allowWildcard && preg_match('/^[a-zA-Z_][a-zA-Z0-9_.]*\.\*$/', $trimmed) === 1) {
-            return;
-        }
-
-        try {
-            Security::validateColumnName($trimmed);
-        } catch (SecurityException $e) {
-            throw QueryException::invalidParameter('column', $e->getMessage());
+        foreach (['limit', 'offset'] as $key) {
+            $builder->{$key} = null;
         }
     }
 
     /**
-     * Validate raw SQL fragment with lightweight security checks.
-     *
-     * @param  list<mixed>  $bindings
+     * @param list<array<string,mixed>> $results
+     * @return array{0:list<array<string,mixed>>,1:bool}
      */
-    private function validateRawFragment(string $sql, array $bindings = []): void
+    private function resolvePaginatedItems(array $results, int $perPage): array
     {
-        $this->enforceRawSqlPolicy($sql);
+        $hasMore = \count($results) > $perPage;
 
-        try {
-            Security::validateQuery($sql, $bindings, [
-                'enabled' => true,
-                'max_sql_length' => 8_192,
-                'max_params' => 256,
-                'max_param_bytes' => 2_048,
-            ]);
-        } catch (SecurityException $e) {
-            throw QueryException::buildingFailed('Unsafe raw SQL fragment: ' . $e->getMessage());
-        }
-    }
-
-    /**
-     * Validate a table identifier when strict identifier policy is enabled.
-     */
-    private function validateTableIdentifier(string $table): void
-    {
-        if (! $this->shouldValidateIdentifiers()) {
-            return;
+        if (!$hasMore) {
+            return [$results, false];
         }
 
-        try {
-            Security::validateTableName($table);
-        } catch (SecurityException $e) {
-            throw QueryException::invalidParameter('table', $e->getMessage());
-        }
+        return [\array_slice($results, 0, $perPage), true];
     }
 }

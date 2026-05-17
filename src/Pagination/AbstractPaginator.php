@@ -34,7 +34,7 @@ abstract class AbstractPaginator implements PaginatorInterface
         int $perPage,
         int $currentPage = 1,
     ) {
-        $this->perPage     = max(1, $perPage);
+        $this->perPage = max(1, $perPage);
         $this->currentPage = max(1, $currentPage);
     }
 

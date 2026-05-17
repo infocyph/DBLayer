@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Support;
 
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
+use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionBeginning;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionCommitted;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionRolledBack;
@@ -18,6 +19,8 @@ final class Telemetry
     private const int DEFAULT_MAX_QUERY_EVENTS = 2_000;
 
     private const int DEFAULT_MAX_TRANSACTION_EVENTS = 2_000;
+
+    private const string REDACTED_VALUE = '[redacted]';
 
     /**
      * Whether collection is enabled.
@@ -45,6 +48,7 @@ final class Telemetry
      * Maximum retained transaction events in memory.
      */
     private static int $maxTransactionEvents = self::DEFAULT_MAX_TRANSACTION_EVENTS;
+
     /**
      * @var list<array<string,mixed>>
      */
@@ -95,7 +99,7 @@ final class Telemetry
     /**
      * Export telemetry payload and clear local buffers.
      *
-     * @param  null|callable(array<string,mixed>):void  $exporter
+     * @param null|callable(array<string,mixed>):void $exporter
      * @return array<string,mixed>
      */
     public static function flush(?callable $exporter = null): array
@@ -115,7 +119,7 @@ final class Telemetry
     /**
      * Export OpenTelemetry-like payload and clear local buffers.
      *
-     * @param  null|callable(array<string,mixed>):void  $exporter
+     * @param null|callable(array<string,mixed>):void $exporter
      * @return array<string,mixed>
      */
     public static function flushOtel(?callable $exporter = null, string $serviceName = 'dblayer'): array
@@ -158,7 +162,7 @@ final class Telemetry
     /**
      * Configure a default exporter callback.
      *
-     * @param  null|callable(array<string,mixed>):void  $exporter
+     * @param null|callable(array<string,mixed>):void $exporter
      */
     public static function setExporter(?callable $exporter): void
     {
@@ -168,13 +172,13 @@ final class Telemetry
     /**
      * Build percentile report for collected query durations.
      *
-     * @param  list<int|float>  $percentiles
+     * @param list<int|float> $percentiles
      * @return array<string,mixed>
      */
     public static function slowQueryReport(array $percentiles = [50, 90, 95, 99], ?float $minimumMs = null): array
     {
         $durations = array_map(
-            static fn(array $query): float => (float) ($query['duration_ms'] ?? 0.0),
+            static fn(array $query): float => Numeric::arrayFloat($query, 'duration_ms'),
             self::$queries,
         );
 
@@ -198,12 +202,8 @@ final class Telemetry
 
         $pct = [];
         foreach ($percentiles as $percentile) {
-            if (! is_numeric($percentile)) {
-                continue;
-            }
-
             $p = max(0.0, min(100.0, (float) $percentile));
-            $pct[(string) $p] = round(self::percentile($durations, $p), 4);
+            $pct[(string) $p] = round(Numeric::percentile($durations, $p), 4);
         }
 
         $slowCount = 0;
@@ -239,7 +239,7 @@ final class Telemetry
         $totalQueryTime = 0.0;
 
         foreach (self::$queries as $query) {
-            $totalQueryTime += (float) ($query['duration_ms'] ?? 0.0);
+            $totalQueryTime += Numeric::arrayFloat($query, 'duration_ms');
         }
 
         return [
@@ -263,22 +263,27 @@ final class Telemetry
         $spans = [];
 
         foreach (self::$queries as $query) {
-            $durationMs = (float) ($query['duration_ms'] ?? 0.0);
-            $end = (float) ($query['timestamp'] ?? microtime(true));
+            $durationMs = Numeric::arrayFloat($query, 'duration_ms');
+            $end = Numeric::arrayFloat($query, 'timestamp', microtime(true));
             $start = max(0.0, $end - ($durationMs / 1_000.0));
+            $spanId = self::queryString($query, 'span_id', 'q');
+            $connection = self::queryString($query, 'connection', 'unknown');
+            $sql = self::queryString($query, 'sql');
+            $bindingsCount = Numeric::arrayInt($query, 'bindings_count');
+            $rowsAffected = Numeric::arrayInt($query, 'rows_affected');
 
             $spans[] = [
-                'traceId' => self::hexHash('trace-' . ($query['span_id'] ?? 'q') . '-' . $end, 32),
-                'spanId' => self::hexHash('span-' . ($query['span_id'] ?? 'q') . '-' . $start, 16),
+                'traceId' => self::hexHash('trace-' . $spanId . '-' . $end, 32),
+                'spanId' => self::hexHash('span-' . $spanId . '-' . $start, 16),
                 'name' => 'db.query',
                 'kind' => 3, // CLIENT
                 'startTimeUnixNano' => (string) self::toUnixNano($start),
                 'endTimeUnixNano' => (string) self::toUnixNano($end),
                 'attributes' => [
-                    ['key' => 'db.system', 'value' => ['stringValue' => (string) ($query['connection'] ?? 'unknown')]],
-                    ['key' => 'db.statement', 'value' => ['stringValue' => (string) ($query['sql'] ?? '')]],
-                    ['key' => 'db.bindings_count', 'value' => ['intValue' => (int) ($query['bindings_count'] ?? 0)]],
-                    ['key' => 'db.rows_affected', 'value' => ['intValue' => (int) ($query['rows_affected'] ?? 0)]],
+                    ['key' => 'db.system', 'value' => ['stringValue' => $connection]],
+                    ['key' => 'db.statement', 'value' => ['stringValue' => $sql]],
+                    ['key' => 'db.bindings_count', 'value' => ['intValue' => $bindingsCount]],
+                    ['key' => 'db.rows_affected', 'value' => ['intValue' => $rowsAffected]],
                     ['key' => 'db.duration_ms', 'value' => ['doubleValue' => $durationMs]],
                 ],
             ];
@@ -315,7 +320,7 @@ final class Telemetry
         self::$hooked = true;
 
         Events::listen('db.query.executed', static function (QueryExecuted $event): void {
-            if (! self::$enabled) {
+            if (!self::$enabled) {
                 return;
             }
 
@@ -325,6 +330,7 @@ final class Telemetry
                 'sql' => $event->sql,
                 'bindings_count' => \count($event->bindings),
                 'duration_ms' => $event->time,
+                'success' => true,
                 'rows_affected' => $event->rowsAffected,
                 'connection' => $event->connection->getDriverName(),
                 'timestamp' => microtime(true),
@@ -332,8 +338,33 @@ final class Telemetry
             self::trimQueryBuffer();
         });
 
+        Events::listen('db.query.failed', static function (QueryFailed $event): void {
+            if (!self::$enabled) {
+                return;
+            }
+
+            self::$sequence++;
+            self::$queries[] = [
+                'span_id' => 'q-' . self::$sequence,
+                'sql' => self::REDACTED_VALUE,
+                'bindings_count' => \count($event->bindings),
+                'bindings_redacted' => true,
+                'duration_ms' => $event->time,
+                'success' => false,
+                'rows_affected' => null,
+                'connection' => $event->connection->getDriverName(),
+                'timestamp' => microtime(true),
+                'error' => self::REDACTED_VALUE,
+                'statement' => $event->statement,
+                'fingerprint' => $event->fingerprint,
+                'attempts' => $event->attempts,
+                'exception' => $event->exceptionClass,
+            ];
+            self::trimQueryBuffer();
+        });
+
         Events::listen('db.transaction.beginning', static function (TransactionBeginning $event): void {
-            if (! self::$enabled) {
+            if (!self::$enabled) {
                 return;
             }
 
@@ -347,7 +378,7 @@ final class Telemetry
         });
 
         Events::listen('db.transaction.committed', static function (TransactionCommitted $event): void {
-            if (! self::$enabled) {
+            if (!self::$enabled) {
                 return;
             }
 
@@ -361,7 +392,7 @@ final class Telemetry
         });
 
         Events::listen('db.transaction.rolled_back', static function (TransactionRolledBack $event): void {
-            if (! self::$enabled) {
+            if (!self::$enabled) {
                 return;
             }
 
@@ -384,35 +415,21 @@ final class Telemetry
     }
 
     /**
-     * @param  list<float>  $sorted
+     * @param array<string,mixed> $query
      */
-    private static function percentile(array $sorted, float $p): float
+    private static function queryString(array $query, string $key, string $default = ''): string
     {
-        $count = count($sorted);
+        $value = $query[$key] ?? null;
 
-        if ($count === 0) {
-            return 0.0;
+        if (is_string($value)) {
+            return $value;
         }
 
-        if ($count === 1 || $p <= 0.0) {
-            return (float) $sorted[0];
+        if (is_int($value) || is_float($value) || is_bool($value)) {
+            return (string) $value;
         }
 
-        if ($p >= 100.0) {
-            return (float) $sorted[$count - 1];
-        }
-
-        $index = ($p / 100.0) * ($count - 1);
-        $lower = (int) floor($index);
-        $upper = (int) ceil($index);
-
-        if ($lower === $upper) {
-            return (float) $sorted[$lower];
-        }
-
-        $weight = $index - $lower;
-
-        return (1 - $weight) * $sorted[$lower] + $weight * $sorted[$upper];
+        return $default;
     }
 
     /**

@@ -15,14 +15,32 @@ final class ReadReplicaSessionPolicy
     /**
      * Apply best-effort read-only behavior to a read handle.
      */
-    public static function apply(string $driver, ?PDO $pdo): void
+    public static function apply(string $driver, ?PDO $pdo, bool $enforceReadOnly = false): void
     {
-        if (! $pdo instanceof PDO || $driver !== 'sqlite') {
+        if (!$pdo instanceof PDO) {
+            return;
+        }
+
+        if ($driver === 'sqlite') {
+            try {
+                $pdo->exec('pragma query_only = on');
+            } catch (PDOException) {
+                // Best effort only.
+            }
+
+            return;
+        }
+
+        if (!$enforceReadOnly) {
             return;
         }
 
         try {
-            $pdo->exec('pragma query_only = on');
+            if ($driver === 'pgsql') {
+                $pdo->exec('set default_transaction_read_only = on');
+            } elseif ($driver === 'mysql') {
+                $pdo->exec('set session transaction read only');
+            }
         } catch (PDOException) {
             // Best effort only.
         }

@@ -33,9 +33,9 @@ final class QueryException extends DBException
     /**
      * Error while executing a query against the database.
      *
-     * @param string      $sql   The SQL statement that failed.
-     * @param string      $error Error message from the driver.
-     * @param string|null $code  Optional driver error code.
+     * @param string $sql The SQL statement that failed.
+     * @param string $error Error message from the driver.
+     * @param string|null $code Optional driver error code.
      */
     public static function executionFailed(
         string $sql,

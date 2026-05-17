@@ -20,7 +20,7 @@ final readonly class TransactionBeginning
 
     public function __construct(public Connection $connection, ?float $time = null)
     {
-        $this->time       = $time ?? microtime(true);
+        $this->time = $time ?? microtime(true);
     }
 
     /**
@@ -30,7 +30,7 @@ final readonly class TransactionBeginning
     {
         return [
             'connection' => $this->connection->getDriverName(),
-            'time'       => $this->time,
+            'time' => $this->time,
         ];
     }
 }

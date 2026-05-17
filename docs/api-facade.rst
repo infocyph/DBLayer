@@ -36,6 +36,7 @@ Raw SQL Methods
 
 - ``select()``, ``selectOne()``, ``selectResultSets()``, ``scalar()``
 - ``insert()``, ``update()``, ``delete()``, ``statement()``, ``unprepared()``, ``batch()``
+- ``stream()``, ``yieldRows()``
 
 Builder and Repository
 ----------------------
@@ -48,7 +49,7 @@ Transactions
 ------------
 
 - ``beginTransaction()``, ``commit()``, ``rollBack()``
-- ``transaction()``, ``transactionLevel()``, ``transactionStats()``
+- ``transaction()``, ``readOnlyTransaction()``, ``transactionLevel()``, ``transactionStats()``
 
 Execution Controls
 ------------------
@@ -70,3 +71,12 @@ Observability and Utility
 - ``stats()``, ``health()``, ``capabilities()``, ``supportsReturning()``, ``supportsJson()``, ``supportsWindowFunctions()``
 - ``pool()``, ``poolManager()``, ``withPooledConnection()``
 - ``cache()``, ``useFileCache()``
+- ``resetRuntimeState()`` (useful for long-running workers between requests/jobs)
+
+Long-Running Worker Note
+------------------------
+
+For worker runtimes (RoadRunner/Swoole/Octane-style loops), call
+``DB::resetRuntimeState()`` between logical requests/jobs to clear query logs,
+telemetry/profiler buffers, listeners, and threshold monitors while preserving
+registered connection configurations.

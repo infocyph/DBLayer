@@ -38,7 +38,7 @@ interface DriverInterface
     /**
      * Merge driver-specific defaults into user config.
      *
-     * @param  array<string,mixed>  $config
+     * @param array<string,mixed> $config
      * @return array<string,mixed>
      */
     public function mergeDefaults(array $config): array;
@@ -49,7 +49,7 @@ interface DriverInterface
      * Implementations SHOULD throw a descriptive exception if a required
      * setting is missing or malformed (e.g. missing "database" for MySQL).
      *
-     * @param  array<string,mixed>  $config
+     * @param array<string,mixed> $config
      */
     public function validateConfig(array $config): void;
 }

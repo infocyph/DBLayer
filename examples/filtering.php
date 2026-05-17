@@ -9,10 +9,16 @@ use Infocyph\DBLayer\Query\QueryBuilder;
 
 require __DIR__ . '/bootstrap.php';
 
+$writeDump = static function (mixed $value): void {
+    $encoded = json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+    fwrite(STDOUT, ($encoded === false ? '[unserializable]' : $encoded) . PHP_EOL);
+};
+
 $filters = [
-    'search'     => $_GET['search']    ?? null,
+    'search' => $_GET['search'] ?? null,
     'activeOnly' => isset($_GET['only_active']),
-    'role'       => $_GET['role']      ?? null,
+    'role' => $_GET['role'] ?? null,
 ];
 
 // Base query
@@ -56,4 +62,4 @@ $users = $query
   ->forPage(page: 1, perPage: 20)
   ->get();
 
-var_dump($users);
+$writeDump($users);

@@ -30,6 +30,7 @@ abstract class TableRepository
      * Optional named connection.
      */
     protected static ?string $connection = null;
+
     /**
      * Backing table name.
      */
@@ -40,6 +41,8 @@ abstract class TableRepository
      * 1) Repository API
      * 2) QueryBuilder API
      * 3) DB facade API (connection-aware forwarding)
+     *
+     * @param array<int,mixed> $arguments
      */
     public static function __callStatic(string $method, array $arguments): mixed
     {
@@ -54,7 +57,7 @@ abstract class TableRepository
         }
 
         if (method_exists(DB::class, $method)) {
-            return static::forwardToFacade($method, $arguments);
+            return self::forwardToFacade($method, $arguments);
         }
 
         throw new BadMethodCallException(sprintf(
@@ -209,11 +212,11 @@ abstract class TableRepository
         static $reflections = [];
 
         $reflection = $reflections[$method] ??= new ReflectionMethod(DB::class, $method);
-        $params     = $reflection->getParameters();
-        $namedArgs  = [];
+        $params = $reflection->getParameters();
+        $namedArgs = [];
 
         foreach ($arguments as $index => $argument) {
-            if (! isset($params[$index])) {
+            if (!isset($params[$index])) {
                 $namedArgs[] = $argument;
 
                 continue;
@@ -227,7 +230,7 @@ abstract class TableRepository
                 continue;
             }
 
-            if (! array_key_exists('connection', $namedArgs)) {
+            if (!array_key_exists('connection', $namedArgs)) {
                 $namedArgs['connection'] = static::resolveConnectionName();
             }
 

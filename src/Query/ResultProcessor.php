@@ -17,8 +17,8 @@ class ResultProcessor
     /**
      * Filter results using callback (reindexed).
      *
-     * @param list<array<string,mixed>>                $results
-     * @param callable(array<string,mixed>):bool|mixed $callback
+     * @param list<array<string,mixed>> $results
+     * @param callable(array<string,mixed>):bool $callback
      * @return list<array<string,mixed>>
      */
     public function filter(array $results, callable $callback): array
@@ -30,6 +30,7 @@ class ResultProcessor
      * Process raw results into collection.
      *
      * @param list<array<string,mixed>> $results
+     * @return Collection<int|string,mixed>
      */
     public function process(array $results): Collection
     {
@@ -48,8 +49,13 @@ class ResultProcessor
         }
 
         $result = $results[0];
+        $firstKey = \array_key_first($result);
 
-        return $result['aggregate'] ?? ($result[\array_key_first($result)] ?? null);
+        if ($firstKey === null) {
+            return null;
+        }
+
+        return $result['aggregate'] ?? $result[$firstKey];
     }
 
     /**
@@ -76,7 +82,7 @@ class ResultProcessor
         foreach ($results as $row) {
             $groupKey = $row[$groupBy] ?? null;
 
-            if ($groupKey === null) {
+            if ($groupKey === null || (!\is_int($groupKey) && !\is_string($groupKey))) {
                 continue;
             }
 
@@ -97,11 +103,17 @@ class ResultProcessor
         $processed = [];
 
         foreach ($results as $row) {
-            if (! \array_key_exists($key, $row) || ! \array_key_exists($value, $row)) {
+            if (!\array_key_exists($key, $row) || !\array_key_exists($value, $row)) {
                 continue;
             }
 
-            $processed[$row[$key]] = $row[$value];
+            $rowKey = $row[$key];
+
+            if (!\is_int($rowKey) && !\is_string($rowKey)) {
+                continue;
+            }
+
+            $processed[$rowKey] = $row[$value];
         }
 
         return $processed;
@@ -121,7 +133,7 @@ class ResultProcessor
     /**
      * Transform results using callback.
      *
-     * @param list<array<string,mixed>>                         $results
+     * @param list<array<string,mixed>> $results
      * @param callable(array<string,mixed>):array<string,mixed> $callback
      * @return list<array<string,mixed>>
      */

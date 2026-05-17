@@ -52,13 +52,13 @@ final class LengthAwarePaginator extends AbstractPaginator
     {
         return [
             'current_page' => $this->currentPage(),
-            'per_page'     => $this->perPage(),
-            'total'        => $this->total(),
-            'last_page'    => $this->lastPage(),
-            'from'         => $this->firstItem(),
-            'to'           => $this->lastItem(),
-            'count'        => $this->count(),
-            'has_more'     => $this->hasMorePages(),
+            'per_page' => $this->perPage(),
+            'total' => $this->total(),
+            'last_page' => $this->lastPage(),
+            'from' => $this->firstItem(),
+            'to' => $this->lastItem(),
+            'count' => $this->count(),
+            'has_more' => $this->hasMorePages(),
         ];
     }
 

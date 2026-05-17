@@ -49,6 +49,23 @@ Use retry attempts for transient failures:
    }, attempts: 3);
 
 When retries are enabled, write logic must be idempotent or safely repeatable.
+Prefer transaction-level retry for deadlocks/serialization failures over
+retrying standalone non-idempotent statements.
+
+Read-Only Transactions
+----------------------
+
+.. code-block:: php
+
+   DB::readOnlyTransaction(function ($connection): int {
+       return (int) $connection->scalar('select count(*) from reports');
+   });
+
+Driver behavior:
+
+- PostgreSQL: best-effort ``SET TRANSACTION READ ONLY``.
+- MySQL/MariaDB: best-effort ``SET TRANSACTION READ ONLY``.
+- SQLite: safe no-op (no transaction-scoped read-only toggle).
 
 Execution Budgets
 -----------------

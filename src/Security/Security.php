@@ -7,7 +7,7 @@ namespace Infocyph\DBLayer\Security;
 use Infocyph\DBLayer\Exceptions\SecurityException;
 
 /**
- * Security Manager
+ * Query Guard Manager
  *
  * Provides:
  *  - SQL injection detection (via QueryValidator)
@@ -252,6 +252,7 @@ final class Security
             'alter table',
             'create table',
         ];
+
         return array_any($dangerous, fn($operation) => str_starts_with($sql, (string) $operation));
     }
 
@@ -266,7 +267,7 @@ final class Security
     /**
      * Log a security event (kept simple and JSON-structured).
      *
-     * @param  array<string,mixed>  $context
+     * @param array<string,mixed> $context
      */
     public static function logSecurityEvent(string $type, string $message, array $context = []): void
     {
@@ -300,7 +301,7 @@ final class Security
             return;
         }
 
-        if (self::isDangerousOperation($sql) && ! $confirmed) {
+        if (self::isDangerousOperation($sql) && !$confirmed) {
             throw SecurityException::unsafeOperation(
                 'Dangerous SQL operation requires explicit confirmation.',
             );
@@ -338,7 +339,7 @@ final class Security
      */
     public static function setMode(SecurityMode $mode): void
     {
-        if ($mode === SecurityMode::OFF && ! self::isInsecureModeAllowed()) {
+        if ($mode === SecurityMode::OFF && !self::isInsecureModeAllowed()) {
             throw SecurityException::invalidConfiguration(
                 'SecurityMode::OFF is disabled by default. Call Security::allowInsecureMode(true) to override intentionally.',
             );
@@ -350,7 +351,7 @@ final class Security
     /**
      * Set an optional external/distributed rate-limit handler.
      *
-     * @param  null|callable(string,array{queries_per_second:int,queries_per_minute:int}):void  $handler
+     * @param null|callable(string,array{queries_per_second:int,queries_per_minute:int}):void $handler
      */
     public static function setRateLimitHandler(?callable $handler): void
     {
@@ -369,6 +370,8 @@ final class Security
 
     /**
      * Validate IN clause size using mode-appropriate max.
+     *
+     * @param list<mixed> $values
      *
      * @throws SecurityException
      */
@@ -395,8 +398,8 @@ final class Security
      *  - max_params       (int)   → max number of bound parameters
      *  - max_param_bytes  (int)   → max bytes per string parameter
      *
-     * @param  array<int|string,mixed>  $bindings
-     * @param  array<string,mixed>|null  $config
+     * @param array<int|string,mixed> $bindings
+     * @param array<string,mixed>|null $config
      *
      * @throws SecurityException
      */
@@ -466,7 +469,7 @@ final class Security
     /**
      * Enforce binding limits (count + per-string size).
      *
-     * @param  array<int|string,mixed>  $bindings
+     * @param array<int|string,mixed> $bindings
      *
      * @throws SecurityException
      */
@@ -490,7 +493,7 @@ final class Security
         }
 
         foreach ($bindings as $key => $value) {
-            if (! is_string($value)) {
+            if (!is_string($value)) {
                 continue;
             }
 
@@ -509,7 +512,7 @@ final class Security
     /**
      * Extract binding-related limits from per-connection config.
      *
-     * @param  array<string,mixed>|null  $config
+     * @param array<string,mixed>|null $config
      * @return array{0:?int,1:?int} [maxParams, maxParamBytes]
      */
     private static function extractBindingLimits(?array $config): array
@@ -517,7 +520,7 @@ final class Security
         $maxParams = null;
         $maxParamBytes = null;
 
-        if (! is_array($config)) {
+        if (!is_array($config)) {
             return [null, null];
         }
 
@@ -554,6 +557,8 @@ final class Security
 
     /**
      * Resolve effective maximum query length given mode + per-connection config.
+     *
+     * @param array<string,mixed>|null $config
      */
     private static function resolveMaxQueryLength(SecurityMode $mode, ?array $config): int
     {
@@ -593,26 +598,28 @@ final class Security
 
     /**
      * Decide whether to skip validation for a specific connection config.
+     *
+     * @param array<string,mixed>|null $config
      */
     private static function shouldSkipForConnection(?array $config): bool
     {
-        if (! is_array($config)) {
+        if (!is_array($config)) {
             return false;
         }
 
-        if (! array_key_exists('enabled', $config)) {
+        if (!array_key_exists('enabled', $config)) {
             return false;
         }
 
         $allowInsecure = (bool) ($config['allow_insecure'] ?? false);
 
-        if (! (bool) $config['enabled'] && ! $allowInsecure && ! self::isInsecureModeAllowed()) {
+        if (!(bool) $config['enabled'] && !$allowInsecure && !self::isInsecureModeAllowed()) {
             throw SecurityException::invalidConfiguration(
                 'Disabling SQL security checks requires security.allow_insecure=true or Security::allowInsecureMode(true).',
             );
         }
 
-        return ! (bool) $config['enabled'];
+        return !(bool) $config['enabled'];
     }
 
     /**

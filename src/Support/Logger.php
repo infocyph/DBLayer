@@ -18,6 +18,19 @@ use Throwable;
  */
 final class Logger
 {
+    /**
+     * @var array<string,string>
+     */
+    private const array PSR_LEVEL_MAP = [
+        'DEBUG' => LogLevel::DEBUG,
+        'NOTICE' => LogLevel::NOTICE,
+        'WARNING' => LogLevel::WARNING,
+        'ERROR' => LogLevel::ERROR,
+        'CRITICAL' => LogLevel::CRITICAL,
+        'ALERT' => LogLevel::ALERT,
+        'EMERGENCY' => LogLevel::EMERGENCY,
+    ];
+
     private readonly string $logFile;
 
     private bool $enabled = false;
@@ -42,8 +55,8 @@ final class Logger
      */
     public function clear(): void
     {
-        if (is_file($this->logFile) && ! is_link($this->logFile)) {
-            @unlink($this->logFile);
+        if (is_file($this->logFile) && !is_link($this->logFile)) {
+            unlink($this->logFile);
         }
     }
 
@@ -68,20 +81,20 @@ final class Logger
      */
     public function error(string $message, ?Throwable $exception = null): void
     {
-        if (! $this->enabled) {
+        if (!$this->enabled) {
             return;
         }
 
         $context = [
-            'level'   => 'ERROR',
+            'level' => 'ERROR',
             'message' => $message,
         ];
 
         if ($exception !== null) {
             $context['exception'] = $exception::class;
-            $context['file']      = $exception->getFile();
-            $context['line']      = $exception->getLine();
-            $context['trace']     = $exception->getTraceAsString();
+            $context['file'] = $exception->getFile();
+            $context['line'] = $exception->getLine();
+            $context['trace'] = $exception->getTraceAsString();
         }
 
         $this->write($context);
@@ -114,19 +127,19 @@ final class Logger
     /**
      * Log a query execution.
      *
-     * @param string                   $sql      The SQL statement
+     * @param string $sql The SQL statement
      * @param array<int|string, mixed> $bindings Bound parameters
-     * @param float                    $time     Execution time in milliseconds
+     * @param float $time Execution time in milliseconds
      */
     public function query(string $sql, array $bindings = [], float $time = 0.0): void
     {
-        if (! $this->enabled) {
+        if (!$this->enabled) {
             return;
         }
 
         $context = [
             'level' => 'QUERY',
-            'sql'   => $sql,
+            'sql' => $sql,
         ];
 
         if ($bindings !== []) {
@@ -156,6 +169,28 @@ final class Logger
         $this->redactBindings = $redact;
     }
 
+    /**
+     * @param array<string,mixed> $context
+     */
+    private function contextString(array $context, string $key, string $default): string
+    {
+        if (!array_key_exists($key, $context)) {
+            return $default;
+        }
+
+        $value = $context[$key];
+
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value) || is_bool($value)) {
+            return (string) $value;
+        }
+
+        return $default;
+    }
+
     private function defaultLogFile(): string
     {
         return rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
@@ -166,7 +201,6 @@ final class Logger
     }
 
     /**
-     * @param  array<string,mixed>  $context
      */
     private function defaultMessageForLevel(string $level): string
     {
@@ -184,11 +218,11 @@ final class Logger
             return false;
         }
 
-        if (! is_dir($directory) && ! @mkdir($directory, 0o700, true) && ! is_dir($directory)) {
+        if (!is_dir($directory) && !mkdir($directory, 0o700, true) && !is_dir($directory)) {
             return false;
         }
 
-        if (! is_writable($directory)) {
+        if (!is_writable($directory)) {
             return false;
         }
 
@@ -196,7 +230,7 @@ final class Logger
             return false;
         }
 
-        if (is_file($this->logFile) && ! is_writable($this->logFile)) {
+        if (is_file($this->logFile) && !is_writable($this->logFile)) {
             return false;
         }
 
@@ -206,12 +240,12 @@ final class Logger
     /**
      * Normalize bindings before writing them to logs.
      *
-     * @param  array<int|string,mixed>  $bindings
+     * @param array<int|string,mixed> $bindings
      * @return array<int|string,mixed>
      */
     private function normalizeBindingsForLog(array $bindings): array
     {
-        if (! $this->redactBindings) {
+        if (!$this->redactBindings) {
             return $bindings;
         }
 
@@ -220,16 +254,7 @@ final class Logger
 
     private function normalizePsrLevel(string $level): string
     {
-        return match ($level) {
-            'DEBUG' => LogLevel::DEBUG,
-            'NOTICE' => LogLevel::NOTICE,
-            'WARNING' => LogLevel::WARNING,
-            'ERROR' => LogLevel::ERROR,
-            'CRITICAL' => LogLevel::CRITICAL,
-            'ALERT' => LogLevel::ALERT,
-            'EMERGENCY' => LogLevel::EMERGENCY,
-            default => LogLevel::INFO,
-        };
+        return self::PSR_LEVEL_MAP[$level] ?? LogLevel::INFO;
     }
 
     /**
@@ -271,10 +296,10 @@ final class Logger
      */
     private function write(array $context): void
     {
-        $level = strtoupper((string) ($context['level'] ?? 'INFO'));
+        $level = strtoupper($this->contextString($context, 'level', 'INFO'));
         unset($context['level']);
 
-        $message = (string) ($context['message'] ?? $this->defaultMessageForLevel($level));
+        $message = $this->contextString($context, 'message', $this->defaultMessageForLevel($level));
         unset($context['message']);
 
         $this->writeToPsrLogger($level, $message, $context);
@@ -282,11 +307,11 @@ final class Logger
     }
 
     /**
-     * @param  array<string,mixed>  $context
+     * @param array<string,mixed> $context
      */
     private function writeToFile(string $level, string $message, array $context): void
     {
-        if (! $this->isSafeLogTarget()) {
+        if (!$this->isSafeLogTarget()) {
             return;
         }
 
@@ -296,19 +321,19 @@ final class Logger
 
         $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}';
         $entry = sprintf("[%s] %s: %s\n", $timestamp, $level, $json);
-        $isNewFile = ! is_file($this->logFile);
+        $isNewFile = !is_file($this->logFile);
 
-        if (@file_put_contents($this->logFile, $entry, FILE_APPEND | LOCK_EX) === false) {
+        if (file_put_contents($this->logFile, $entry, FILE_APPEND | LOCK_EX) === false) {
             return;
         }
 
         if ($isNewFile) {
-            @chmod($this->logFile, 0o600);
+            chmod($this->logFile, 0o600);
         }
     }
 
     /**
-     * @param  array<string,mixed>  $context
+     * @param array<string,mixed> $context
      */
     private function writeToPsrLogger(string $level, string $message, array $context): void
     {
