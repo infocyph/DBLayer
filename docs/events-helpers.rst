@@ -30,9 +30,22 @@ Built-in database event names:
 
 - ``db.query.executed``
 - ``db.query.executing``
+- ``db.query.failed``
 - ``db.transaction.beginning``
 - ``db.transaction.committed``
 - ``db.transaction.rolled_back``
+
+``db.query.failed`` payload fields:
+
+- ``sql``
+- ``bindings``
+- ``time``
+- ``connection``
+- ``attempts``
+- ``error``
+- ``exception``
+- ``statement``
+- ``fingerprint``
 
 Helpers
 -------

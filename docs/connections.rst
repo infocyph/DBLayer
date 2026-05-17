@@ -22,6 +22,19 @@ Connection Access
 Use ``freshConnection()`` when you explicitly need a new underlying PDO
 instance and do not want shared connection reuse.
 
+Connection Runtime Methods
+--------------------------
+
+Runtime controls are available on ``Connection`` instances:
+
+- lifecycle hooks: ``beforeConnect()``, ``afterConnect()``, ``beforeReconnect()``,
+  ``afterReconnect()``, ``onConnectionFailure()``
+- query comment context: ``setQueryCommentContext()``,
+  ``mergeQueryCommentContext()``, ``clearQueryCommentContext()``,
+  ``getQueryCommentContext()``
+- execution helpers: ``setFetchMode()``, ``withoutQueryEvents()``,
+  ``stream()``, ``yieldRows()``, ``readOnlyTransaction()``
+
 Read/Write Split
 ----------------
 
@@ -34,6 +47,9 @@ Read/Write Split
        'password' => 'secret',
        'sticky' => true,
        'read_strategy' => 'round_robin',
+       'read_latency_ttl' => 15,
+       'read_probe_sample_size' => 0,
+       'read_session_read_only' => false,
        'read' => [
            ['host' => 'replica1.internal', 'weight' => 1],
            ['host' => 'replica2.internal', 'weight' => 3],
@@ -78,6 +94,8 @@ Strategy Behavior Summary
 - ``random``: random healthy replica selection.
 - ``round_robin``: deterministic rotation.
 - ``least_latency``: probe healthy replicas and choose fastest response.
+  Winner is cached for ``read_latency_ttl`` seconds.
+  ``read_probe_sample_size`` can bound first-pass probes for large pools.
 - ``weighted``: weighted random using per-replica ``weight``.
 
 When a replica fails, DBLayer applies cooldown-based suppression before retry.
@@ -129,3 +147,11 @@ Use pool stats to tune these settings under real workload:
 
    Oversizing ``max_connections`` can overwhelm downstream databases.
    Tune against real connection limits and query concurrency.
+
+Pool Limitations and Fit
+------------------------
+
+- PHP-FPM request lifecycles usually do not benefit much from pooling.
+- Long-running workers and CLI daemons benefit more from pooled reuse.
+- Pool health checks are interval-based and batched, not full scans on every
+  acquire path.

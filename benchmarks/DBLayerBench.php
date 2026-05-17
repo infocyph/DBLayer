@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Benchmarks;
 
 use Infocyph\DBLayer\DB;
+use Infocyph\DBLayer\Query\Core\CompiledQuery;
+use Infocyph\DBLayer\Query\Core\QueryType;
 use PDO;
 use PhpBench\Attributes as Bench;
 
@@ -36,19 +38,70 @@ final class DBLayerBench
             ->toSql();
     }
 
+    public function benchEventDispatchOff(): void
+    {
+        if ($this->fallbackCompileById()) {
+            return;
+        }
+
+        DB::connection('bench_events_off')->withoutQueryEvents(function (): void {
+            DB::connection('bench_events_off')->select('select ? as value', [$this->currentUserId]);
+        });
+    }
+
+    public function benchEventDispatchOn(): void
+    {
+        $this->runConnectionValueSelect('bench_events_on');
+    }
+
+    public function benchExecuteRaw(): void
+    {
+        if ($this->fallbackCompileById()) {
+            return;
+        }
+
+        DB::connection('bench')->execute('select score from users where id = ?', [$this->currentUserId]);
+    }
+
     public function benchSelectByPrimaryKey(): void
     {
-        if (!self::$sqliteAvailable) {
-            DB::table('users')
-                ->where('id', '=', $this->currentUserId)
-                ->toSql();
-
+        if ($this->fallbackCompileById()) {
             return;
         }
 
         DB::table('users')
             ->where('id', '=', $this->currentUserId)
             ->first();
+    }
+
+    public function benchSelectRowsBuffered(): void
+    {
+        if ($this->fallbackCompileLimitedSelect()) {
+            return;
+        }
+
+        DB::connection('bench')->select('select id, name from users order by id asc limit 50');
+    }
+
+    public function benchStatementCacheOff(): void
+    {
+        $this->runConnectionValueSelect('bench_cache_off');
+    }
+
+    public function benchStatementCacheOn(): void
+    {
+        $this->runConnectionValueSelect('bench_cache_on');
+    }
+
+    public function benchStreamRows(): void
+    {
+        if ($this->fallbackCompileLimitedSelect()) {
+            return;
+        }
+
+        foreach (DB::connection('bench')->stream('select id, name from users order by id asc limit 50') as $row) {
+            unset($row);
+        }
     }
 
     public function benchTransactionTwoPointReads(): void
@@ -69,6 +122,21 @@ final class DBLayerBench
         });
     }
 
+    public function benchTypedRunCompiled(): void
+    {
+        if ($this->fallbackCompileById()) {
+            return;
+        }
+
+        $compiled = new CompiledQuery(
+            'select id, score from users where id = ?',
+            [$this->currentUserId],
+            QueryType::SELECT,
+        );
+
+        DB::connection('bench')->runCompiled($compiled);
+    }
+
     public function benchUpdateSingleColumn(): void
     {
         if (!self::$sqliteAvailable) {
@@ -86,6 +154,26 @@ final class DBLayerBench
             ->update([
                 'score' => $this->currentUserId * 10,
             ]);
+    }
+
+    public function benchWithLeastLatencyCachedReplica(): void
+    {
+        $this->runConnectionSelect('bench_least_latency_cached', 'select 1 as ok');
+    }
+
+    public function benchWithLeastLatencyUncachedReplica(): void
+    {
+        $this->runConnectionSelect('bench_least_latency_uncached', 'select 1 as ok');
+    }
+
+    public function benchWithQueryCommentDisabled(): void
+    {
+        $this->runConnectionValueSelect('bench_comment_off');
+    }
+
+    public function benchWithQueryCommentEnabled(): void
+    {
+        $this->runConnectionValueSelect('bench_comment_on');
     }
 
     public function setUpBeforeSubject(): void
@@ -143,6 +231,59 @@ final class DBLayerBench
                 'enabled' => true,
             ],
         ], 'bench');
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'statement_cache_enabled' => false,
+        ], 'bench_cache_off');
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'statement_cache_enabled' => true,
+            'statement_cache_size' => 64,
+        ], 'bench_cache_on');
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'query_comment_enabled' => false,
+        ], 'bench_comment_off');
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'query_comment_enabled' => true,
+            'query_comment_context' => [
+                'app' => 'bench',
+                'route' => 'users.list',
+            ],
+        ], 'bench_comment_on');
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+        ], 'bench_events_on');
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+        ], 'bench_events_off');
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'read_strategy' => 'least_latency',
+            'read_latency_ttl' => 30,
+            'read' => [
+                ['database' => ':memory:'],
+                ['database' => ':memory:'],
+            ],
+        ], 'bench_least_latency_cached');
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'read_strategy' => 'least_latency',
+            'read_latency_ttl' => 0,
+            'read' => [
+                ['database' => ':memory:'],
+                ['database' => ':memory:'],
+            ],
+        ], 'bench_least_latency_uncached');
         DB::setDefaultConnection('bench');
 
         self::createSchema();
@@ -167,5 +308,48 @@ final class DBLayerBench
                 );
             }
         });
+    }
+
+    private function fallbackCompileById(): bool
+    {
+        if (self::$sqliteAvailable) {
+            return false;
+        }
+
+        DB::table('users')
+            ->where('id', '=', $this->currentUserId)
+            ->toSql();
+
+        return true;
+    }
+
+    private function fallbackCompileLimitedSelect(): bool
+    {
+        if (self::$sqliteAvailable) {
+            return false;
+        }
+
+        DB::table('users')
+            ->limit(50)
+            ->toSql();
+
+        return true;
+    }
+
+    /**
+     * @param array<int,mixed> $bindings
+     */
+    private function runConnectionSelect(string $connection, string $sql, array $bindings = []): void
+    {
+        if ($this->fallbackCompileById()) {
+            return;
+        }
+
+        DB::connection($connection)->select($sql, $bindings);
+    }
+
+    private function runConnectionValueSelect(string $connection): void
+    {
+        $this->runConnectionSelect($connection, 'select ? as value', [$this->currentUserId]);
     }
 }

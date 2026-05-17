@@ -20,6 +20,8 @@ final class Telemetry
 
     private const int DEFAULT_MAX_TRANSACTION_EVENTS = 2_000;
 
+    private const string REDACTED_VALUE = '[redacted]';
+
     /**
      * Whether collection is enabled.
      */
@@ -344,14 +346,15 @@ final class Telemetry
             self::$sequence++;
             self::$queries[] = [
                 'span_id' => 'q-' . self::$sequence,
-                'sql' => $event->sql,
+                'sql' => self::REDACTED_VALUE,
                 'bindings_count' => \count($event->bindings),
+                'bindings_redacted' => true,
                 'duration_ms' => $event->time,
                 'success' => false,
                 'rows_affected' => null,
                 'connection' => $event->connection->getDriverName(),
                 'timestamp' => microtime(true),
-                'error' => $event->error,
+                'error' => self::REDACTED_VALUE,
                 'statement' => $event->statement,
                 'fingerprint' => $event->fingerprint,
                 'attempts' => $event->attempts,

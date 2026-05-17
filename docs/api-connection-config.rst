@@ -13,6 +13,7 @@ Factory and Access
 - ``__construct(array $config)``
 - ``fromArray(array $config): self``
 - ``toArray(): array``
+- ``toSafeArray(): array`` (recursively redacts sensitive keys)
 - ``get(string $key, mixed $default = null): mixed``
 - ``with(string $key, mixed $value): self``
 
@@ -22,8 +23,20 @@ Read/Write Split
 - ``hasReadConfig()``, ``getReadConfig()``, ``getReadConfigs()``
 - ``getReadStrategy()`` -> ``random``, ``round_robin``, ``least_latency``, ``weighted``
 - ``getReadHealthCooldown()``
+- ``getLeastLatencyCacheTtl()``
+- ``getReadProbeSampleSize()``
+- ``shouldEnforceReadSessionReadOnly()``
 - ``hasWriteConfig()``, ``getWriteConfig()``, ``getWriteConfigs()``
 - ``isSticky()``
+
+Statement Cache + Query Comment
+-------------------------------
+
+- ``shouldUseStatementCache()``
+- ``statementCacheSize()``
+- ``shouldUseQueryComments()``
+- ``getQueryCommentMaxLength()``
+- ``getQueryCommentContext()``
 
 Security
 --------

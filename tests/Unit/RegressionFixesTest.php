@@ -183,11 +183,22 @@ it('supports associative read replica configuration', function (): void {
     expect($config->getReadStrategy())->toBe('round_robin');
 });
 
+it('keeps statement cache disabled by default with conservative size', function (): void {
+    $config = ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]);
+
+    expect($config->shouldUseStatementCache())->toBeFalse();
+    expect($config->statementCacheSize())->toBe(64);
+});
+
 it('recursively redacts sensitive values in safe config export', function (): void {
     $config = ConnectionConfig::fromArray([
         'driver' => 'sqlite',
         'database' => ':memory:',
         'password' => 'root-secret',
+        'PASSWORD' => 'root-secret-uppercased',
         'token' => 'root-token',
         'read' => [
             [
@@ -195,6 +206,7 @@ it('recursively redacts sensitive values in safe config export', function (): vo
                 'password' => 'read-secret',
                 'options' => [
                     'ssl_key' => '/tmp/read.key',
+                    'SSL_CERT' => '/tmp/read.crt',
                 ],
             ],
         ],
@@ -202,12 +214,15 @@ it('recursively redacts sensitive values in safe config export', function (): vo
             [
                 'database' => ':memory:',
                 'private_key' => 'write-private',
+                'Secret' => 'write-secret',
             ],
         ],
         'options' => [
             'ssl_ca' => '/tmp/ca.pem',
+            'TLS_KEY' => '/tmp/tls.key',
             'nested' => [
                 'passphrase' => 'nested-secret',
+                'TOKEN' => 'nested-token',
             ],
         ],
         'security' => [
@@ -218,12 +233,17 @@ it('recursively redacts sensitive values in safe config export', function (): vo
     $safe = $config->toSafeArray();
 
     expect(data_get($safe, 'password'))->toBe('[redacted]');
+    expect(data_get($safe, 'PASSWORD'))->toBe('[redacted]');
     expect(data_get($safe, 'token'))->toBe('[redacted]');
     expect(data_get($safe, 'read.0.password'))->toBe('[redacted]');
     expect(data_get($safe, 'read.0.options.ssl_key'))->toBe('[redacted]');
+    expect(data_get($safe, 'read.0.options.SSL_CERT'))->toBe('[redacted]');
     expect(data_get($safe, 'write.0.private_key'))->toBe('[redacted]');
+    expect(data_get($safe, 'write.0.Secret'))->toBe('[redacted]');
     expect(data_get($safe, 'options.ssl_ca'))->toBe('[redacted]');
+    expect(data_get($safe, 'options.TLS_KEY'))->toBe('[redacted]');
     expect(data_get($safe, 'options.nested.passphrase'))->toBe('[redacted]');
+    expect(data_get($safe, 'options.nested.TOKEN'))->toBe('[redacted]');
     expect(data_get($safe, 'security.rate_limit_key'))->toBe('safe-visible');
 });
 
@@ -382,6 +402,75 @@ it('respects least-latency probe sample size when healthy replicas are found', f
     expect($info['latencies_ms'])->toHaveCount(1);
 });
 
+it('evicts failed cached least-latency replica and marks cooldown', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'read_strategy' => 'least_latency',
+        'read_latency_ttl' => 30,
+        'read_health_cooldown' => 30,
+        'read' => [
+            ['database' => ':memory:'],
+            ['database' => ':memory:'],
+        ],
+    ], 'regression_least_latency_cached_failure');
+
+    $connection = DB::connection('regression_least_latency_cached_failure');
+    $connection->select('select 1');
+
+    $reflection = new \ReflectionClass($connection);
+    $markFailure = $reflection->getMethod('markReadReplicaFailure');
+    $cachedIndex = $reflection->getProperty('leastLatencyReplicaIndex');
+    $cachedAt = $reflection->getProperty('leastLatencyResolvedAt');
+    $unavailableUntil = $reflection->getProperty('readReplicaUnavailableUntil');
+
+    // Simulate a cached winner that subsequently failed and is now suppressed.
+    $cachedIndex->setValue($connection, 1);
+    $cachedAt->setValue($connection, time());
+    $markFailure->invoke($connection, 1);
+    $connection->reconnect(false);
+
+    $connection->select('select 1');
+    $info = $connection->getReadReplicaInfo();
+
+    /** @var array<int,int> $suppressed */
+    $suppressed = $unavailableUntil->getValue($connection);
+    expect($info['selected_index'])->toBe(0);
+    expect($suppressed)->toHaveKey(1);
+    expect($cachedIndex->getValue($connection))->toBe(0);
+});
+
+it('suppresses failed replicas during health cooldown windows', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'read_strategy' => 'least_latency',
+        'read_health_cooldown' => 30,
+        'read' => [
+            ['database' => ':memory:'],
+            ['database' => ':memory:'],
+        ],
+    ], 'regression_least_latency_cooldown');
+
+    $connection = DB::connection('regression_least_latency_cooldown');
+    $reflection = new \ReflectionClass($connection);
+    $markFailure = $reflection->getMethod('markReadReplicaFailure');
+    $available = $reflection->getMethod('availableReadReplicaIndexes');
+    $unavailableUntil = $reflection->getProperty('readReplicaUnavailableUntil');
+
+    $markFailure->invoke($connection, 1);
+
+    /** @var list<int> $duringCooldown */
+    $duringCooldown = $available->invoke($connection, 2);
+    expect($duringCooldown)->toBe([0]);
+
+    $unavailableUntil->setValue($connection, [1 => time() - 1]);
+
+    /** @var list<int> $afterCooldown */
+    $afterCooldown = $available->invoke($connection, 2);
+    expect($afterCooldown)->toBe([0, 1]);
+});
+
 it('routes subsequent reads to write pdo when sticky mode is enabled', function (string $driver): void {
     $baseConfig = dblayerRequireDriver($driver);
 
@@ -459,6 +548,7 @@ it('uses stable statement-cache keys when query comments change dynamically', fu
     ], 'regression_statement_cache_comments');
 
     $connection = DB::connection('regression_statement_cache_comments');
+    DB::enableQueryLog();
 
     $connection->setQueryCommentContext([
         'app' => 'regression',
@@ -477,8 +567,14 @@ it('uses stable statement-cache keys when query comments change dynamically', fu
 
     /** @var array{read:array<string,\PDOStatement>,write:array<string,\PDOStatement>} $cache */
     $cache = $cacheProperty->getValue($connection);
+    $queryLog = DB::getQueryLog();
 
     expect($cache['read'])->toHaveCount(1);
+    expect($queryLog)->toHaveCount(2);
+    expect((string) ($queryLog[0]['query'] ?? ''))->toStartWith('/* ');
+    expect((string) ($queryLog[1]['query'] ?? ''))->toStartWith('/* ');
+
+    DB::disableQueryLog();
 });
 
 it('applies prepared statement cache lifecycle rules safely', function (): void {
@@ -660,9 +756,11 @@ it('sanitizes and bounds query comment context against delimiter and control cha
         'query_comment_enabled' => true,
         'query_comment_max_length' => 48,
         'query_comment_context' => [
-            'trace' => "abc*/\nnext;\"quoted\"",
+            'trace' => "abc*/\nnext;\"quoted\" -- drop table users; select * from secrets",
             'unicode' => "merchant-\u{1F680}",
             'path' => '../tenant/alpha',
+            'arrayValue' => ['x' => 'y'],
+            'objectValue' => (object) ['a' => 'b'],
         ],
     ], 'regression_query_comment_safety');
 
@@ -682,6 +780,9 @@ it('sanitizes and bounds query comment context against delimiter and control cha
     expect($commentPayload)->not->toContain("\n");
     expect($commentPayload)->not->toContain(';');
     expect($commentPayload)->not->toContain('"');
+    expect($commentPayload)->not->toContain(' drop table ');
+    expect($commentPayload)->not->toContain('arrayValue=');
+    expect($commentPayload)->not->toContain('objectValue=');
 });
 
 it('invokes connection lifecycle hooks around connect and reconnect', function (): void {
@@ -862,6 +963,26 @@ it('closes stream cursors on early break and loop exceptions', function (): void
     expect($count)->toBe(4);
 });
 
+it('streams larger result sets end-to-end without buffering errors', function (): void {
+    $connectionName = 'regression_stream_large';
+    dblayerAddConnectionForDriver('sqlite', $connectionName);
+    $table = dblayerTable('stream_large_rows');
+
+    DB::statement(sprintf('create table %s (value integer)', $table), [], $connectionName);
+
+    for ($value = 1; $value <= 512; $value++) {
+        DB::statement(sprintf('insert into %s (value) values (?)', $table), [$value], $connectionName);
+    }
+
+    $count = 0;
+    foreach (DB::stream(sprintf('select value from %s order by value asc', $table), [], $connectionName) as $row) {
+        $count++;
+        expect((int) ($row['value'] ?? 0))->toBeGreaterThan(0);
+    }
+
+    expect($count)->toBe(512);
+});
+
 it('fires cumulative query-time threshold callback once', function (string $driver): void {
     $connectionName = 'regression_query_time_' . $driver;
     dblayerAddConnectionForDriver($driver, $connectionName);
@@ -979,6 +1100,44 @@ it('does not execute queries while in pretend mode', function (string $driver): 
     expect((int) DB::scalar(sprintf('select count(*) from %s', $table), [], $connectionName))->toBe(0);
 })->with('dblayer_drivers');
 
+it('emits success lifecycle events in pretend mode without mutating data', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_pretend_lifecycle');
+
+    DB::statement('create table pretend_lifecycle_items (id integer, name text)', [], 'regression_pretend_lifecycle');
+
+    $sequence = [];
+
+    $onExecuting = static function () use (&$sequence): void {
+        $sequence[] = 'executing';
+    };
+    $onExecuted = static function () use (&$sequence): void {
+        $sequence[] = 'executed';
+    };
+    $onFailed = static function () use (&$sequence): void {
+        $sequence[] = 'failed';
+    };
+
+    Events::listen('db.query.executing', $onExecuting);
+    Events::listen('db.query.executed', $onExecuted);
+    Events::listen('db.query.failed', $onFailed);
+
+    $connection = DB::connection('regression_pretend_lifecycle');
+    $logged = $connection->pretend(static function (Connection $conn): void {
+        $conn->statement("insert into pretend_lifecycle_items (id, name) values (1, 'ghost')");
+    });
+
+    expect($logged)->toHaveCount(1);
+    expect($sequence)->toBe(['executing', 'executed']);
+    expect((int) DB::scalar('select count(*) from pretend_lifecycle_items', [], 'regression_pretend_lifecycle'))->toBe(0);
+
+    Events::forget('db.query.executing', $onExecuting);
+    Events::forget('db.query.executed', $onExecuted);
+    Events::forget('db.query.failed', $onFailed);
+});
+
 it('redacts query bindings in logger output by default', function (string $driver): void {
     $connectionName = 'regression_logger_redaction_' . $driver;
     dblayerAddConnectionForDriver($driver, $connectionName);
@@ -1053,6 +1212,36 @@ it('logs query failures with sanitized context and without raw binding leakage',
 
     DB::disableLogger();
     DB::setPsrLogger(null);
+});
+
+it('stores failed-query telemetry with redacted sql and binding context by default', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_failure_telemetry_sanitized');
+
+    DB::enableTelemetry();
+
+    expect(static fn(): array => DB::select(
+        'select * from missing_telemetry_table where token = ?',
+        ['secret-failure-token'],
+        'regression_failure_telemetry_sanitized',
+    ))->toThrow(ConnectionException::class);
+
+    $snapshot = DB::telemetry();
+    /** @var list<array<string,mixed>> $queries */
+    $queries = is_array($snapshot['queries'] ?? null) ? $snapshot['queries'] : [];
+    $failed = end($queries);
+
+    expect(is_array($failed))->toBeTrue();
+    expect($failed['success'] ?? null)->toBeFalse();
+    expect($failed['sql'] ?? null)->toBe('[redacted]');
+    expect($failed['error'] ?? null)->toBe('[redacted]');
+    expect($failed['statement'] ?? null)->toBe('SELECT');
+    expect($failed['bindings_count'] ?? null)->toBe(1);
+    expect($failed['bindings_redacted'] ?? null)->toBeTrue();
+
+    DB::disableTelemetry();
 });
 
 it('forwards logger entries to configured PSR-3 backend', function (string $driver): void {
@@ -1350,13 +1539,21 @@ it('does not duplicate facade query tracking when lifecycle events are enabled',
     DB::enableQueryLog();
     DB::enableProfiler();
     DB::enableLogger(null, $psrLogger);
+    DB::enableTelemetry();
+    $listenerCalls = 0;
+    DB::listen(static function () use (&$listenerCalls): void {
+        $listenerCalls++;
+    });
 
     DB::select('select 1', [], 'regression_no_duplicate_facade_tracking');
 
     expect(DB::getQueryLog())->toHaveCount(1);
     expect(DB::profiler()->profiles())->toHaveCount(1);
     expect($records->count())->toBe(1);
+    expect((int) (DB::telemetry()['summary']['query_count'] ?? 0))->toBe(1);
+    expect($listenerCalls)->toBe(1);
 
+    DB::disableTelemetry();
     DB::disableLogger();
     DB::disableProfiler();
     DB::disableQueryLog();
@@ -1460,6 +1657,40 @@ it('emits one final success event after retry recovery and no duplicate success 
     expect($failed[0]->attempts)->toBe(5);
 });
 
+it('suppresses query lifecycle events inside withoutQueryEvents wrapper', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'regression_without_query_events');
+
+    $connection = DB::connection('regression_without_query_events');
+    $sequence = [];
+
+    $onExecuting = static function () use (&$sequence): void {
+        $sequence[] = 'executing';
+    };
+    $onExecuted = static function () use (&$sequence): void {
+        $sequence[] = 'executed';
+    };
+    $onFailed = static function () use (&$sequence): void {
+        $sequence[] = 'failed';
+    };
+
+    Events::listen('db.query.executing', $onExecuting);
+    Events::listen('db.query.executed', $onExecuted);
+    Events::listen('db.query.failed', $onFailed);
+
+    $connection->withoutQueryEvents(static function () use ($connection): void {
+        $connection->select('select 1');
+    });
+
+    expect($sequence)->toBe([]);
+
+    Events::forget('db.query.executing', $onExecuting);
+    Events::forget('db.query.executed', $onExecuted);
+    Events::forget('db.query.failed', $onFailed);
+});
+
 it('does not flag legitimate unions and still catches injected union payloads', function (): void {
     $validator = new QueryValidator();
 
@@ -1529,6 +1760,67 @@ it('supports allowlist raw SQL policy for explicit fragments only', function (st
     })->toThrow(QueryException::class);
 })->with('dblayer_drivers');
 
+it('rejects raw SQL allowlist bypass payloads that mutate a safe fragment', function (string $driver): void {
+    $connectionName = 'regression_raw_policy_allowlist_mutation_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName, [
+        'security' => [
+            'raw_sql_policy' => 'allowlist',
+            'raw_sql_allowlist' => [
+                '/^id\\s*=\\s*\\?$/i',
+            ],
+        ],
+    ]);
+
+    expect(static function () use ($connectionName): void {
+        DB::table('users', $connectionName)->whereRaw('id = ?/**/or/**/1=1', [1]);
+    })->toThrow(QueryException::class);
+
+    expect(static function () use ($connectionName): void {
+        DB::table('users', $connectionName)->whereRaw('id = ? --', [1]);
+    })->toThrow(QueryException::class);
+})->with('dblayer_drivers');
+
+it('rejects malicious strict-identifier payloads in table and column selectors', function (string $driver): void {
+    $connectionName = 'regression_strict_identifiers_mutation_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connectionName);
+
+    expect(static function () use ($connectionName): void {
+        DB::table('users;drop_table', $connectionName)->select('*');
+    })->toThrow(QueryException::class);
+
+    expect(static function () use ($connectionName): void {
+        DB::table('users', $connectionName)->select("name\nfrom users");
+    })->toThrow(QueryException::class);
+})->with('dblayer_drivers');
+
+it('blocks binding values exceeding configured byte-size limits', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'security' => [
+            'max_param_bytes' => 8,
+        ],
+    ], 'regression_security_binding_size_limit');
+
+    expect(static function (): array {
+        return DB::select('select ?', ['123456789'], 'regression_security_binding_size_limit');
+    })->toThrow(SecurityException::class);
+});
+
+it('blocks queries exceeding configured parameter-count limits', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'security' => [
+            'max_params' => 2,
+        ],
+    ], 'regression_security_param_count_limit');
+
+    expect(static function (): array {
+        return DB::select('select ?, ?, ?', [1, 2, 3], 'regression_security_param_count_limit');
+    })->toThrow(SecurityException::class);
+});
+
 it('supports external distributed rate limit callback configuration', function (string $driver): void {
     $connectionName = 'regression_distributed_rate_limit_' . $driver;
 
@@ -1553,6 +1845,27 @@ it('supports external distributed rate limit callback configuration', function (
 
     expect(static fn(): array => DB::select('select 1', [], $connectionName))
         ->toThrow(SecurityException::class);
+})->with('dblayer_drivers');
+
+it('enforces rate limits across mutated query text for the same limiter key', function (string $driver): void {
+    $connectionName = 'regression_rate_limit_mutation_' . $driver;
+    $rateKey = 'mutation-rate:' . bin2hex(random_bytes(8));
+
+    dblayerAddConnectionForDriver($driver, $connectionName, [
+        'security' => [
+            'queries_per_second' => 0,
+            'queries_per_minute' => 1,
+            'rate_limit_key' => $rateKey,
+        ],
+    ]);
+
+    DB::select('select 1', [], $connectionName);
+
+    expect(static function () use ($connectionName): array {
+        return DB::select('select 2 /* mutated */', [], $connectionName);
+    })->toThrow(SecurityException::class);
+
+    Security::resetRateLimit($rateKey);
 })->with('dblayer_drivers');
 
 it('requires TLS policy when explicitly requested for mysql and pgsql configs', function (): void {

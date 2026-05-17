@@ -7,6 +7,11 @@ Introduction
 DBLayer observability is event-driven. Query and transaction events can feed
 logger, profiler, telemetry export, and custom callbacks simultaneously.
 
+Query lifecycle events:
+
+- successful queries emit ``db.query.executed``
+- failed queries emit ``db.query.failed``
+
 .. contents:: On This Page
    :depth: 2
    :local:
@@ -81,6 +86,10 @@ adjusted:
 
    DB::setTelemetryBufferLimits(queryEvents: 2000, transactionEvents: 2000);
    DB::setProfilerMaxProfiles(2000);
+
+Failed-query telemetry defaults to redacted SQL/error payloads while preserving
+statement type, fingerprint, connection, duration, attempts, and exception
+class metadata.
 
 Telemetry Exports
 -----------------

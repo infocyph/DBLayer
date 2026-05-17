@@ -105,3 +105,82 @@ What To Do Next
 - Move to ``configuration`` for multi-connection and security options.
 - Move to ``connections`` for replica and pooling behavior.
 - Move to ``query-builder`` and ``repository`` for advanced usage patterns.
+
+Copy-Paste Single-File Examples
+-------------------------------
+
+SQLite (local/dev)
+^^^^^^^^^^^^^^^^^^
+
+.. code-block:: php
+
+   <?php
+   declare(strict_types=1);
+
+   use Infocyph\DBLayer\DB;
+
+   require __DIR__ . '/vendor/autoload.php';
+
+   DB::addConnection([
+       'driver' => 'sqlite',
+       'database' => ':memory:',
+   ], 'sqlite');
+
+   DB::statement('create table users (id integer primary key autoincrement, name text not null)', [], 'sqlite');
+   DB::table('users', 'sqlite')->insert(['name' => 'Alice']);
+
+   $rows = DB::table('users', 'sqlite')->select('id', 'name')->get();
+   var_export($rows);
+
+MySQL (single file)
+^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: php
+
+   <?php
+   declare(strict_types=1);
+
+   use Infocyph\DBLayer\DB;
+
+   require __DIR__ . '/vendor/autoload.php';
+
+   DB::addConnection([
+       'driver' => 'mysql',
+       'host' => '127.0.0.1',
+       'port' => 3306,
+       'database' => 'app',
+       'username' => 'app',
+       'password' => 'secret',
+       'charset' => 'utf8mb4',
+       'collation' => 'utf8mb4_unicode_ci',
+   ], 'mysql');
+
+   $row = DB::selectOne('select 1 as ok', [], 'mysql');
+   var_export($row);
+
+PostgreSQL (single file)
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: php
+
+   <?php
+   declare(strict_types=1);
+
+   use Infocyph\DBLayer\DB;
+
+   require __DIR__ . '/vendor/autoload.php';
+
+   DB::addConnection([
+       'driver' => 'pgsql',
+       'host' => '127.0.0.1',
+       'port' => 5432,
+       'database' => 'app',
+       'username' => 'app',
+       'password' => 'secret',
+       'charset' => 'utf8',
+       'schema' => 'public',
+       'sslmode' => 'require',
+   ], 'pgsql');
+
+   $row = DB::selectOne('select 1 as ok', [], 'pgsql');
+   var_export($row);
