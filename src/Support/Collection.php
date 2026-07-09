@@ -108,7 +108,6 @@ final class Collection extends ArrayKitCollection implements \Stringable
      * Filter the collection using a callback.
      *
      * @param callable(TValue, int|string): bool|null $callback
-     * @return static<TKey, TValue>
      */
     public function filter(?callable $callback = null): static
     {
@@ -172,7 +171,6 @@ final class Collection extends ArrayKitCollection implements \Stringable
      * Map over the collection.
      *
      * @param callable(TValue, int|string): mixed $callback
-     * @return static<TKey, mixed>
      */
     public function map(callable $callback): static
     {
@@ -239,8 +237,6 @@ final class Collection extends ArrayKitCollection implements \Stringable
 
     /**
      * Filter items by key/value.
-     *
-     * @return static<TKey, TValue>
      */
     public function where(string $key, mixed $value): static
     {
