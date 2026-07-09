@@ -26,12 +26,12 @@
     "require": {
         "php": "^8.4",
         "ext-pdo": "*",
-        "infocyph/arraykit": "^4.1",
-        "infocyph/cachelayer": "^1.2",
-        "psr/log": "^3.0"
+        "infocyph/arraykit": "^4.4",
+        "infocyph/cachelayer": "^1.2.2",
+        "psr/log": "^3.0.2"
     },
     "require-dev": {
-        "infocyph/phpforge": "dev-main"
+        "infocyph/phpforge": "dev-main@dev"
     },
     "suggest": {
         "ext-pdo_mysql": "For MySQL database support",
