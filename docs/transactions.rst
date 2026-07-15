@@ -52,6 +52,33 @@ When retries are enabled, write logic must be idempotent or safely repeatable.
 Prefer transaction-level retry for deadlocks/serialization failures over
 retrying standalone non-idempotent statements.
 
+After-Commit Callbacks
+----------------------
+
+Use ``DB::afterCommit()`` to defer side effects until the surrounding
+top-level transaction commits successfully:
+
+.. code-block:: php
+
+   DB::transaction(function ($connection): void {
+       $connection->table('orders')->insert(['reference' => 'order-42']);
+
+       DB::afterCommit(function (): void {
+           // Publish an event, invalidate a cache entry, or notify another system.
+       });
+   });
+
+Callbacks registered outside a transaction run immediately. Nested callbacks
+are promoted when their savepoint commits and discarded when their savepoint
+rolls back. If a retry attempt rolls back, its callbacks are discarded before
+the next attempt starts.
+
+After-commit callbacks run only after the database commit is durable. If one
+fails, DBLayer still runs the remaining callbacks and rethrows the first
+failure; the already committed database write cannot be rolled back. Design
+callbacks to be idempotent and send operational failures to your retry or
+monitoring system.
+
 Read-Only Transactions
 ----------------------
 

@@ -42,6 +42,18 @@ if (!function_exists('db_transaction')) {
     }
 }
 
+if (!function_exists('db_after_commit')) {
+    /**
+     * Register a callback that runs after the selected connection commits.
+     *
+     * @param callable():void $callback
+     */
+    function db_after_commit(callable $callback, ?string $connection = null): void
+    {
+        DB::afterCommit($callback, $connection);
+    }
+}
+
 if (!function_exists('db_read_only_transaction')) {
     /**
      * Execute a callback within a read-only database transaction.

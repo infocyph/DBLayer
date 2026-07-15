@@ -286,6 +286,16 @@ final class Connection
     }
 
     /**
+     * Register a callback that runs after the surrounding top-level commit.
+     *
+     * @param callable():void $callback
+     */
+    public function afterCommit(callable $callback): void
+    {
+        $this->getTransactionManager()->afterCommit($this, $callback);
+    }
+
+    /**
      * Register hook executed right after connecting write/read PDO.
      *
      * Hook signature: fn(Connection $connection, bool $isWrite): void
