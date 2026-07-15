@@ -192,6 +192,16 @@ class DB
     }
 
     /**
+     * Register a callback that runs after the selected connection commits.
+     *
+     * @param callable():void $callback
+     */
+    public static function afterCommit(callable $callback, ?string $connection = null): void
+    {
+        static::connection($connection)->afterCommit($callback);
+    }
+
+    /**
      * Execute multiple queries in sequence.
      *
      * Supported item shapes:

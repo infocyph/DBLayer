@@ -33,6 +33,13 @@ final class Transaction
     private const int MAX_ATTEMPTS = 3;
 
     /**
+     * Callbacks grouped by the transaction level that registered them.
+     *
+     * @var array<int,list<callable():void>>
+     */
+    private array $afterCommitCallbacks = [];
+
+    /**
      * Current nesting level.
      */
     private int $level = 0;
@@ -75,6 +82,25 @@ final class Transaction
          */
         private readonly Connection $connection,
     ) {}
+
+    /**
+     * Run a callback after the surrounding top-level transaction commits.
+     *
+     * Callbacks registered in a nested transaction are promoted when its
+     * savepoint commits and discarded if that savepoint rolls back.
+     *
+     * @param callable():void $callback
+     */
+    public function afterCommit(callable $callback): void
+    {
+        if ($this->level === 0) {
+            $callback();
+
+            return;
+        }
+
+        $this->afterCommitCallbacks[$this->level][] = $callback;
+    }
 
     /**
      * Begin a new transaction or create a savepoint for nested transactions.
@@ -130,6 +156,12 @@ final class Transaction
 
             return $result;
         } catch (Throwable $e) {
+            // A post-commit callback runs after the database is durable. Do not
+            // wrap it as a rollback or retry failure once the transaction closed.
+            if (!$this->inTransaction()) {
+                throw $e;
+            }
+
             $this->rollBack();
 
             if ($attempt < $attempts && $this->causedByRetryableTransactionError($e)) {
@@ -204,6 +236,9 @@ final class Transaction
         ];
 
         $this->startedAt = $this->level > 0 ? (microtime(true)) : null;
+        if ($this->level === 0) {
+            $this->afterCommitCallbacks = [];
+        }
     }
 
     /**
@@ -211,6 +246,8 @@ final class Transaction
      */
     public function rollBack(): void
     {
+        $this->discardAfterCommitCallbacks($this->level);
+
         $this->finishTransactionLevel(
             $this->finalizeRollback(...),
             $this->rollbackToSavepoint(...),
@@ -251,6 +288,31 @@ final class Transaction
         $this->connection->statement('SAVEPOINT trans_' . $level);
     }
 
+    private function discardAfterCommitCallbacks(int $fromLevel): void
+    {
+        foreach (array_keys($this->afterCommitCallbacks) as $level) {
+            if ($level >= $fromLevel) {
+                unset($this->afterCommitCallbacks[$level]);
+            }
+        }
+    }
+
+    /**
+     * @return list<callable():void>
+     */
+    private function drainAfterCommitCallbacks(): array
+    {
+        if ($this->afterCommitCallbacks === []) {
+            return [];
+        }
+
+        ksort($this->afterCommitCallbacks);
+        $callbacks = array_merge(...array_values($this->afterCommitCallbacks));
+        $this->afterCommitCallbacks = [];
+
+        return $callbacks;
+    }
+
     private function finalizeCommit(): void
     {
         $this->finalizeTopLevelChange(
@@ -282,7 +344,13 @@ final class Transaction
         string $eventName,
         callable $eventFactory,
     ): void {
-        $operation();
+        try {
+            $operation();
+        } catch (Throwable $exception) {
+            $this->afterCommitCallbacks = [];
+
+            throw $exception;
+        }
 
         if ($counterKey === 'committed') {
             $this->stats['committed']++;
@@ -292,6 +360,7 @@ final class Transaction
 
         $durationMs = $this->transactionDurationMs();
         $this->finishTopLevel();
+        $this->runAfterCommitCallbacks($this->drainAfterCommitCallbacks());
         Events::dispatch($eventName, [$eventFactory($durationMs)]);
     }
 
@@ -320,6 +389,7 @@ final class Transaction
             return;
         }
 
+        $completedLevel = $this->level;
         $this->level--;
         $this->stats['current_level'] = $this->level;
 
@@ -330,6 +400,20 @@ final class Transaction
         }
 
         $finalizeNested($this->level);
+        $this->promoteAfterCommitCallbacks($completedLevel, $this->level);
+    }
+
+    private function promoteAfterCommitCallbacks(int $fromLevel, int $toLevel): void
+    {
+        $callbacks = $this->afterCommitCallbacks[$fromLevel] ?? [];
+        unset($this->afterCommitCallbacks[$fromLevel]);
+
+        if ($callbacks !== []) {
+            $this->afterCommitCallbacks[$toLevel] = [
+                ...($this->afterCommitCallbacks[$toLevel] ?? []),
+                ...$callbacks,
+            ];
+        }
     }
 
     /**
@@ -358,6 +442,25 @@ final class Transaction
         }
 
         $this->connection->statement('ROLLBACK TO SAVEPOINT trans_' . $level);
+    }
+
+    /**
+     * @param list<callable():void> $callbacks
+     */
+    private function runAfterCommitCallbacks(array $callbacks): void
+    {
+        $firstFailure = null;
+        foreach ($callbacks as $callback) {
+            try {
+                $callback();
+            } catch (Throwable $exception) {
+                $firstFailure ??= $exception;
+            }
+        }
+
+        if ($firstFailure instanceof Throwable) {
+            throw $firstFailure;
+        }
     }
 
     /**

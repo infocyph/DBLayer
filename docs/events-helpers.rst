@@ -52,7 +52,7 @@ Helpers
 
 From ``src/helpers.php``:
 
-- DB helpers: ``db()``, ``db_table()``, ``db_select()``, ``db_transaction()``
+- DB helpers: ``db()``, ``db_table()``, ``db_select()``, ``db_transaction()``, ``db_after_commit()``
 - Data helpers: ``data_get()``, ``data_set()``
 - Utility helpers: ``collect()``, ``retry()``, ``rescue()``, ``blank()``, ``filled()``, ``now()``
 

@@ -49,6 +49,16 @@ final class TransactionManager
     }
 
     /**
+     * Register a callback that runs after the connection's top-level commit.
+     *
+     * @param callable():void $callback
+     */
+    public function afterCommit(Connection $connection, callable $callback): void
+    {
+        $this->forConnection($connection)->afterCommit($callback);
+    }
+
+    /**
      * Begin a transaction on a specific connection.
      */
     public function begin(Connection $connection): void
