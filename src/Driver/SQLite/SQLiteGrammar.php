@@ -121,37 +121,15 @@ final class SQLiteGrammar extends Grammar
     }
 
     /**
-     * Compile the "limit" portion.
-     */
-    #[\Override]
-    protected function compileLimit(QueryBuilder $query, int $limit): string
-    {
-        unset($query);
-
-        return 'limit ' . $limit;
-    }
-
-    /**
      * Compile the lock into SQL (SQLite doesn't support locking hints).
      */
     #[\Override]
-    protected function compileLock(QueryBuilder $query, string $lock): string
+    protected function compileLock(string $lock): string
     {
-        unset($query, $lock);
-
-        // SQLite doesn't support SELECT ... FOR UPDATE.
-        return '';
-    }
-
-    /**
-     * Compile the "offset" portion.
-     */
-    #[\Override]
-    protected function compileOffset(QueryBuilder $query, int $offset): string
-    {
-        unset($query);
-
-        return 'offset ' . $offset;
+        return match ($lock) {
+            'update', 'shared' => '', // SQLite doesn't support SELECT locking hints.
+            default => throw new \LogicException("Unsupported SQLite lock mode [{$lock}]."),
+        };
     }
 
     /**

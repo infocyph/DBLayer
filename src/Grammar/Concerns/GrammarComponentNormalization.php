@@ -23,45 +23,54 @@ trait GrammarComponentNormalization
         return match ($component) {
             'aggregate' => is_array($value) ? $this->compileAggregate($query) : '',
             'columns' => $this->compileColumnsComponent($query, $value),
-            'from' => is_string($value) && $value !== '' ? $this->compileFrom($query, $value) : '',
-            'joins' => $this->compileJoinsComponent($query, $value),
+            'from' => is_string($value) && $value !== '' ? $this->compileFrom($value) : '',
+            'joins' => $this->compileJoinsComponent($value),
             'wheres' => $this->compileWheresComponent($query, $value),
-            'groups' => $this->compileGroupsComponent($query, $value),
-            'havings' => $this->compileHavingsComponent($query, $value),
-            'orders' => $this->compileOrdersComponent($query, $value),
-            'limit' => is_int($value) ? $this->compileLimit($query, $value) : '',
-            'offset' => is_int($value) ? $this->compileOffset($query, $value) : '',
-            'lock' => is_string($value) && $value !== '' ? $this->compileLock($query, $value) : '',
+            'groups' => $this->compileGroupsComponent($value),
+            'havings' => $this->compileHavingsComponent($value),
+            'orders' => $this->compileOrdersComponent($value),
+            'limit' => is_int($value) ? $this->compileLimit($value, $this->limitOffset($query)) : '',
+            'offset' => $this->compileStandaloneOffset($query, $value),
+            'lock' => is_string($value) && $value !== '' ? $this->compileLock($value) : '',
             default => '',
         };
     }
 
-    private function compileGroupsComponent(QueryBuilder $query, mixed $value): string
+    private function compileGroupsComponent(mixed $value): string
     {
         $groups = $this->normalizeColumns($value);
 
-        return $groups !== [] ? $this->compileGroups($query, $groups) : '';
+        return $groups !== [] ? $this->compileGroups($groups) : '';
     }
 
-    private function compileHavingsComponent(QueryBuilder $query, mixed $value): string
+    private function compileHavingsComponent(mixed $value): string
     {
         $havings = $this->normalizeHavings($value);
 
-        return $havings !== [] ? $this->compileHavings($query, $havings) : '';
+        return $havings !== [] ? $this->compileHavings($havings) : '';
     }
 
-    private function compileJoinsComponent(QueryBuilder $query, mixed $value): string
+    private function compileJoinsComponent(mixed $value): string
     {
         $joins = $this->normalizeJoins($value);
 
-        return $joins !== [] ? $this->compileJoins($query, $joins) : '';
+        return $joins !== [] ? $this->compileJoins($joins) : '';
     }
 
-    private function compileOrdersComponent(QueryBuilder $query, mixed $value): string
+    private function compileOrdersComponent(mixed $value): string
     {
         $orders = $this->normalizeOrders($value);
 
-        return $orders !== [] ? $this->compileOrders($query, $orders) : '';
+        return $orders !== [] ? $this->compileOrders($orders) : '';
+    }
+
+    private function compileStandaloneOffset(QueryBuilder $query, mixed $value): string
+    {
+        if (!is_int($value) || is_int($query->getComponents()['limit'])) {
+            return '';
+        }
+
+        return $this->compileOffset($value);
     }
 
     private function compileWheresComponent(QueryBuilder $query, mixed $value): string
@@ -69,6 +78,13 @@ trait GrammarComponentNormalization
         $wheres = $this->normalizeWheres($value);
 
         return $wheres !== [] ? $this->compileWheres($query, $wheres) : '';
+    }
+
+    private function limitOffset(QueryBuilder $query): ?int
+    {
+        $offset = $query->getComponents()['offset'];
+
+        return is_int($offset) ? $offset : null;
     }
 
     /**
