@@ -102,7 +102,7 @@ abstract class Grammar
 
         $ctes = $this->normalizeCtes($components['ctes']);
         if ($ctes !== []) {
-            $cteSql = $this->compileCtes($query, $ctes) . ' ';
+            $cteSql = $this->compileCtes($ctes) . ' ';
         }
 
         if (is_array($components['aggregate'])) {
@@ -234,12 +234,12 @@ abstract class Grammar
         );
 
         if (is_string($components['from']) && $components['from'] !== '') {
-            $sql .= ' ' . $this->compileFrom($query, $components['from']);
+            $sql .= ' ' . $this->compileFrom($components['from']);
         }
 
         $joins = $this->normalizeJoins($components['joins']);
         if ($joins !== []) {
-            $sql .= ' ' . $this->compileJoins($query, $joins);
+            $sql .= ' ' . $this->compileJoins($joins);
         }
 
         $wheres = $this->normalizeWheres($components['wheres']);
@@ -249,12 +249,12 @@ abstract class Grammar
 
         $groups = $this->normalizeColumns($components['groups']);
         if ($groups !== []) {
-            $sql .= ' ' . $this->compileGroups($query, $groups);
+            $sql .= ' ' . $this->compileGroups($groups);
         }
 
         $havings = $this->normalizeHavings($components['havings']);
         if ($havings !== []) {
-            $sql .= ' ' . $this->compileHavings($query, $havings);
+            $sql .= ' ' . $this->compileHavings($havings);
         }
 
         return $sql;
@@ -303,10 +303,8 @@ abstract class Grammar
      *
      * @param list<array{name:string,query:string|QueryBuilder,recursive:bool}> $ctes
      */
-    protected function compileCtes(QueryBuilder $query, array $ctes): string
+    protected function compileCtes(array $ctes): string
     {
-        unset($query);
-
         $parts = [];
         $recursive = false;
 
@@ -332,10 +330,8 @@ abstract class Grammar
     /**
      * Compile the "from" portion of the query.
      */
-    protected function compileFrom(QueryBuilder $query, string $table): string
+    protected function compileFrom(string $table): string
     {
-        unset($query);
-
         return 'from ' . $this->wrapTable($table);
     }
 
@@ -344,10 +340,8 @@ abstract class Grammar
      *
      * @param array<int,string|Expression> $groups
      */
-    protected function compileGroups(QueryBuilder $query, array $groups): string
+    protected function compileGroups(array $groups): string
     {
-        unset($query);
-
         return 'group by ' . $this->columnize($groups);
     }
 
@@ -356,10 +350,8 @@ abstract class Grammar
      *
      * @param array<int,array{column:string,operator:string,value:mixed,boolean:string}> $havings
      */
-    protected function compileHavings(QueryBuilder $query, array $havings): string
+    protected function compileHavings(array $havings): string
     {
-        unset($query);
-
         $sql = \implode(' ', \array_map(
             function (array $having, int $i): string {
                 $boolean = $i === 0 ? '' : $having['boolean'] . ' ';
@@ -483,10 +475,8 @@ abstract class Grammar
      *
      * @param array<int,JoinClause|array<string,mixed>> $joins
      */
-    protected function compileJoins(QueryBuilder $query, array $joins): string
+    protected function compileJoins(array $joins): string
     {
-        unset($query);
-
         return \implode(' ', \array_map(
             function (JoinClause|array $join): string {
                 if ($join instanceof JoinClause) {
@@ -513,30 +503,24 @@ abstract class Grammar
     /**
      * Compile the "limit" portion of the query.
      */
-    protected function compileLimit(QueryBuilder $query, int $limit): string
+    protected function compileLimit(int $limit, ?int $offset = null): string
     {
-        unset($query);
-
-        return 'limit ' . $limit;
+        return $offset === null ? 'limit ' . $limit : 'limit ' . $limit . ' offset ' . $offset;
     }
 
     /**
      * Compile the lock into SQL.
      */
-    protected function compileLock(QueryBuilder $query, string $lock): string
+    protected function compileLock(string $lock): string
     {
-        unset($query);
-
         return $lock === 'update' ? 'for update' : 'lock in share mode';
     }
 
     /**
      * Compile the "offset" portion of the query.
      */
-    protected function compileOffset(QueryBuilder $query, int $offset): string
+    protected function compileOffset(int $offset): string
     {
-        unset($query);
-
         return 'offset ' . $offset;
     }
 
@@ -545,10 +529,8 @@ abstract class Grammar
      *
      * @param array<int,array{column:string,direction:string}> $orders
      */
-    protected function compileOrders(QueryBuilder $query, array $orders): string
+    protected function compileOrders(array $orders): string
     {
-        unset($query);
-
         $sql = \implode(', ', \array_map(
             fn(array $order): string => $this->wrap($order['column']) . ' ' . \strtoupper($order['direction']),
             $orders,

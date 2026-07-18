@@ -131,40 +131,16 @@ final class PostgreSQLGrammar extends Grammar
     }
 
     /**
-     * Compile the "limit" portion.
-     */
-    #[\Override]
-    protected function compileLimit(QueryBuilder $query, int $limit): string
-    {
-        unset($query);
-
-        return 'limit ' . $limit;
-    }
-
-    /**
      * Compile the lock into SQL (PostgreSQL-specific).
      */
     #[\Override]
-    protected function compileLock(QueryBuilder $query, string $lock): string
+    protected function compileLock(string $lock): string
     {
-        unset($query);
-
         return match ($lock) {
             'update' => 'for update',
             'shared' => 'for share',
             default => '',
         };
-    }
-
-    /**
-     * Compile the "offset" portion.
-     */
-    #[\Override]
-    protected function compileOffset(QueryBuilder $query, int $offset): string
-    {
-        unset($query);
-
-        return 'offset ' . $offset;
     }
 
     /**

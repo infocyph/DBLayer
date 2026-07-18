@@ -84,13 +84,10 @@ final class MySQLGrammar extends Grammar
      * Compile the "limit" portion with offset support (MySQL-specific).
      */
     #[\Override]
-    protected function compileLimit(QueryBuilder $query, int $limit): string
+    protected function compileLimit(int $limit, ?int $offset = null): string
     {
-        $components = $query->getComponents();
-        $offset = $components['offset'];
-
         if ($offset !== null) {
-            return 'limit ' . (int) $offset . ', ' . $limit;
+            return 'limit ' . $offset . ', ' . $limit;
         }
 
         return 'limit ' . $limit;
@@ -100,10 +97,8 @@ final class MySQLGrammar extends Grammar
      * Compile the lock into SQL (MySQL-specific).
      */
     #[\Override]
-    protected function compileLock(QueryBuilder $query, string $lock): string
+    protected function compileLock(string $lock): string
     {
-        unset($query);
-
         return match ($lock) {
             'update' => 'for update',
             'shared' => 'lock in share mode',
@@ -112,15 +107,12 @@ final class MySQLGrammar extends Grammar
     }
 
     /**
-     * Compile the "offset" portion (handled by limit in MySQL).
+     * Compile offset-only queries using MySQL's unbounded row-count sentinel.
      */
     #[\Override]
-    protected function compileOffset(QueryBuilder $query, int $offset): string
+    protected function compileOffset(int $offset): string
     {
-        unset($query, $offset);
-
-        // In MySQL, offset is encoded into the LIMIT clause.
-        return '';
+        return 'limit ' . $offset . ', 18446744073709551615';
     }
 
     /**
