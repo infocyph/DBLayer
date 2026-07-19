@@ -25,6 +25,13 @@ final class SecurityException extends DBException
         );
     }
 
+    public static function rateLimitStorageExhausted(int $maxEntries): self
+    {
+        return new self(
+            "Rate limiter storage capacity of {$maxEntries} active buckets was exhausted.",
+        );
+    }
+
     public static function sqlInjectionDetected(string $pattern, string $fragment): self
     {
         return new self(

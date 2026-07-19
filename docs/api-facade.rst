@@ -80,3 +80,9 @@ For worker runtimes (RoadRunner/Swoole/Octane-style loops), call
 ``DB::resetRuntimeState()`` between logical requests/jobs to clear query logs,
 telemetry/profiler buffers, listeners, and threshold monitors while preserving
 registered connection configurations.
+
+Query logs, profiler samples, and telemetry events use bounded in-memory
+retention by default. Pass an explicit positive limit when a workload needs a
+different bound. For query logs and profiler samples, passing ``null`` restores
+the safe default; omitted telemetry-limit arguments leave their current values
+unchanged.

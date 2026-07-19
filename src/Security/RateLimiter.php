@@ -16,10 +16,26 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
  */
 final class RateLimiter
 {
+    private const int DEFAULT_MAX_ENTRIES = 10_000;
+
+    /**
+     * Expiration timestamps keyed identically to storage.
+     *
+     * @var array<string, int>
+     */
+    private array $expiresAt = [];
+
     /**
      * @var array<string, int>
      */
     private array $storage = [];
+
+    public function __construct(private readonly int $maxEntries = self::DEFAULT_MAX_ENTRIES)
+    {
+        if ($this->maxEntries <= 0) {
+            throw SecurityException::invalidConfiguration('Rate limiter capacity must be greater than zero.');
+        }
+    }
 
     /**
      * Check a rate limit for a key within a given time window.
@@ -37,11 +53,21 @@ final class RateLimiter
             return;
         }
 
-        $bucket = intdiv(time(), $ttlSeconds);
+        $now = time();
+        $bucket = intdiv($now, $ttlSeconds);
         $storageKey = $key . ':' . $ttlSeconds . ':' . $bucket;
+
+        if (!isset($this->storage[$storageKey]) && \count($this->storage) >= $this->maxEntries) {
+            $this->purgeExpired($now);
+
+            if (\count($this->storage) >= $this->maxEntries) {
+                throw SecurityException::rateLimitStorageExhausted($this->maxEntries);
+            }
+        }
 
         $count = ($this->storage[$storageKey] ?? 0) + 1;
         $this->storage[$storageKey] = $count;
+        $this->expiresAt[$storageKey] = ($bucket + 1) * $ttlSeconds;
 
         if ($count > $maxAttempts) {
             throw SecurityException::rateLimitExceeded($key, $maxAttempts, $ttlSeconds);
@@ -54,6 +80,7 @@ final class RateLimiter
     public function clear(): void
     {
         $this->storage = [];
+        $this->expiresAt = [];
     }
 
     /**
@@ -78,6 +105,8 @@ final class RateLimiter
      */
     public function getStats(): array
     {
+        $this->purgeExpired(time());
+
         return [
             'total_keys' => count($this->storage),
             'total_requests' => array_sum($this->storage),
@@ -94,7 +123,22 @@ final class RateLimiter
         foreach (array_keys($this->storage) as $storageKey) {
             if (str_starts_with($storageKey, $prefix)) {
                 unset($this->storage[$storageKey]);
+                unset($this->expiresAt[$storageKey]);
             }
+        }
+    }
+
+    /**
+     * Remove buckets that can no longer affect rate-limit decisions.
+     */
+    private function purgeExpired(int $now): void
+    {
+        foreach ($this->expiresAt as $storageKey => $expiresAt) {
+            if ($expiresAt > $now) {
+                continue;
+            }
+
+            unset($this->expiresAt[$storageKey], $this->storage[$storageKey]);
         }
     }
 }

@@ -138,6 +138,11 @@ confirmation gates:
    Security::checkRateLimit('tenant:42');
    Security::requireConfirmation('drop table users', confirmed: true);
 
+The built-in limiter is process-local and keeps a bounded set of active time
+buckets. It removes expired buckets lazily and fails closed if active-key
+cardinality exhausts its capacity. Use ``rate_limit_callback`` for a shared,
+distributed limit across workers or hosts.
+
 Error and Log Hygiene
 ---------------------
 

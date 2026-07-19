@@ -121,7 +121,11 @@ it('records query logs and profiles through logger and profiler services', funct
         'name' => 'alpha',
     ]);
 
-    $logFile = '/tmp/dblayer-log-' . bin2hex(random_bytes(6)) . '.log';
+    $logFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR
+        . 'dblayer-log-'
+        . bin2hex(random_bytes(6))
+        . '.log';
 
     DB::enableLogger($logFile);
     DB::enableProfiler();

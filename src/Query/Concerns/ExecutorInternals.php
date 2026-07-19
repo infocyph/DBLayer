@@ -25,17 +25,6 @@ trait ExecutorInternals
     {
         $max = $this->maxLogEntries;
 
-        if ($max === null) {
-            $this->queryLog[] = $entry;
-            $this->queryLogCount++;
-
-            return;
-        }
-
-        if ($max <= 0) {
-            return;
-        }
-
         RingBuffer::append(
             $this->queryLog,
             $this->queryLogStart,
@@ -462,10 +451,6 @@ trait ExecutorInternals
             return [];
         }
 
-        if ($this->maxLogEntries === null) {
-            return \array_values($this->queryLog);
-        }
-
         $ordered = [];
         $max = $this->maxLogEntries;
 
@@ -485,7 +470,7 @@ trait ExecutorInternals
         $ordered = $this->orderedQueryLog();
         $max = $this->maxLogEntries;
 
-        if ($max !== null && \count($ordered) > $max) {
+        if (\count($ordered) > $max) {
             $ordered = \array_slice($ordered, -$max);
         }
 

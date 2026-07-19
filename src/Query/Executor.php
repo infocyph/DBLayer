@@ -28,6 +28,8 @@ final class Executor
 {
     use ExecutorInternals;
 
+    private const int DEFAULT_MAX_QUERY_LOG_ENTRIES = 2_000;
+
     /**
      * Whether to dispatch query events.
      */
@@ -39,9 +41,9 @@ final class Executor
     private bool $logging = false;
 
     /**
-     * Maximum number of query log entries to keep (null = unbounded).
+     * Maximum number of query log entries to keep.
      */
-    private ?int $maxLogEntries = null;
+    private int $maxLogEntries = self::DEFAULT_MAX_QUERY_LOG_ENTRIES;
 
     /**
      * Query execution log.
@@ -465,11 +467,11 @@ final class Executor
     /**
      * Set maximum number of query log entries to keep.
      *
-     * Pass null or <= 0 for unbounded.
+     * Pass null to restore the safe default. Non-positive values retain one entry.
      */
     public function setMaxQueryLogEntries(?int $max): void
     {
-        $this->maxLogEntries = $max !== null && $max > 0 ? $max : null;
+        $this->maxLogEntries = max(1, $max ?? self::DEFAULT_MAX_QUERY_LOG_ENTRIES);
         $this->reconfigureQueryLogStorage();
     }
 
