@@ -20,19 +20,20 @@ A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with 
 - **Multi-Driver** - MySQL, PostgreSQL, SQLite
 - **Security** - Multi-layer SQL injection protection
 - **Transactions** - Nested transactions with savepoints
-- **Caching** - Query result caching
+- **Caching** - CacheLayer memory/file adapter integration
 - **Profiling** - Performance monitoring
 - **Events** - Lifecycle hooks
 - **Telemetry** - Query + transaction observability export
 - **Pagination** - Length-aware, simple, and cursor pagination
 
 ### Performance
-- Microsecond-level benchmark results for core query-builder and transaction paths
+- Reproducible PHPBench scenarios for relative hot-path comparisons
 - Connection pooling for reuse
 - Memory-efficient cursor mode for large datasets
+- Bounded query-log, profiler, telemetry, and local rate-limit state for persistent workers
 
 ### Security
-- Automatic parameterization (all values bound)
+- Automatic parameterization for Query Builder values; explicit raw SQL APIs remain available
 - Identifier validation & escaping
 - Operator whitelist
 - SQL injection pattern detection
@@ -228,11 +229,11 @@ try {
 ## Testing
 
 ```bash
-composer tests
-composer test:code
-composer test:static:strict
-composer test:security:strict
-composer release:audit
+composer ic:tests
+composer ic:test:code
+composer ic:test:static
+composer ic:test:security
+composer ic:release:guard
 ```
 
 Test execution is driver-aware:
@@ -246,34 +247,28 @@ So total test count increases when more drivers are available.
 ## Benchmarking
 
 ```bash
-composer bench:run
-composer bench:quick
-composer bench:chart
+composer ic:bench:run
+composer ic:bench:quick
+composer ic:bench:chart
 ```
 
 ## Benchmarks
 
-Latest `composer bench:quick` sample output:
-
-| Subject | Mode | RSD |
-|---------|------|-----|
-| `benchBuildSelectSql` | `11.79μs` | `±0.80%` |
-| `benchSelectByPrimaryKey` | `28.20μs` | `±1.27%` |
-| `benchTransactionTwoPointReads` | `20.66μs` | `±1.61%` |
-| `benchUpdateSingleColumn` | `23.45μs` | `±4.21%` |
-
-Environment for this sample: PHP 8.5.4, xdebug disabled, opcache disabled, 10 revs x 3 iterations.
+Use repeated runs on the same production-representative environment. The
+included PHPBench subjects compare component hot paths; they do not establish
+end-to-end application RPM. See `docs/benchmarks.rst` for interpretation and
+reporting requirements.
 
 ## Security
 
 DBLayer implements multiple layers of security:
 
-1. **Parameterization** - All values automatically bound
+1. **Parameterization** - Query Builder values are bound; raw SQL remains explicit
 2. **Identifier Validation** - Table/column names validated
 3. **Operator Whitelist** - Only safe operators allowed
 4. **Injection Detection** - Scans for suspicious patterns
 5. **Rate Limiting** - Prevents query flooding
-6. **Audit Logging** - Tracks all queries
+6. **Audit Logging** - Optional, bounded query logging
 
 Hardening controls:
 

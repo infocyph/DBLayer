@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer;
 
+use Closure;
 use Generator;
 use Infocyph\CacheLayer\Cache\Cache;
 use Infocyph\CacheLayer\Cache\CacheInterface;
@@ -45,6 +46,8 @@ use Throwable;
  */
 class DB
 {
+    private const int DEFAULT_MAX_QUERY_LOG_ENTRIES = 2_000;
+
     /**
      * Shared cache manager instance.
      */
@@ -94,9 +97,9 @@ class DB
     protected static bool $loggingQueries = false;
 
     /**
-     * Maximum number of query log entries to retain (null = unbounded).
+     * Maximum number of query log entries to retain.
      */
-    protected static ?int $maxQueryLogEntries = null;
+    protected static int $maxQueryLogEntries = self::DEFAULT_MAX_QUERY_LOG_ENTRIES;
 
     /**
      * Optional connection pool instance.
@@ -160,6 +163,12 @@ class DB
      * @var array<string,mixed>|null
      */
     protected static ?array $securityDefaults = null;
+
+    private static ?Closure $queryExecutedEventBridge = null;
+
+    private static ?Closure $queryExecutingEventBridge = null;
+
+    private static ?Closure $queryFailedEventBridge = null;
 
     /**
      * Dynamically pass methods to the default connection.
@@ -988,11 +997,11 @@ class DB
     /**
      * Set maximum number of facade query log entries to retain.
      *
-     * Pass null or <= 0 for unbounded.
+     * Pass null to restore the safe default. Non-positive values retain one entry.
      */
     public static function setMaxQueryLogEntries(?int $max): void
     {
-        static::$maxQueryLogEntries = $max !== null && $max > 0 ? $max : null;
+        static::$maxQueryLogEntries = max(1, $max ?? self::DEFAULT_MAX_QUERY_LOG_ENTRIES);
         self::reconfigureQueryLogStorage();
     }
 
@@ -1412,17 +1421,6 @@ class DB
     {
         $max = static::$maxQueryLogEntries;
 
-        if ($max === null) {
-            static::$queryLog[] = $entry;
-            static::$queryLogCount++;
-
-            return;
-        }
-
-        if ($max <= 0) {
-            return;
-        }
-
         if (static::$queryLogCount < $max) {
             $index = (static::$queryLogStart + static::$queryLogCount) % $max;
             static::$queryLog[$index] = $entry;
@@ -1560,9 +1558,27 @@ class DB
      */
     private static function hasQueryLifecycleEventListeners(): bool
     {
-        return Events::hasListeners('db.query.executing')
-          && Events::hasListeners('db.query.executed')
-          && Events::hasListeners('db.query.failed');
+        if (
+            self::$queryExecutingEventBridge === null
+            || self::$queryExecutedEventBridge === null
+            || self::$queryFailedEventBridge === null
+        ) {
+            return false;
+        }
+
+        return \in_array(
+            self::$queryExecutingEventBridge,
+            Events::getListeners('db.query.executing'),
+            true,
+        ) && \in_array(
+            self::$queryExecutedEventBridge,
+            Events::getListeners('db.query.executed'),
+            true,
+        ) && \in_array(
+            self::$queryFailedEventBridge,
+            Events::getListeners('db.query.failed'),
+            true,
+        );
     }
 
     /**
@@ -1659,10 +1675,6 @@ class DB
             return [];
         }
 
-        if (static::$maxQueryLogEntries === null) {
-            return static::$queryLog;
-        }
-
         $ordered = [];
         $max = static::$maxQueryLogEntries;
 
@@ -1682,7 +1694,7 @@ class DB
         $ordered = self::orderedQueryLog();
         $max = static::$maxQueryLogEntries;
 
-        if ($max !== null && \count($ordered) > $max) {
+        if (\count($ordered) > $max) {
             $ordered = \array_slice($ordered, -$max);
         }
 
@@ -1696,13 +1708,13 @@ class DB
      */
     private static function registerEventBridges(): void
     {
-        Events::listen('db.query.executing', static function (QueryExecuting $event): void {
+        self::$queryExecutingEventBridge ??= static function (QueryExecuting $event): void {
             self::handleQueryExecuting($event);
-        });
-        Events::listen('db.query.executed', static function (QueryExecuted $event): void {
+        };
+        self::$queryExecutedEventBridge ??= static function (QueryExecuted $event): void {
             self::handleQueryExecuted($event);
-        });
-        Events::listen('db.query.failed', static function (QueryFailed $event): void {
+        };
+        self::$queryFailedEventBridge ??= static function (QueryFailed $event): void {
             QueryFailureBridge::handle(
                 $event,
                 static::$connections,
@@ -1712,7 +1724,19 @@ class DB
                 static::$listeners,
                 self::appendQueryLogEntry(...),
             );
-        });
+        };
+
+        if (!\in_array(self::$queryExecutingEventBridge, Events::getListeners('db.query.executing'), true)) {
+            Events::listen('db.query.executing', self::$queryExecutingEventBridge);
+        }
+
+        if (!\in_array(self::$queryExecutedEventBridge, Events::getListeners('db.query.executed'), true)) {
+            Events::listen('db.query.executed', self::$queryExecutedEventBridge);
+        }
+
+        if (!\in_array(self::$queryFailedEventBridge, Events::getListeners('db.query.failed'), true)) {
+            Events::listen('db.query.failed', self::$queryFailedEventBridge);
+        }
     }
 
     /**
@@ -1723,7 +1747,8 @@ class DB
         static::$queryLog = static::$listeners = static::$queryTimeMonitors = [];
         static::$queryLogCount = static::$queryLogStart = 0;
         static::$loggingQueries = false;
-        static::$maxQueryLogEntries = static::$logger = static::$profiler = null;
+        static::$maxQueryLogEntries = self::DEFAULT_MAX_QUERY_LOG_ENTRIES;
+        static::$logger = static::$profiler = null;
         Telemetry::clear();
     }
 

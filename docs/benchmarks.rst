@@ -15,9 +15,9 @@ Commands
 
 .. code-block:: bash
 
-   composer bench:run
-   composer bench:quick
-   composer bench:chart
+   composer ic:bench:run
+   composer ic:bench:quick
+   composer ic:bench:chart
 
 Current benchmark subjects are defined in ``benchmarks/DBLayerBench.php``:
 
@@ -38,7 +38,20 @@ Report Interpretation
 
 - Prefer comparing results from the same machine and PHP version.
 - Watch for drift in mode/mean and RSD.
-- Use ``bench:quick`` for local iteration and ``bench:run`` for fuller runs.
+- Use ``ic:bench:quick`` for local iteration and ``ic:bench:run`` for fuller runs.
+- Record the PHP version, extensions, OPcache state, operating system, database
+  engine/version, hardware class, and command with every comparison.
+- Compare repeated median results on the same environment. Treat a median
+  sustained-throughput regression above 2% as a reason to investigate; adjust
+  that tolerance only when measured variance justifies it.
+- A component microbenchmark is not an application RPM claim. Validate material
+  changes in a representative host application with correct responses, stable
+  queues and memory, bounded connections, and acceptable error/timeout rates.
+
+PHPBench reports time per operation. For a supporting component-throughput
+estimate, convert consistently using ``operations/second = 1,000,000 / µs`` and
+``operations/minute = operations/second × 60``. Do not present that number as
+end-to-end successful application RPM.
 
 Do Not Assume Feature Speedups
 ------------------------------
@@ -55,5 +68,5 @@ Treat these as measured tradeoffs, not guaranteed improvements.
 Chart Output
 ------------
 
-``bench:chart`` uses the configured console bar chart generator in
+``ic:bench:chart`` uses the configured console bar chart generator in
 ``phpbench.json`` to make regressions easier to spot visually.

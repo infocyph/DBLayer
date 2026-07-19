@@ -52,6 +52,6 @@ Useful local quality checks:
 
 .. code-block:: bash
 
-   composer test:syntax
-   composer test:code
-   composer test:all
+   composer ic:test:syntax
+   composer ic:test:code
+   composer ic:tests
