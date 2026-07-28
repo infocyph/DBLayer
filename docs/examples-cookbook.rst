@@ -243,7 +243,7 @@ Caching Recipe
 
    $cache = DB::cache();
 
-   $activeUsers = $cache->remember('users:active', function (): array {
+   $activeUsers = $cache->remember('users.active', function (): array {
        return DB::table('users')->where('active', '=', 1)->get();
    }, 120);
 

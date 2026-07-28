@@ -403,7 +403,7 @@ final class Pool
 
         // Check idle timeout.
         $idleTime = microtime(true) - $data['idle_since'];
-        if ($idleTime > $this->poolConfig['idle_timeout']) {
+        if ($idleTime >= $this->poolConfig['idle_timeout']) {
             $this->removeConnection($name, $data['connection']);
 
             // Try next one.
@@ -455,7 +455,7 @@ final class Pool
             foreach ($connections as $data) {
                 $idleTime = $now - $data['idle_since'];
 
-                if ($idleTime > $this->poolConfig['idle_timeout']) {
+                if ($idleTime >= $this->poolConfig['idle_timeout']) {
                     $this->removeConnection($name, $data['connection']);
                 }
             }

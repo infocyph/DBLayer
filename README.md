@@ -20,7 +20,7 @@ A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with 
 - **Multi-Driver** - MySQL, PostgreSQL, SQLite
 - **Security** - Multi-layer SQL injection protection
 - **Transactions** - Nested transactions with savepoints
-- **Caching** - CacheLayer memory/file adapter integration
+- **Caching** - Lazy CacheLayer 2 memory/file adapter integration
 - **Profiling** - Performance monitoring
 - **Events** - Lifecycle hooks
 - **Telemetry** - Query + transaction observability export
