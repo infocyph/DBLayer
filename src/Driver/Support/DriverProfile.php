@@ -20,7 +20,6 @@ use Throwable;
  *
  * Responsibilities:
  *  - Create Grammar instances for a given driver
- *  - Provide default connection options (port/charset/collation/schema)
  *  - Classify deadlock errors per driver
  */
 final class DriverProfile
@@ -81,19 +80,6 @@ final class DriverProfile
         // PostgreSQL
         'pgsql' => ['40P01', '40001'],
         'postgres' => ['40P01', '40001'],
-    ];
-
-    /**
-     * Default ports by driver (when none is explicitly provided).
-     *
-     * @var array<string,int|null>
-     */
-    private const array DEFAULT_PORTS = [
-        'mysql' => 3306,
-        'mariadb' => 3306,
-        'pgsql' => 5432,
-        'postgres' => 5432,
-        'sqlite' => null,
     ];
 
     /**
@@ -178,67 +164,23 @@ final class DriverProfile
     }
 
     /**
-     * Apply driver-specific connection defaults (port, charset, collation, schema, etc.).
-     *
-     * This is intended to be called from ConnectionConfig, after base defaults
-     * and user config are merged.
+     * Apply defaults owned by the selected driver.
      *
      * @param array<string,mixed> $config
      * @return array<string,mixed>
      */
     public static function applyConnectionDefaults(array $config): array
     {
-        $driver = isset($config['driver']) && is_string($config['driver'])
-          ? strtolower($config['driver'])
-          : '';
-
-        if ($driver === '') {
+        $driver = $config['driver'] ?? null;
+        if (!is_string($driver) || $driver === '') {
             return $config;
         }
 
-        // Default port.
-        if (!array_key_exists('port', $config) || $config['port'] === null || $config['port'] === '') {
-            $port = self::DEFAULT_PORTS[$driver] ?? null;
-
-            if ($port !== null) {
-                $config['port'] = $port;
-            }
+        try {
+            return DriverRegistry::resolve($driver)->mergeDefaults($config);
+        } catch (ConnectionException) {
+            return $config;
         }
-
-        // Charset / collation / schema defaults per dialect.
-        switch ($driver) {
-            case 'mysql':
-            case 'mariadb':
-                if (!isset($config['charset']) || !is_string($config['charset']) || $config['charset'] === '') {
-                    $config['charset'] = 'utf8mb4';
-                }
-
-                if (!isset($config['collation']) || !is_string($config['collation']) || $config['collation'] === '') {
-                    $config['collation'] = 'utf8mb4_unicode_ci';
-                }
-
-                break;
-
-            case 'pgsql':
-            case 'postgres':
-            case 'postgresql':
-                if (!isset($config['charset']) || !is_string($config['charset']) || $config['charset'] === '') {
-                    $config['charset'] = 'utf8';
-                }
-
-                if (!isset($config['schema']) || !is_string($config['schema']) || $config['schema'] === '') {
-                    $config['schema'] = 'public';
-                }
-
-                break;
-
-            case 'sqlite':
-            case 'sqlite3':
-                // Nothing extra for now. Host/port generally unused.
-                break;
-        }
-
-        return $config;
     }
 
     /**

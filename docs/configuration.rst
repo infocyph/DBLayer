@@ -35,16 +35,40 @@ Default Behavior
 - Driver-specific defaults are applied when values are missing.
 - Security settings are merged with safe defaults.
 
-Important Keys
---------------
+Effective Configuration Surface
+-------------------------------
 
-- ``driver``, ``host``, ``port``, ``database``, ``username``, ``password``
-- ``read`` / ``write`` split
-- ``read_strategy``, ``read_health_cooldown``, ``sticky``
-- ``read_latency_ttl``, ``read_probe_sample_size``, ``read_session_read_only``
-- ``statement_cache_enabled``, ``statement_cache_size``
-- ``query_comment_enabled``, ``query_comment_max_length``, ``query_comment_context``
-- ``security`` limits and transport policy
+DBLayer rejects built-in settings used with the wrong driver instead of
+silently accepting values that PDO never applies.
+
+================  ============================================================
+Scope             Effective keys
+================  ============================================================
+All drivers       ``database``, ``prefix``, ``options``, ``timeout``,
+                  ``persistent``, ``read``, ``write``, replica selection and
+                  timing, statement caching, query comments, ``sticky``, and
+                  SQL ``security``
+MySQL/MariaDB     ``host``, ``port``, ``username``, ``password``, ``charset``,
+                  ``collation``, ``unix_socket``, ``ssl_ca``, ``ssl_cert``,
+                  ``ssl_key``, ``ssl_verify_server_cert``
+PostgreSQL        ``host``, ``port``, ``username``, ``password``, ``charset``,
+                  ``schema``, ``sslmode``
+SQLite            ``database``; network, credential, charset, collation,
+                  schema, and TLS settings are rejected
+================  ============================================================
+
+MySQL ``collation`` becomes the connection initialization command. Its TLS file
+settings become ``Pdo\Mysql::ATTR_SSL_*`` constructor attributes. MySQL does
+not support the PostgreSQL ``sslmode`` key.
+
+PostgreSQL maps ``charset``, ``schema``, ``timeout``, and ``sslmode`` to libpq
+``client_encoding``, startup ``search_path``, ``connect_timeout``, and
+``sslmode`` DSN parameters. Supported SSL modes are ``disable``, ``allow``,
+``prefer``, ``require``, ``verify-ca``, and ``verify-full``.
+
+``timeout`` uses PDO's timeout attribute for MySQL/SQLite and libpq
+``connect_timeout`` for PostgreSQL. Native clients can impose additional
+driver- and version-specific behavior.
 
 Read/Write Config Shape
 -----------------------
@@ -91,14 +115,20 @@ Security Block
        'allow_insecure' => false,
        'raw_sql_policy' => 'allow', // allow | deny | allowlist
        'raw_sql_allowlist' => [],
+       'cursor_signing_key' => null, // null or a stable secret of at least 32 bytes
    ]
 
 Config-Driven Hardening
 -----------------------
 
-- ``security.require_tls=true`` forces TLS for MySQL/PostgreSQL.
+- ``security.require_tls=true`` forces TLS for MySQL/PostgreSQL and is not a
+  valid SQLite connection setting.
 - ``security.require_tls=false`` requires ``security.allow_insecure=true``.
 - ``security.enabled=false`` requires ``security.allow_insecure=true``.
+- ``security.cursor_signing_key`` signs opaque pagination cursors with HMAC-SHA256.
+  Use the same secret on every application node and during rolling deploys.
+  ``null`` leaves cursors unsigned; any configured string must contain at least
+  32 bytes. Safe configuration exports always redact this value.
 
 Facade helpers:
 
@@ -112,7 +142,8 @@ Production Guidance
 - Keep ``security.enabled`` true unless you have a controlled benchmark-only use case.
 - Set explicit query limits for multi-tenant workloads.
 - In high-trust production environments, set ``raw_sql_policy`` to ``allowlist`` and explicitly list permitted fragments.
-- Set explicit TLS parameters (``sslmode`` and/or driver TLS keys) for all remote MySQL/PostgreSQL links.
+- For MySQL, set ``ssl_ca`` / ``ssl_cert`` / ``ssl_key`` as needed.
+- For PostgreSQL, set ``sslmode`` explicitly for every remote link.
 - Use named connections for operational clarity (``primary``, ``reporting``, etc.).
 
 Recommended Production Baseline

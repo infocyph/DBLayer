@@ -8,10 +8,10 @@ use Generator;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Grammar\Grammar;
-use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
 use Infocyph\DBLayer\Query\Concerns\QueryBuilderInternals;
+use Infocyph\DBLayer\Query\Concerns\QueryBuilderKeysetPagination;
 use Infocyph\DBLayer\Query\Core\QueryPayload;
 use Infocyph\DBLayer\Query\Core\QueryType;
 
@@ -33,6 +33,7 @@ use Infocyph\DBLayer\Query\Core\QueryType;
 class QueryBuilder
 {
     use QueryBuilderInternals;
+    use QueryBuilderKeysetPagination;
 
     /**
      * Allowed operators for where/having/join clauses.
@@ -78,7 +79,21 @@ class QueryBuilder
     private ?array $aggregate = null;
 
     /**
-     * Query bindings.
+     * Rare clause-specific bindings, populated only when those clauses use
+     * placeholders.
+     *
+     * @var array{
+     *   select?:list<mixed>,
+     *   from?:list<mixed>,
+     *   join?:list<mixed>,
+     *   having?:list<mixed>,
+     *   union?:list<mixed>
+     * }
+     */
+    private array $bindingBuckets = [];
+
+    /**
+     * WHERE-clause bindings.
      *
      * @var list<mixed>
      */
@@ -269,28 +284,15 @@ class QueryBuilder
         callable $callback,
         string $column = 'id',
         mixed $fromId = null,
+        string $direction = 'asc',
     ): bool {
-        if ($count <= 0) {
-            throw QueryException::invalidLimit($count);
-        }
-
-        $lastId = $fromId;
-        $column = $this->requireNonEmptyString($column, 'column');
-
-        for ($page = 1; ; $page++) {
-            $results = $this->fetchChunkById($count, $column, $lastId);
-
-            if ($results === []) {
-                return true;
-            }
-
+        foreach ($this->keysetChunks($count, $column, $fromId, $direction) as [$results, $page]) {
             if ($callback($results, $page) === false) {
                 return false;
             }
-
-            $lastRow = $results[\count($results) - 1];
-            $lastId = $lastRow[$column] ?? $lastId;
         }
+
+        return true;
     }
 
     /**
@@ -329,79 +331,9 @@ class QueryBuilder
      *
      * @return Generator<mixed>
      */
-    public function cursor(int $chunkSize = 1000): Generator
+    public function cursor(?int $fetchMode = null): Generator
     {
-        if ($chunkSize <= 0) {
-            throw QueryException::invalidLimit($chunkSize);
-        }
-
-        yield from $this->stream();
-    }
-
-    /**
-     * Cursor-based pagination.
-     *
-     * This assumes a stable ordering by $column. For large datasets this is
-     * more efficient than OFFSET-based pagination.
-     *
-     * @param int $perPage Items per page
-     * @param mixed $cursor Last seen value for $column (raw DB value)
-     * @param string $column Ordered column used as the cursor (default: "id")
-     * @param non-empty-string $direction "asc" or "desc"
-     *
-     * @throws QueryException
-     */
-    public function cursorPaginate(
-        int $perPage = 15,
-        mixed $cursor = null,
-        string $column = 'id',
-        string $direction = 'asc',
-    ): CursorPaginator {
-        if ($perPage <= 0) {
-            throw QueryException::invalidLimit($perPage);
-        }
-
-        $direction = \strtolower($direction);
-
-        if (!\in_array($direction, ['asc', 'desc'], true)) {
-            throw QueryException::invalidOrderDirection($direction);
-        }
-
-        $operator = $direction === 'asc' ? '>' : '<';
-
-        $clone = $this->cloneBuilder();
-        $this->resetCursorWindow($clone);
-
-        if ($cursor !== null) {
-            $clone->where($this->requireNonEmptyString($column, 'column'), $operator, $cursor);
-        }
-
-        $clone->orderBy($column, $direction);
-        $clone->limit = $perPage + 1;
-
-        $results = $clone->get();
-        [$items, $hasMore] = $this->resolvePaginatedItems($results, $perPage);
-
-        $nextCursor = null;
-
-        if ($hasMore && $items !== []) {
-            $lastRow = $items[\count($items) - 1];
-            $nextCursorVal = $lastRow[$column] ?? null;
-
-            if ($nextCursorVal !== null) {
-                $nextCursor = $this->stringifyScalar($nextCursorVal);
-            }
-        }
-
-        $currentCursor = $cursor !== null ? $this->stringifyScalar($cursor) : null;
-
-        return new CursorPaginator(
-            $items,
-            $perPage,
-            $currentCursor,
-            $nextCursor,
-            $hasMore,
-        );
+        yield from $this->stream($fetchMode);
     }
 
     /**
@@ -428,6 +360,28 @@ class QueryBuilder
     public function exists(): bool
     {
         return $this->count() > 0;
+    }
+
+    /**
+     * Inspect this SELECT query's database-native execution plan.
+     *
+     * analyze=true executes the SELECT. Other options are driver-specific and
+     * rejected when unsupported instead of being silently ignored.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function explain(
+        bool $analyze = false,
+        bool $buffers = false,
+        bool $verbose = false,
+    ): array {
+        return $this->connection->explain(
+            $this->toSelectSql(),
+            $this->getBindings(),
+            $analyze,
+            $buffers,
+            $verbose,
+        );
     }
 
     /**
@@ -515,14 +469,14 @@ class QueryBuilder
 
         if ($query instanceof self) {
             $this->from = '(' . $query->toSelectSql() . ') as ' . $as;
-            $this->bindings = \array_merge($this->bindings, $query->getBindings());
+            $this->appendBindingBucket('from', $query->getBindings());
 
             return $this;
         }
 
         $this->validateRawFragment($query, $bindings);
         $this->from = '(' . $query . ') as ' . $as;
-        $this->bindings = \array_merge($this->bindings, $bindings);
+        $this->appendBindingBucket('from', $bindings);
 
         return $this;
     }
@@ -544,7 +498,19 @@ class QueryBuilder
      */
     public function getBindings(): array
     {
-        return \array_merge($this->cteBindings, $this->bindings);
+        if ($this->cteBindings === [] && $this->bindingBuckets === []) {
+            return $this->bindings;
+        }
+
+        return \array_merge(
+            $this->cteBindings,
+            $this->bindingBuckets['select'] ?? [],
+            $this->bindingBuckets['from'] ?? [],
+            $this->bindingBuckets['join'] ?? [],
+            $this->bindings,
+            $this->bindingBuckets['having'] ?? [],
+            $this->bindingBuckets['union'] ?? [],
+        );
     }
 
     /**
@@ -650,7 +616,7 @@ class QueryBuilder
             'boolean' => $boolean,
         ];
 
-        $this->bindings[] = $value;
+        $this->bindingBuckets['having'][] = $value;
 
         return $this;
     }
@@ -757,7 +723,65 @@ class QueryBuilder
         $this->joins[] = $join;
 
         if ($join->getBindings() !== []) {
-            $this->bindings = \array_merge($this->bindings, $join->getBindings());
+            $this->appendBindingBucket('join', $join->getBindings());
+        }
+
+        return $this;
+    }
+
+    /**
+     * Join a derived-table subquery.
+     *
+     * @param QueryBuilder|callable(QueryBuilder):void|string $query
+     * @param list<mixed> $bindings Bindings for a raw string subquery.
+     */
+    public function joinSub(
+        QueryBuilder|callable|string $query,
+        string $as,
+        string $first,
+        string $operator,
+        string $second,
+        string $type = 'inner',
+        array $bindings = [],
+    ): self {
+        $this->validateColumnIdentifier($as, false);
+        $this->validateColumnIdentifier($first, false);
+        $this->validateColumnIdentifier($second, false);
+        $operator = $this->assertValidOperator($operator);
+        $type = strtolower(trim($type));
+
+        if (!in_array($type, ['inner', 'left', 'right'], true)) {
+            throw QueryException::invalidParameter(
+                'type',
+                'Subquery join type must be inner, left, or right.',
+            );
+        }
+
+        if (is_callable($query)) {
+            $builder = $this->newQuery();
+            $query($builder);
+            $query = $builder;
+        }
+
+        if ($query instanceof self) {
+            $sql = $query->toSelectSql();
+            $bindings = $query->getBindings();
+        } else {
+            $this->validateRawFragment($query, $bindings);
+            $sql = $query;
+        }
+
+        $this->joins[] = [
+            'type' => $type,
+            'table' => '(' . $sql . ') as ' . $as,
+            'subquery' => true,
+            'first' => $first,
+            'operator' => $operator,
+            'second' => $second,
+        ];
+
+        if ($bindings !== []) {
+            $this->appendBindingBucket('join', $bindings);
         }
 
         return $this;
@@ -772,11 +796,60 @@ class QueryBuilder
     }
 
     /**
+     * Lazy keyset iteration alias.
+     *
+     * @return Generator<array<string,mixed>>
+     */
+    public function lazy(
+        int $chunkSize = 1000,
+        string $column = 'id',
+        mixed $fromId = null,
+        string $direction = 'asc',
+    ): Generator {
+        yield from $this->lazyById($chunkSize, $column, $fromId, $direction);
+    }
+
+    /**
+     * Iterate in bounded keyset batches, releasing the statement between batches.
+     *
+     * @return Generator<array<string,mixed>>
+     */
+    public function lazyById(
+        int $chunkSize = 1000,
+        string $column = 'id',
+        mixed $fromId = null,
+        string $direction = 'asc',
+    ): Generator {
+        foreach ($this->keysetChunks($chunkSize, $column, $fromId, $direction) as [$rows]) {
+            foreach ($rows as $row) {
+                yield $row;
+            }
+        }
+    }
+
+    /**
      * Add a LEFT JOIN clause.
      */
     public function leftJoin(string $table, string $first, string $operator, string $second): self
     {
         return $this->join($table, $first, $operator, $second, 'left');
+    }
+
+    /**
+     * Add a LEFT JOIN against a derived-table subquery.
+     *
+     * @param QueryBuilder|callable(QueryBuilder):void|string $query
+     * @param list<mixed> $bindings
+     */
+    public function leftJoinSub(
+        QueryBuilder|callable|string $query,
+        string $as,
+        string $first,
+        string $operator,
+        string $second,
+        array $bindings = [],
+    ): self {
+        return $this->joinSub($query, $as, $first, $operator, $second, 'left', $bindings);
     }
 
     /**
@@ -968,6 +1041,23 @@ class QueryBuilder
     }
 
     /**
+     * Add a RIGHT JOIN against a derived-table subquery.
+     *
+     * @param QueryBuilder|callable(QueryBuilder):void|string $query
+     * @param list<mixed> $bindings
+     */
+    public function rightJoinSub(
+        QueryBuilder|callable|string $query,
+        string $as,
+        string $first,
+        string $operator,
+        string $second,
+        array $bindings = [],
+    ): self {
+        return $this->joinSub($query, $as, $first, $operator, $second, 'right', $bindings);
+    }
+
+    /**
      * Add a raw select expression.
      *
      * @param list<mixed> $bindings
@@ -982,7 +1072,7 @@ class QueryBuilder
 
         $this->type = 'select';
         $this->columns[] = new Expression($expression);
-        $this->bindings = \array_merge($this->bindings, $bindings);
+        $this->appendBindingBucket('select', $bindings);
 
         return $this;
     }
@@ -1156,7 +1246,7 @@ class QueryBuilder
             unions: $unionPayloads,
             lock: $this->lock,
             aggregate: $this->aggregate,
-            bindings: $this->bindings,
+            bindings: $this->getBindings(),
         );
     }
 
@@ -1216,6 +1306,28 @@ class QueryBuilder
     }
 
     /**
+     * Stream rows with the driver's explicit bounded-memory strategy.
+     *
+     * PostgreSQL uses $fetchSize server-cursor batches. MySQL keeps its
+     * connection occupied until this generator is consumed or closed.
+     *
+     * @return Generator<mixed>
+     */
+    public function unbufferedStream(?int $fetchMode = null, int $fetchSize = 1000): Generator
+    {
+        if ($this->type === null) {
+            $this->type = 'select';
+        }
+
+        yield from $this->connection->unbufferedStream(
+            $this->toSelectSql(),
+            $this->getBindings(),
+            $fetchMode,
+            $fetchSize,
+        );
+    }
+
+    /**
      * Add a UNION query.
      *
      * @param QueryBuilder|callable(QueryBuilder):void $query
@@ -1233,7 +1345,7 @@ class QueryBuilder
             'all' => $all,
         ];
 
-        $this->bindings = \array_merge($this->bindings, $query->getBindings());
+        $this->appendBindingBucket('union', $query->getBindings());
 
         return $this;
     }
@@ -1567,6 +1679,22 @@ class QueryBuilder
     }
 
     /**
+     * @param 'select'|'from'|'join'|'having'|'union' $bucket
+     * @param list<mixed> $bindings
+     */
+    private function appendBindingBucket(string $bucket, array $bindings): void
+    {
+        if ($bindings === []) {
+            return;
+        }
+
+        $this->bindingBuckets[$bucket] = \array_merge(
+            $this->bindingBuckets[$bucket] ?? [],
+            $bindings,
+        );
+    }
+
+    /**
      * @param array<string,mixed> $where
      * @param list<mixed> $bindings
      */
@@ -1581,23 +1709,6 @@ class QueryBuilder
         $this->bindings = \array_merge($this->bindings, $bindings);
 
         return $this;
-    }
-
-    /**
-     * @return list<array<string,mixed>>
-     */
-    private function fetchChunkById(int $chunkSize, string $column, mixed $lastId): array
-    {
-        $clone = $this->cloneBuilder();
-
-        if ($lastId !== null) {
-            $clone->where($this->requireNonEmptyString($column, 'column'), '>', $lastId);
-        }
-
-        $clone->orderBy($column, 'asc');
-        $clone->limit = $chunkSize;
-
-        return $clone->get();
     }
 
     /**
@@ -1672,6 +1783,7 @@ class QueryBuilder
 
         $builder->orders = [];
         $builder->unions = [];
+        unset($builder->bindingBuckets['union']);
     }
 
     private function resetCursorWindow(self $builder): void

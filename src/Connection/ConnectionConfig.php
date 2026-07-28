@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection;
 
-use Infocyph\DBLayer\Driver\Support\DriverProfile;
+use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
 use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Support\ArrayNormalizer;
@@ -15,7 +15,7 @@ use Infocyph\DBLayer\Support\ArrayNormalizer;
  * Responsibilities:
  *  - Normalize driver names / aliases
  *  - Merge with sensible defaults
- *  - Apply driver-specific defaults via DriverProfile
+ *  - Apply defaults owned by the selected driver
  *  - Delegate advanced validation to the driver when available
  */
 final class ConnectionConfig
@@ -27,14 +27,7 @@ final class ConnectionConfig
      */
     private const array DEFAULTS = [
         'driver' => 'mysql',
-        'host' => '127.0.0.1',
-        'port' => null,
         'database' => '',
-        'username' => '',
-        'password' => '',
-        'charset' => null,
-        'collation' => null,
-        'schema' => null,
         'prefix' => '',
         'options' => [],
         'write' => [],
@@ -44,7 +37,6 @@ final class ConnectionConfig
         'read_latency_ttl' => 15,
         'read_probe_sample_size' => 0,
         'least_latency_ttl' => 15,
-        'read_session_read_only' => false,
         'statement_cache_enabled' => false,
         'statement_cache_size' => 64,
         'query_comment_enabled' => false,
@@ -89,6 +81,7 @@ final class ConnectionConfig
         'private_key',
         'ssl_passphrase',
         'passphrase',
+        'cursor_signing_key',
     ];
 
     /**
@@ -106,6 +99,7 @@ final class ConnectionConfig
         'rate_limit_key' => null,
         'rate_limit_callback' => null,
         'strict_identifiers' => true,
+        'cursor_signing_key' => null,
         'require_tls' => null,
         'allow_insecure' => false,
         'raw_sql_policy' => 'allow',
@@ -141,14 +135,17 @@ final class ConnectionConfig
         );
         $this->validateSecurityConfig($config['security']);
 
-        // Apply driver-specific connection defaults via DriverProfile.
-        $config = DriverProfile::applyConnectionDefaults($config);
+        // Resolve once so defaulting and validation share the same driver instance.
+        $driver = $this->resolveDriver($config['driver'] ?? null);
+        if ($driver instanceof DriverInterface) {
+            $config = $driver->mergeDefaults($config);
+        }
 
         // Basic structural validation.
         $this->validateConfig($config);
 
-        // Let driver perform additional validation / normalization if registered.
-        $this->validateWithDriver($config);
+        // Let the resolved driver perform its advanced validation.
+        $driver?->validateConfig($config);
 
         $this->config = $config;
     }
@@ -600,6 +597,20 @@ final class ConnectionConfig
         return $value;
     }
 
+    private function resolveDriver(mixed $driverName): ?DriverInterface
+    {
+        if (!is_string($driverName) || $driverName === '') {
+            return null;
+        }
+
+        try {
+            return DriverRegistry::resolve($driverName);
+        } catch (ConnectionException) {
+            // Unknown driver (custom or not registered): skip driver-level validation.
+            return null;
+        }
+    }
+
     /**
      * @return list<array<string,mixed>>
      */
@@ -673,29 +684,5 @@ final class ConnectionConfig
     private function validateSecurityConfig(array $security): void
     {
         ConnectionSecurityConfigValidator::validate($security);
-    }
-
-    /**
-     * Delegate advanced validation / normalization to driver when registered.
-     *
-     * @param array<string,mixed> $config
-     */
-    private function validateWithDriver(array $config): void
-    {
-        $driverName = $config['driver'] ?? null;
-
-        if (!is_string($driverName) || $driverName === '') {
-            return;
-        }
-
-        try {
-            $driver = DriverRegistry::resolve($driverName);
-        } catch (ConnectionException) {
-            // Unknown driver (custom or not registered): skip driver-level validation.
-            return;
-        }
-
-        // Give driver a chance to throw a more specific exception.
-        $driver->validateConfig($config);
     }
 }

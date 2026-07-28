@@ -483,7 +483,10 @@ abstract class Grammar
                     return $this->compileJoinClause($join);
                 }
 
-                $table = $this->wrapTable($this->stringValue($join['table'] ?? ''));
+                $tableValue = $this->stringValue($join['table'] ?? '');
+                $table = ($join['subquery'] ?? false) === true
+                  ? $tableValue
+                  : $this->wrapTable($tableValue);
                 $type = \strtoupper($this->stringValue($join['type'] ?? 'inner', 'inner'));
 
                 if (isset($join['first'])) {

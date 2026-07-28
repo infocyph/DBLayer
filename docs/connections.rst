@@ -33,7 +33,14 @@ Runtime controls are available on ``Connection`` instances:
   ``mergeQueryCommentContext()``, ``clearQueryCommentContext()``,
   ``getQueryCommentContext()``
 - execution helpers: ``setFetchMode()``, ``withoutQueryEvents()``,
-  ``stream()``, ``yieldRows()``, ``readOnlyTransaction()``
+  ``stream()``, ``unbufferedStream()``, ``yieldRows()``, ``readOnlyTransaction()``
+
+``stream()`` avoids ``fetchAll()`` but native client buffering remains
+driver-dependent. ``unbufferedStream()`` makes the stronger bounded-memory
+choice explicit: MySQL disables buffered queries for the generator lifetime,
+PostgreSQL fetches through a transaction-scoped server cursor, and SQLite uses
+incremental ``fetch()``. A MySQL unbuffered generator occupies its connection;
+consume or close it before issuing another statement on that connection.
 
 Read/Write Split
 ----------------
@@ -97,6 +104,10 @@ Strategy Behavior Summary
   Winner is cached for ``read_latency_ttl`` seconds.
   ``read_probe_sample_size`` can bound first-pass probes for large pools.
 - ``weighted``: weighted random using per-replica ``weight``.
+
+``read_session_read_only=true`` enables the vendor session command for MySQL
+and PostgreSQL read handles. SQLite read handles always receive
+``PRAGMA query_only = ON``; the option is therefore not accepted for SQLite.
 
 When a replica fails, DBLayer applies cooldown-based suppression before retry.
 

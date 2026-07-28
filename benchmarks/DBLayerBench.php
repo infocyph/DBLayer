@@ -19,6 +19,8 @@ final class DBLayerBench
 {
     private const SEED_ROWS = 1000;
 
+    private static ?string $cursorToken = null;
+
     private static bool $initialized = false;
 
     private static bool $sqliteAvailable = false;
@@ -36,6 +38,18 @@ final class DBLayerBench
             ->orderByDesc('id')
             ->limit(25)
             ->toSql();
+    }
+
+    public function benchCursorPaginateComposite(): void
+    {
+        if ($this->fallbackCompileLimitedSelect()) {
+            return;
+        }
+
+        DB::table('users')
+            ->where('active', '=', 1)
+            ->orderBy('created_at', 'desc')
+            ->cursorPaginate(25, self::$cursorToken, 'id', 'asc');
     }
 
     public function benchEventDispatchOff(): void
@@ -61,6 +75,17 @@ final class DBLayerBench
         }
 
         DB::connection('bench')->execute('select score from users where id = ?', [$this->currentUserId]);
+    }
+
+    public function benchLazyByIdRows(): void
+    {
+        if ($this->fallbackCompileLimitedSelect()) {
+            return;
+        }
+
+        foreach (DB::table('users')->where('id', '<=', 49)->lazyById(50) as $row) {
+            unset($row);
+        }
     }
 
     public function benchSelectByPrimaryKey(): void
@@ -135,6 +160,20 @@ final class DBLayerBench
         );
 
         DB::connection('bench')->runCompiled($compiled);
+    }
+
+    public function benchUnbufferedStreamRows(): void
+    {
+        if ($this->fallbackCompileLimitedSelect()) {
+            return;
+        }
+
+        foreach (DB::connection('bench')->unbufferedStream(
+            'select id, name from users order by id asc limit 50',
+            fetchSize: 10,
+        ) as $row) {
+            unset($row);
+        }
     }
 
     public function benchUpdateSingleColumn(): void
@@ -288,6 +327,11 @@ final class DBLayerBench
 
         self::createSchema();
         self::seedUsers();
+        self::$cursorToken = DB::table('users')
+            ->where('active', '=', 1)
+            ->orderBy('created_at', 'desc')
+            ->cursorPaginate(25, null, 'id', 'asc')
+            ->nextCursor();
     }
 
     private static function seedUsers(): void

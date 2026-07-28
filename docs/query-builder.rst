@@ -96,8 +96,10 @@ Advanced SQL
 
 - CTE: ``with()``, ``withRecursive()``
 - Subquery source: ``fromSub()``
+- Derived-table joins: ``joinSub()``, ``leftJoinSub()``, ``rightJoinSub()``
 - Window helper: ``selectWindow()``
 - Upsert returning: ``upsertReturning()``
+- Native execution plans: ``explain()``
 
 Example CTE:
 
@@ -116,15 +118,49 @@ Reporting Scenario
 
 .. code-block:: php
 
-   $rows = DB::table('orders as o')
-       ->join('users as u', 'o.user_id', '=', 'u.id')
-       ->select('u.email')
-       ->selectRaw('sum(o.amount) as total_amount')
+   $rows = DB::table('orders')
+       ->join('users', 'orders.user_id', '=', 'users.id')
+       ->select('users.email')
+       ->selectRaw('sum(orders.amount) as total_amount')
        ->selectRaw('count(*) as order_count')
-       ->groupBy('u.email')
+       ->groupBy('users.email')
        ->having('order_count', '>=', 3)
        ->orderBy('total_amount', 'desc')
        ->get();
+
+For selective reporting queries, aggregate detail rows before joining them:
+
+.. code-block:: php
+
+   $totals = DB::table('orders')
+       ->select('customer_id')
+       ->selectRaw('sum(total_amount) as total_spent')
+       ->where('order_date', '>=', $start)
+       ->where('order_date', '<', $end)
+       ->groupBy('customer_id');
+
+   $rows = DB::table('customers')
+       ->leftJoinSub(
+           $totals,
+           'order_totals',
+           'customers.id',
+           '=',
+           'order_totals.customer_id',
+       )
+       ->where('customers.status', '=', 'active')
+       ->get();
+
+Use ``explain()`` before and after changing the query or its indexes:
+
+.. code-block:: php
+
+   $plan = $query->explain();
+
+   // PostgreSQL only; executes the SELECT:
+   $measured = $query->explain(analyze: true, buffers: true);
+
+See ``performance-optimization`` for driver options, safety constraints, index
+design, and benchmark acceptance.
 
 Pagination and Streaming
 ------------------------
@@ -133,10 +169,54 @@ Pagination and Streaming
 - ``simplePaginate()``
 - ``cursorPaginate()``
 - ``chunk()`` / ``chunkById()``
-- ``cursor()``
+- ``lazyById()`` / ``lazy()``
+- ``cursor()`` / ``stream()`` / ``unbufferedStream()``
 
 Prefer ``chunkById()`` over offset-based chunking for large or changing tables.
 It is more stable when rows are inserted/deleted during iteration.
+
+Composite Cursor Pagination
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use a stable business order followed by a unique tie-breaker:
+
+.. code-block:: php
+
+   $page = DB::table('events')
+       ->where('tenant_id', '=', $tenantId)
+       ->orderBy('created_at', 'desc')
+       ->cursorPaginate(
+           perPage: 100,
+           cursor: $requestCursor,
+           uniqueColumn: 'id',
+           direction: 'asc',
+       );
+
+   $next = $page->nextCursor();
+   $previous = $page->previousCursor();
+
+Existing order clauses are retained. If ``id`` is absent it is appended as the
+final order, preventing equal ``created_at`` values from being skipped.
+Ordered columns must be selected, non-null scalar values. Cursors are bound to
+the filter bindings and order definition, so changing tenant, filters, or order
+invalidates the token.
+
+Keyset speed still depends on the database index. Put equality filters first,
+then the ordered cursor columns in the same sequence. The example above
+normally needs ``(tenant_id, created_at, id)``. Verify production shapes with
+the database's ``EXPLAIN`` output; cursor syntax cannot compensate for a
+sequential scan or filesort.
+
+For resumable jobs, ``lazyById($size, 'id', $checkpoint)`` executes bounded
+keyset batches and releases each statement between batches. ``cursor()`` and
+``stream()`` hold one PDO statement. ``unbufferedStream()`` adds a driver-level
+bounded-memory guarantee but also occupies the connection while active.
+
+Cursor pagination tolerates ordinary concurrent inserts and deletes, but it is
+not a historical snapshot. When an export requires one fixed view of the data,
+run the traversal inside an explicitly configured repeatable-read transaction.
+Long snapshots retain database history and occupy a connection, so prefer
+checkpointed ``lazyById()`` jobs when exact snapshot consistency is unnecessary.
 
 Branching Queries Safely
 ------------------------

@@ -26,6 +26,8 @@ DB::addConnection([
         'max_sql_length' => 8000,
         'max_params' => 500,
         'max_param_bytes' => 4096,
+        // Optional: at least 32 bytes. Keep it stable across every app node.
+        'cursor_signing_key' => null,
     ],
 ], 'mysql_main');
 
@@ -37,7 +39,17 @@ DB::addConnection([
     'database' => 'reporting_db',
     'username' => 'report_user',
     'password' => 'secret',
+    'charset' => 'UTF8',
+    'schema' => 'public',
+    'timeout' => 5,
+    'sslmode' => 'prefer',
 ], 'pgsql_reporting');
+
+// Local SQLite connection; client/server and TLS keys intentionally do not apply.
+DB::addConnection([
+    'driver' => 'sqlite',
+    'database' => __DIR__ . '/database.sqlite',
+], 'sqlite_local');
 
 // Optional: explicitly mark default (if you didn’t give it in addConnection)
 DB::setDefaultConnection('mysql_main');
