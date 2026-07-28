@@ -129,11 +129,6 @@ abstract class AbstractPdoDriver implements DriverInterface
     final public function createPdo(ConnectionConfig $config, bool $readOnly = false): PDO
     {
         $data = $config->toArray();
-
-        // Allow drivers to stamp their defaults and validate config.
-        $data = $this->mergeDefaults($data);
-        $this->validateConfig($data);
-
         $dsn = $this->buildDsn($data, $readOnly);
 
         $username = $this->stringValue($data['username'] ?? '');
@@ -197,7 +192,7 @@ abstract class AbstractPdoDriver implements DriverInterface
         $config['driver'] ??= $this->getName();
 
         foreach (static::DRIVER_DEFAULTS as $key => $value) {
-            if (!array_key_exists($key, $config) || $config[$key] === null) {
+            if (!array_key_exists($key, $config) || $config[$key] === null || $config[$key] === '') {
                 $config[$key] = $value;
             }
         }
@@ -351,6 +346,25 @@ abstract class AbstractPdoDriver implements DriverInterface
      * @param array<string,mixed> $config
      * @param list<string> $keys
      */
+    protected function rejectUnsupportedSettings(array $config, string $driver, array $keys): void
+    {
+        foreach ($keys as $key) {
+            $value = $config[$key] ?? null;
+            if ($value === null || $value === '' || $value === []) {
+                continue;
+            }
+
+            $this->throwInvalidConfiguration(
+                $driver,
+                sprintf("Config key '%s' is not supported by driver '%s'.", $key, $driver),
+            );
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $config
+     * @param list<string> $keys
+     */
     protected function requireAnyNonEmptyStringSetting(array $config, array $keys, string $driver): void
     {
         foreach ($keys as $key) {
@@ -395,6 +409,19 @@ abstract class AbstractPdoDriver implements DriverInterface
     /**
      * @param array<string,mixed> $config
      */
+    protected function requireOptionalBooleanSetting(array $config, string $key, string $driver): void
+    {
+        if (isset($config[$key]) && !is_bool($config[$key])) {
+            $this->throwInvalidConfiguration(
+                $driver,
+                sprintf("Config key '%s' must be a boolean for driver '%s'.", $key, $driver),
+            );
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $config
+     */
     protected function requireOptionalNumericPort(array $config, string $driver): void
     {
         if (isset($config['port']) && !is_int($config['port']) && !$this->isNumericString($config['port'])) {
@@ -409,6 +436,28 @@ abstract class AbstractPdoDriver implements DriverInterface
     {
         if (isset($config[$key]) && !is_string($config[$key])) {
             $this->throwInvalidConfiguration($driver);
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $config
+     */
+    protected function requireOptionalTokenSetting(
+        array $config,
+        string $key,
+        string $driver,
+        string $pattern = '/^[A-Za-z][A-Za-z0-9_-]*$/D',
+    ): void {
+        $value = $config[$key] ?? null;
+        if ($value === null || $value === '') {
+            return;
+        }
+
+        if (!is_string($value) || preg_match($pattern, $value) !== 1) {
+            $this->throwInvalidConfiguration(
+                $driver,
+                sprintf("Config key '%s' contains an invalid value for driver '%s'.", $key, $driver),
+            );
         }
     }
 

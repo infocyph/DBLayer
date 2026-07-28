@@ -291,8 +291,9 @@ abstract class Repository
     public function chunkById(
         int $count,
         callable $callback,
-        string $column = 'id',
+        ?string $column = null,
         mixed $fromId = null,
+        string $direction = 'asc',
         ?callable $scope = null,
     ): bool {
         $query = $this->applyScope(
@@ -300,7 +301,13 @@ abstract class Repository
             $scope,
         );
 
-        return $query->chunkById($count, $callback, $column, $fromId);
+        return $query->chunkById(
+            $count,
+            $callback,
+            $this->normalizeColumnName($column ?? $this->primaryKey(), 'id'),
+            $fromId,
+            $this->normalizeDirection($direction),
+        );
     }
 
     /**
@@ -366,14 +373,14 @@ abstract class Repository
      * @param callable(QueryBuilder):void|null $scope
      * @return Generator<mixed>
      */
-    public function cursor(int $chunkSize = 1000, ?callable $scope = null): Generator
+    public function cursor(?callable $scope = null, ?int $fetchMode = null): Generator
     {
         $query = $this->applyScope(
             $this->query(),
             $scope,
         );
 
-        return $query->cursor($chunkSize);
+        return $query->cursor($fetchMode);
     }
 
     /**
@@ -383,9 +390,9 @@ abstract class Repository
      */
     public function cursorPaginate(
         int $perPage = 15,
-        mixed $cursor = null,
-        string $column = 'id',
-        string $direction = 'asc',
+        ?string $cursor = null,
+        ?string $uniqueColumn = null,
+        ?string $direction = null,
         ?callable $scope = null,
     ): CursorPaginator {
         $query = $this->applyScope(
@@ -396,8 +403,8 @@ abstract class Repository
         return $query->cursorPaginate(
             $perPage,
             $cursor,
-            $this->normalizeColumnName($column, 'id'),
-            $this->normalizeDirection($direction),
+            $this->normalizeColumnName($uniqueColumn ?? $this->primaryKey(), 'id'),
+            $direction === null ? null : $this->normalizeDirection($direction),
         );
     }
 
@@ -681,14 +688,45 @@ abstract class Repository
     }
 
     /**
-     * Lazy generator alias for cursor().
+     * Lazily iterate rows in bounded primary-key batches.
      *
      * @param callable(QueryBuilder):void|null $scope
      * @return Generator<mixed>
      */
-    public function lazy(int $chunkSize = 1000, ?callable $scope = null): Generator
-    {
-        yield from $this->cursor($chunkSize, $scope);
+    public function lazy(
+        int $chunkSize = 1000,
+        ?callable $scope = null,
+        ?string $column = null,
+        mixed $fromId = null,
+        string $direction = 'asc',
+    ): Generator {
+        yield from $this->lazyById($chunkSize, $scope, $column, $fromId, $direction);
+    }
+
+    /**
+     * Lazily iterate rows in bounded keyset batches.
+     *
+     * @param callable(QueryBuilder):void|null $scope
+     * @return Generator<array<string,mixed>>
+     */
+    public function lazyById(
+        int $chunkSize = 1000,
+        ?callable $scope = null,
+        ?string $column = null,
+        mixed $fromId = null,
+        string $direction = 'asc',
+    ): Generator {
+        $query = $this->applyScope(
+            $this->query(),
+            $scope,
+        );
+
+        yield from $query->lazyById(
+            $chunkSize,
+            $this->normalizeColumnName($column ?? $this->primaryKey(), 'id'),
+            $fromId,
+            $this->normalizeDirection($direction),
+        );
     }
 
     /**
@@ -881,6 +919,25 @@ abstract class Repository
         );
 
         return $query->stream($fetchMode);
+    }
+
+    /**
+     * Stream scoped rows with the driver's explicit bounded-memory strategy.
+     *
+     * @param callable(QueryBuilder):void|null $scope
+     * @return Generator<mixed>
+     */
+    public function unbufferedStream(
+        ?callable $scope = null,
+        ?int $fetchMode = null,
+        int $fetchSize = 1000,
+    ): Generator {
+        $query = $this->applyScope(
+            $this->query(),
+            $scope,
+        );
+
+        return $query->unbufferedStream($fetchMode, $fetchSize);
     }
 
     /**

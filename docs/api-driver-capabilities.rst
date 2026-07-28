@@ -61,3 +61,12 @@ Built-in Driver Matrix
      - no
      - yes
      - yes
+
+Custom Driver Contract
+----------------------
+
+Custom ``DriverInterface`` implementations compile their native plan syntax
+through ``compileExplain()``. Unsupported option combinations must be rejected
+explicitly rather than silently ignored. The method receives the SELECT SQL,
+the ``analyze``, ``buffers``, and ``verbose`` booleans, and an optional server
+version used when a vendor family has version-specific syntax.

@@ -117,6 +117,16 @@ final class ConnectionSecurityConfigValidator
             throw ConnectionException::invalidConfiguration("Security config key 'strict_identifiers' must be a boolean.");
         }
 
+        $cursorSigningKey = $security['cursor_signing_key'] ?? null;
+        if (
+            $cursorSigningKey !== null
+            && (!is_string($cursorSigningKey) || strlen($cursorSigningKey) < 32)
+        ) {
+            throw ConnectionException::invalidConfiguration(
+                "Security config key 'cursor_signing_key' must be null or a string of at least 32 bytes.",
+            );
+        }
+
         if (isset($security['require_tls']) && !is_bool($security['require_tls'])) {
             throw ConnectionException::invalidConfiguration("Security config key 'require_tls' must be a boolean or null.");
         }

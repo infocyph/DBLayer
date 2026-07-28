@@ -52,6 +52,7 @@ as lookup pages after reading the guides.
    repository
    transactions
    caching
+   performance-optimization
    security
    limitations
    observability

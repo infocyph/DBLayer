@@ -77,6 +77,7 @@ Telemetry
    $snapshot = DB::telemetry();
    $otel = DB::telemetryOtel('dblayer-service');
    $report = DB::slowQueryReport([50, 90, 95, 99], 1.0);
+   $shapes = DB::queryShapeReport([50, 90, 95, 99], 1.0, 20);
    $flushed = DB::flushTelemetry();
 
 Buffers are bounded by default (query and transaction events), and can be
@@ -95,6 +96,30 @@ restores that default.
 Failed-query telemetry defaults to redacted SQL/error payloads while preserving
 statement type, fingerprint, connection, duration, attempts, and exception
 class metadata.
+
+Query Shape Reports
+-------------------
+
+``queryShapeReport()`` groups parameterized statements by connection and stable
+SQL fingerprint. It reports calls, successes/failures, total/mean/min/max
+duration, requested percentiles, and available affected-row totals. Leading
+DBLayer query comments are excluded from the fingerprint.
+
+The method arguments are:
+
+- ``percentiles``: list of numeric values; default ``[50, 90, 95, 99]``.
+- ``minimumMs``: ``null`` for all queries or a millisecond threshold; default
+  ``null``.
+- ``limit``: ``null`` for all shapes or the maximum returned shapes; default
+  ``20``.
+
+Shapes are ordered by total database time so frequently repeated moderate
+queries are visible alongside individually slow queries. Collection remains
+bounded by ``setTelemetryBufferLimits()`` and is active only after
+``enableTelemetry()``.
+
+See ``performance-optimization`` for execution plans and the full measurement
+workflow.
 
 Telemetry Exports
 -----------------

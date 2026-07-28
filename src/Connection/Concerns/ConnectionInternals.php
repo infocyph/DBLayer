@@ -534,6 +534,34 @@ trait ConnectionInternals
     }
 
     /**
+     * Bind values and execute an already-prepared statement.
+     *
+     * @param array<int|string,mixed> $bindings
+     */
+    private function executePreparedStatement(PDOStatement $statement, array $bindings): PDOStatement
+    {
+        $resourceBindings = [];
+
+        foreach ($bindings as $key => $value) {
+            $parameter = is_int($key) ? $key + 1 : $key;
+
+            if (is_resource($value)) {
+                $resourceBindings[] = $value;
+                $resourceIndex = \count($resourceBindings) - 1;
+                $statement->bindParam($parameter, $resourceBindings[$resourceIndex], PDO::PARAM_LOB);
+
+                continue;
+            }
+
+            $statement->bindValue($parameter, $value, $this->getParameterType($value));
+        }
+
+        $statement->execute();
+
+        return $statement;
+    }
+
+    /**
      * Get the query executor for this connection (legacy).
      */
     private function getExecutor(): Executor
@@ -765,6 +793,24 @@ trait ConnectionInternals
         $clean = preg_replace('/[^a-z0-9_.:@\\/-]/i', '_', trim($value));
 
         return is_string($clean) ? $clean : '';
+    }
+
+    /**
+     * Validate policy controls and apply the configured query comment.
+     *
+     * @param array<int|string,mixed> $bindings
+     */
+    private function prepareSqlForExecution(string $sql, array $bindings): string
+    {
+        $securityConfig = $this->config->securityConfig();
+
+        if ($this->securityChecks) {
+            Security::validateQuery($sql, $bindings, $securityConfig);
+        }
+
+        $this->enforceRateLimitIfConfigured($securityConfig);
+
+        return $this->applyQueryComment($sql);
     }
 
     /**
@@ -1124,25 +1170,8 @@ trait ConnectionInternals
             $isWrite,
             $cacheFingerprintSql,
         );
-        $resourceBindings = [];
 
-        foreach ($bindings as $key => $value) {
-            $parameter = is_int($key) ? $key + 1 : $key;
-
-            if (is_resource($value)) {
-                $resourceBindings[] = $value;
-                $resourceIndex = \count($resourceBindings) - 1;
-                $statement->bindParam($parameter, $resourceBindings[$resourceIndex], PDO::PARAM_LOB);
-
-                continue;
-            }
-
-            $statement->bindValue($parameter, $value, $this->getParameterType($value));
-        }
-
-        $statement->execute();
-
-        return $statement;
+        return $this->executePreparedStatement($statement, $bindings);
     }
 
     /**

@@ -19,6 +19,7 @@ final class RepositoryUserDto
 final class RepositoryHydratedDto
 {
     public string $email = '';
+
     public int $id = 0;
 }
 
@@ -194,7 +195,7 @@ it('supports repository pagination and streaming helpers', function (string $dri
     expect($chunkedByIdCount)->toBe(6);
 
     $cursorCount = 0;
-    foreach ($repository->cursor(4) as $row) {
+    foreach ($repository->cursor() as $row) {
         expect($row['tenant_id'] ?? null)->toBe(20);
         $cursorCount++;
     }

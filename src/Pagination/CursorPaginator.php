@@ -33,6 +33,14 @@ final class CursorPaginator extends AbstractPaginator
          * Whether there is a next page.
          */
         private readonly bool $hasMore,
+        /**
+         * Cursor for the previous page (opaque).
+         */
+        private readonly ?string $previousCursor = null,
+        /**
+         * Whether there is a previous page.
+         */
+        private readonly bool $hasPrevious = false,
     ) {
         // Page number is mostly meaningless for cursor-based pagination,
         // but we keep it as 1 for interface compatibility.
@@ -50,6 +58,11 @@ final class CursorPaginator extends AbstractPaginator
         return $this->hasMore;
     }
 
+    public function hasPreviousPage(): bool
+    {
+        return $this->hasPrevious;
+    }
+
     #[\Override]
     public function lastPage(): ?int
     {
@@ -65,15 +78,22 @@ final class CursorPaginator extends AbstractPaginator
         return [
             'cursor' => $this->cursor(),
             'next_cursor' => $this->nextCursor(),
+            'previous_cursor' => $this->previousCursor(),
             'per_page' => $this->perPage(),
             'count' => $this->count(),
             'has_more' => $this->hasMorePages(),
+            'has_previous' => $this->hasPreviousPage(),
         ];
     }
 
     public function nextCursor(): ?string
     {
         return $this->nextCursor;
+    }
+
+    public function previousCursor(): ?string
+    {
+        return $this->previousCursor;
     }
 
     /**

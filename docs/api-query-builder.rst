@@ -16,6 +16,7 @@ Select/Read
 - ``select()``, ``addSelect()``, ``selectRaw()``, ``selectWindow()``
 - ``get()``, ``first()``, ``find()``, ``firstWhere()``, ``exists()``
 - ``value()``, ``pluck()``, ``count()``, ``min()``, ``max()``, ``avg()``, ``sum()``, ``aggregate()``
+- ``explain()``
 
 Filters
 -------
@@ -30,6 +31,7 @@ Join and Set Operations
 -----------------------
 
 - ``join()``, ``leftJoin()``, ``rightJoin()``, ``crossJoin()``, ``joinComplex()``
+- ``joinSub()``, ``leftJoinSub()``, ``rightJoinSub()``
 - ``union()``, ``unionAll()``
 
 CTE
@@ -49,7 +51,12 @@ Pagination/Streaming
 --------------------
 
 - ``paginate()``, ``simplePaginate()``, ``cursorPaginate()``
-- ``chunk()``, ``chunkById()``, ``cursor()``
+- ``chunk()``, ``chunkById()``, ``lazyById()``
+- ``cursor()``, ``stream()``, ``unbufferedStream()``
+
+``cursorPaginate()`` retains existing ordering and appends the supplied unique
+column as its final tie-breaker. Returned ``next_cursor`` and
+``previous_cursor`` tokens are opaque and query-bound.
 
 Other
 -----

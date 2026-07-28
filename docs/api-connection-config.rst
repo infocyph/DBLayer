@@ -5,7 +5,8 @@ Class: ``Infocyph\DBLayer\Connection\ConnectionConfig``
 
 ``ConnectionConfig`` is immutable and normalized. It merges defaults, resolves
 driver aliases, and exposes structured accessors for replica and security
-settings used by ``Connection`` and pool modules.
+settings used by ``Connection`` and pool modules. The selected driver owns its
+defaults and validates its effective settings once during construction.
 
 Factory and Access
 ------------------
@@ -62,3 +63,16 @@ Core
 
 - ``getDriver()``
 - ``getDatabase()``
+
+Driver Settings
+---------------
+
+- MySQL/MariaDB: ``host``, ``port``, credentials, ``charset``, ``collation``,
+  ``unix_socket``, and MySQL TLS keys.
+- PostgreSQL: ``host``, ``port``, credentials, ``charset``, ``schema``, and
+  ``sslmode``.
+- SQLite: ``database`` only; network, credential, charset, schema, and TLS keys
+  are rejected.
+
+Recognized built-in keys that do not belong to the selected driver cause
+``ConnectionException`` instead of being retained as ineffective config.

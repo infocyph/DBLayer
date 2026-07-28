@@ -152,7 +152,7 @@ Use facade capabilities to branch behavior:
 8. Large table backfill job
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use keyset streaming from builder or repository:
+Use bounded keyset batches from builder or repository:
 
 .. code-block:: php
 
@@ -162,6 +162,17 @@ Use keyset streaming from builder or repository:
            // process rows
            return true;
        }, 'id');
+
+For row-by-row handling with the same bounded query lifetime:
+
+.. code-block:: php
+
+   foreach (DB::table('events')->lazyById(1000, 'id', $checkpoint) as $event) {
+       // process and persist $event['id'] as the next restart checkpoint
+   }
+
+Use ``unbufferedStream()`` only when a single occupied connection is acceptable.
+MySQL disables client buffering; PostgreSQL uses server-cursor fetch batches.
 
 Repository-Style App Service Pattern
 ------------------------------------

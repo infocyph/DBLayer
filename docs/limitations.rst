@@ -7,6 +7,9 @@ Scope Boundaries
 - DBLayer is not an ORM. It does not provide Active Record entities, relationship
   graph loading, or model lifecycle abstractions.
 - DBLayer does not include a migration framework yet.
+- DBLayer does not create indexes/partitions or change database statistics and
+  server settings automatically. Apply evidence-backed DDL and maintenance
+  through the application's migration/deployment system.
 
 Connection and Consistency Notes
 --------------------------------

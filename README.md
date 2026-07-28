@@ -24,12 +24,13 @@ A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with 
 - **Profiling** - Performance monitoring
 - **Events** - Lifecycle hooks
 - **Telemetry** - Query + transaction observability export
-- **Pagination** - Length-aware, simple, and cursor pagination
+- **Performance diagnostics** - Native execution plans and query-shape reports
+- **Pagination** - Offset, composite keyset, opaque next/previous cursors, and resumable chunks
 
 ### Performance
 - Reproducible PHPBench scenarios for relative hot-path comparisons
 - Connection pooling for reuse
-- Memory-efficient cursor mode for large datasets
+- Bounded ``lazyById()`` batches and driver-aware unbuffered streaming
 - Bounded query-log, profiler, telemetry, and local rate-limit state for persistent workers
 
 ### Security
@@ -63,6 +64,7 @@ DB::addConnection([
     'username' => 'root',
     'password' => 'secret',
     'charset' => 'utf8mb4',
+    'collation' => 'utf8mb4_unicode_ci',
 ]);
 
 // Read replicas
@@ -78,6 +80,34 @@ DB::addConnection([
     'password' => 'secret',
 ]);
 ```
+
+### Effective Connection Configuration
+
+`ConnectionConfig` normalizes aliases and applies defaults once. Built-in
+driver settings are validated before PDO is opened; a recognized setting used
+with the wrong driver throws instead of being silently ignored.
+
+| Scope | Effective keys |
+| --- | --- |
+| All drivers | `database`, `prefix`, `options`, `timeout`, `persistent`, `write`, `read`, replica selection/timing, statement caching, query comments, `sticky`, and SQL `security` |
+| MySQL/MariaDB | `host`, `port`, `username`, `password`, `charset`, `collation`, `unix_socket`, `ssl_ca`, `ssl_cert`, `ssl_key`, `ssl_verify_server_cert` |
+| PostgreSQL | `host`, `port`, `username`, `password`, `charset`, `schema`, `sslmode` |
+| SQLite | `database`; network, credential, schema, charset, collation, and TLS settings are rejected |
+
+MySQL TLS files are translated to `Pdo\Mysql::ATTR_SSL_*` constructor
+attributes. `collation` is applied with the connection initialization command.
+MySQL does not accept PostgreSQL's `sslmode`; use the MySQL TLS keys above and
+set `security.require_tls=true` when encryption is mandatory.
+
+PostgreSQL `charset`, `schema`, `timeout`, and `sslmode` are written into the
+libpq DSN as `client_encoding`, startup `search_path`, `connect_timeout`, and
+`sslmode`. Supported SSL modes are `disable`, `allow`, `prefer`, `require`,
+`verify-ca`, and `verify-full`.
+
+`timeout` maps to the native connection-time mechanism: PDO timeout attributes
+for MySQL/SQLite and `connect_timeout` for PostgreSQL. PDO and native-client
+versions may still impose driver-specific timeout and persistent-connection
+semantics.
 
 ### Query Controls
 
@@ -110,6 +140,7 @@ DB::rollBack();
 
 $snapshot = DB::telemetry();      // read buffer
 $exported = DB::flushTelemetry(); // read + clear
+$shapes = DB::queryShapeReport(); // grouped by parameterized SQL fingerprint
 ```
 
 ### Query Builder

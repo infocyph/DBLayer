@@ -34,9 +34,9 @@ Connection Methods
 Raw SQL Methods
 ---------------
 
-- ``select()``, ``selectOne()``, ``selectResultSets()``, ``scalar()``
+- ``select()``, ``selectOne()``, ``selectResultSets()``, ``scalar()``, ``explain()``
 - ``insert()``, ``update()``, ``delete()``, ``statement()``, ``unprepared()``, ``batch()``
-- ``stream()``, ``yieldRows()``
+- ``stream()``, ``unbufferedStream()``, ``yieldRows()``
 
 Builder and Repository
 ----------------------
@@ -65,7 +65,7 @@ Observability and Utility
 - ``enableLogger()``, ``disableLogger()``, ``logger()``, ``setPsrLogger()``
 - ``enableProfiler()``, ``disableProfiler()``, ``profiler()``
 - ``enableTelemetry()``, ``disableTelemetry()``, ``telemetry()``, ``telemetryOtel()``
-- ``flushTelemetry()``, ``flushTelemetryOtel()``, ``slowQueryReport()``
+- ``flushTelemetry()``, ``flushTelemetryOtel()``, ``slowQueryReport()``, ``queryShapeReport()``
 - ``setMaxQueryLogEntries()``, ``setProfilerMaxProfiles()``, ``setTelemetryBufferLimits()``
 - ``listen()``, ``whenQueryingForLongerThan()``
 - ``stats()``, ``health()``, ``capabilities()``, ``supportsReturning()``, ``supportsJson()``, ``supportsWindowFunctions()``

@@ -10,6 +10,7 @@ use Infocyph\CacheLayer\Cache\Cache;
 use Infocyph\CacheLayer\Cache\CacheInterface;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Connection\ConnectionSecurityConfigValidator;
 use Infocyph\DBLayer\Connection\Pool;
 use Infocyph\DBLayer\Connection\PoolManager;
 use Infocyph\DBLayer\Driver\Support\Capabilities;
@@ -476,6 +477,29 @@ class DB
     }
 
     /**
+     * Inspect the database-native execution plan for a raw SELECT statement.
+     *
+     * @param array<int|string,mixed> $bindings
+     * @return list<array<string,mixed>>
+     */
+    public static function explain(
+        string $query,
+        array $bindings = [],
+        bool $analyze = false,
+        bool $buffers = false,
+        bool $verbose = false,
+        ?string $connection = null,
+    ): array {
+        return static::connection($connection)->explain(
+            $query,
+            $bindings,
+            $analyze,
+            $buffers,
+            $verbose,
+        );
+    }
+
+    /**
      * Flush the query log.
      */
     public static function flushQueryLog(): void
@@ -774,6 +798,20 @@ class DB
     }
 
     /**
+     * Aggregate buffered telemetry by normalized, parameterized query shape.
+     *
+     * @param list<int|float> $percentiles
+     * @return array<string,mixed>
+     */
+    public static function queryShapeReport(
+        array $percentiles = [50, 90, 95, 99],
+        ?float $minimumMs = null,
+        ?int $limit = 20,
+    ): array {
+        return Telemetry::queryShapeReport($percentiles, $minimumMs, $limit);
+    }
+
+    /**
      * Quote a value for use in a query.
      *
      * @throws ConnectionException
@@ -1033,12 +1071,7 @@ class DB
      */
     public static function setSecurityDefaults(array $security, bool $refreshExisting = true): void
     {
-        // Validate shape/types against ConnectionConfig security rules.
-        ConnectionConfig::fromArray([
-            'driver' => 'sqlite',
-            'database' => ':memory:',
-            'security' => $security,
-        ]);
+        ConnectionSecurityConfigValidator::validate($security);
 
         static::$securityDefaults = $security;
         self::applySecurityDefaultsToRegisteredConnections($refreshExisting);
@@ -1226,6 +1259,29 @@ class DB
     }
 
     /**
+     * Stream rows using the driver's explicit bounded-memory strategy.
+     *
+     * @param array<int|string,mixed> $bindings
+     * @return Generator<mixed>
+     *
+     * @throws ConnectionException
+     */
+    public static function unbufferedStream(
+        string $query,
+        array $bindings = [],
+        ?string $connection = null,
+        ?int $fetchMode = null,
+        int $fetchSize = 1000,
+    ): Generator {
+        yield from static::connection($connection)->unbufferedStream(
+            $query,
+            $bindings,
+            $fetchMode,
+            $fetchSize,
+        );
+    }
+
+    /**
      * Execute an unprepared statement.
      *
      * This is an alias for execute() without bindings, kept for convenience.
@@ -1400,13 +1456,14 @@ class DB
 
             return $config->with(
                 'security',
-                self::mergeSecurityDefaults($config->securityConfig()),
+                self::mergeSecurityDefaults($config->securityConfig(), $config->getDriver()),
             );
         }
 
         if (static::$securityDefaults !== null) {
             $security = self::normalizeStringKeyArray($config['security'] ?? []);
-            $config['security'] = self::mergeSecurityDefaults($security);
+            $driver = is_string($config['driver'] ?? null) ? $config['driver'] : null;
+            $config['security'] = self::mergeSecurityDefaults($security, $driver);
         }
 
         return ConnectionConfig::fromArray($config);
@@ -1441,7 +1498,7 @@ class DB
         foreach (static::$connectionConfigs as $name => $config) {
             $normalized = $config->with(
                 'security',
-                self::mergeSecurityDefaults($config->securityConfig()),
+                self::mergeSecurityDefaults($config->securityConfig(), $config->getDriver()),
             );
 
             static::$connectionConfigs[$name] = $normalized;
@@ -1618,13 +1675,18 @@ class DB
      * @param array<string,mixed> $security
      * @return array<string,mixed>
      */
-    private static function mergeSecurityDefaults(array $security): array
+    private static function mergeSecurityDefaults(array $security, ?string $driver = null): array
     {
         if (static::$securityDefaults === null) {
             return $security;
         }
 
-        return array_replace($security, static::$securityDefaults);
+        $defaults = static::$securityDefaults;
+        if ($driver !== null && in_array(strtolower($driver), ['sqlite', 'sqlite3'], true)) {
+            unset($defaults['require_tls']);
+        }
+
+        return array_replace($security, $defaults);
     }
 
     /**

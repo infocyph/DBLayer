@@ -78,19 +78,48 @@ Per-Connection Security Config
        'allow_insecure' => false,
        'raw_sql_policy' => 'allow',
        'raw_sql_allowlist' => [],
+       'cursor_signing_key' => null,
    ]
+
+Cursor Integrity
+----------------
+
+``cursorPaginate()`` always returns an opaque, versioned token bound to the
+query filters and exact ordering. Set ``security.cursor_signing_key`` to add an
+HMAC-SHA256 signature when cursors cross a trust boundary, such as a public
+HTTP API.
+
+The value is either ``null`` (unsigned) or a secret string of at least 32 bytes.
+It must be identical across application nodes. Rotating it immediately
+invalidates cursors issued with the previous key, so coordinate rotation with
+clients when uninterrupted navigation is required.
+
+.. code-block:: php
+
+   'security' => [
+       // Example only: load a random 32+ byte value from secret storage.
+       'cursor_signing_key' => $_ENV['DB_CURSOR_SIGNING_KEY'],
+   ]
+
+Cursor positions reject null and non-scalar ordered values. Safe configuration
+exports redact the signing key.
 
 Transport / TLS Policy
 ----------------------
 
 - ``security.require_tls = true`` enforces TLS for MySQL/PostgreSQL.
 - ``security.require_tls = false`` requires ``security.allow_insecure = true``.
-- ``DB::hardenProduction()`` sets ``require_tls = true`` for hardened defaults.
+- ``DB::hardenProduction()`` sets ``require_tls = true`` for MySQL/PostgreSQL
+  connections. SQLite receives the remaining hardening defaults without a TLS
+  setting.
 
 Driver requirements:
 
-- MySQL: provide secure transport via ``ssl_ca`` / ``ssl_cert`` / ``ssl_key`` or a secure ``sslmode``.
+- MySQL: provide secure transport via ``ssl_ca`` / ``ssl_cert`` / ``ssl_key``
+  or the matching numeric ``Pdo\Mysql::ATTR_SSL_*`` entries in ``options``.
 - PostgreSQL: set ``sslmode`` to ``require``, ``verify-ca``, or ``verify-full``.
+- SQLite: ``security.require_tls`` is rejected because SQLite has no network
+  transport.
 
 Raw SQL Fragment Policy
 -----------------------

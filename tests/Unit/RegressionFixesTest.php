@@ -195,8 +195,10 @@ it('keeps statement cache disabled by default with conservative size', function 
 
 it('recursively redacts sensitive values in safe config export', function (): void {
     $config = ConnectionConfig::fromArray([
-        'driver' => 'sqlite',
-        'database' => ':memory:',
+        'driver' => 'mysql',
+        'host' => '127.0.0.1',
+        'database' => 'app',
+        'username' => 'app',
         'password' => 'root-secret',
         'PASSWORD' => 'root-secret-uppercased',
         'token' => 'root-token',
@@ -227,6 +229,7 @@ it('recursively redacts sensitive values in safe config export', function (): vo
         ],
         'security' => [
             'rate_limit_key' => 'safe-visible',
+            'cursor_signing_key' => str_repeat('cursor-secret-', 3),
         ],
     ]);
 
@@ -245,6 +248,7 @@ it('recursively redacts sensitive values in safe config export', function (): vo
     expect(data_get($safe, 'options.nested.passphrase'))->toBe('[redacted]');
     expect(data_get($safe, 'options.nested.TOKEN'))->toBe('[redacted]');
     expect(data_get($safe, 'security.rate_limit_key'))->toBe('safe-visible');
+    expect(data_get($safe, 'security.cursor_signing_key'))->toBe('[redacted]');
 });
 
 it('preserves null values for ArrayAccess lookups in data_get', function (): void {
@@ -1181,7 +1185,7 @@ it('logs query failures with sanitized context and without raw binding leakage',
     ], 'regression_failure_logging_sanitized');
 
     $records = new \ArrayObject();
-    $psrLogger = new class($records) extends AbstractLogger {
+    $psrLogger = new class ($records) extends AbstractLogger {
         public function __construct(private \ArrayObject $records) {}
 
         public function log($level, \Stringable|string $message, array $context = []): void
@@ -1258,7 +1262,7 @@ it('forwards logger entries to configured PSR-3 backend', function (string $driv
     DB::table($table, $connectionName)->insert(['name' => 'seed']);
 
     $records = new \ArrayObject();
-    $psrLogger = new class($records) extends AbstractLogger {
+    $psrLogger = new class ($records) extends AbstractLogger {
         public function __construct(private \ArrayObject $records) {}
 
         public function log($level, \Stringable|string $message, array $context = []): void
@@ -1304,7 +1308,7 @@ it('supports configuring psr logger backend via facade helper', function (string
     DB::table($table, $connectionName)->insert(['name' => 'seed']);
 
     $records = new \ArrayObject();
-    $psrLogger = new class($records) extends AbstractLogger {
+    $psrLogger = new class ($records) extends AbstractLogger {
         public function __construct(private \ArrayObject $records) {}
 
         public function log($level, \Stringable|string $message, array $context = []): void
@@ -1357,7 +1361,7 @@ it('does not write when logger target is a symlink', function (string $driver): 
     $realLog = $baseDir . DIRECTORY_SEPARATOR . 'real.log';
     $linkLog = $baseDir . DIRECTORY_SEPARATOR . 'link.log';
 
-    if ((! is_dir($baseDir)) && (! mkdir($baseDir, 0o700, true))) {
+    if ((!is_dir($baseDir)) && (!mkdir($baseDir, 0o700, true))) {
         test()->markTestSkipped('Unable to create temporary directory for symlink logger test.');
 
         return;
@@ -1377,7 +1381,7 @@ it('does not write when logger target is a symlink', function (string $driver): 
         }
     }
 
-    if (! $linked) {
+    if (!$linked) {
         if (is_file($realLog)) {
             unlink($realLog);
         }
@@ -1523,7 +1527,7 @@ it('does not duplicate facade query tracking when lifecycle events are enabled',
     ], 'regression_no_duplicate_facade_tracking');
 
     $records = new \ArrayObject();
-    $psrLogger = new class($records) extends AbstractLogger {
+    $psrLogger = new class ($records) extends AbstractLogger {
         public function __construct(private \ArrayObject $records) {}
 
         public function log($level, \Stringable|string $message, array $context = []): void
@@ -1978,5 +1982,15 @@ it('enables hardened defaults through facade helper', function (): void {
 
     expect($security['enabled'] ?? null)->toBeTrue();
     expect($security['strict_identifiers'] ?? null)->toBeTrue();
-    expect($security['require_tls'] ?? null)->toBeTrue();
+    expect($security['require_tls'] ?? null)->toBeNull();
+
+    DB::addConnection([
+        'driver' => 'mysql',
+        'database' => 'app',
+        'username' => 'app',
+        'ssl_ca' => '/run/secrets/mysql-ca.pem',
+    ], 'hardened_mysql');
+
+    expect(DB::connection('hardened_mysql')->getConfig()->securityConfig()['require_tls'] ?? null)
+        ->toBeTrue();
 });

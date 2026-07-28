@@ -6,6 +6,7 @@ namespace Infocyph\DBLayer\Connection;
 
 use Generator;
 use Infocyph\DBLayer\Connection\Concerns\ConnectionInternals;
+use Infocyph\DBLayer\Connection\Concerns\ConnectionStreaming;
 use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
 use Infocyph\DBLayer\Driver\Support\Capabilities;
@@ -15,6 +16,7 @@ use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuting;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
+use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Exceptions\SecurityException;
 use Infocyph\DBLayer\Grammar\Grammar;
 use Infocyph\DBLayer\Query\Core\CompiledQuery;
@@ -46,6 +48,7 @@ use Throwable;
 final class Connection
 {
     use ConnectionInternals;
+    use ConnectionStreaming;
 
     /**
      * Hard upper bound for retry-policy guided query retries.
@@ -459,6 +462,55 @@ final class Connection
         $isWrite = $this->isWriteQuery($sql);
 
         return $this->executeTypedStatement($sql, $bindings, $isWrite);
+    }
+
+    /**
+     * Inspect the execution plan for a SELECT statement.
+     *
+     * The returned rows retain the database-native plan representation.
+     * PostgreSQL/MySQL return JSON plans by default; SQLite returns
+     * EXPLAIN QUERY PLAN rows.
+     *
+     * @param array<int|string,mixed> $bindings
+     * @return list<array<string,mixed>>
+     */
+    public function explain(
+        string $sql,
+        array $bindings = [],
+        bool $analyze = false,
+        bool $buffers = false,
+        bool $verbose = false,
+    ): array {
+        if (SqlStatementInspector::leadingStatementKeyword($sql) !== 'SELECT') {
+            throw QueryException::invalidParameter(
+                'sql',
+                'Execution plans accept SELECT statements only.',
+            );
+        }
+
+        $serverVersion = null;
+
+        if ($analyze && $this->driver->getName() === 'mysql' && !$this->pretending) {
+            $resolvedVersion = $this->getPdo()->getAttribute(PDO::ATTR_SERVER_VERSION);
+
+            if (is_string($resolvedVersion) || is_int($resolvedVersion) || is_float($resolvedVersion)) {
+                $serverVersion = (string) $resolvedVersion;
+            }
+        }
+
+        $explainSql = $this->driver->compileExplain(
+            $sql,
+            $analyze,
+            $buffers,
+            $verbose,
+            $serverVersion,
+        );
+
+        return array_values($this->fetchAllFromKnownTypeStatement(
+            $explainSql,
+            $bindings,
+            QueryType::SELECT,
+        ));
     }
 
     /**
@@ -1390,15 +1442,7 @@ final class Connection
      */
     private function executeTypedStatement(string $sql, array $bindings, bool $isWrite): PDOStatement
     {
-        $securityConfig = $this->config->securityConfig();
-
-        if ($this->securityChecks) {
-            // Will be a no-op when SecurityMode::OFF is set globally.
-            Security::validateQuery($sql, $bindings, $securityConfig);
-        }
-
-        $this->enforceRateLimitIfConfigured($securityConfig);
-        $finalSql = $this->applyQueryComment($sql);
+        $finalSql = $this->prepareSqlForExecution($sql, $bindings);
 
         return $this->executeWithRetry(
             $finalSql,

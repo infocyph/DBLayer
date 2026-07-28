@@ -71,6 +71,10 @@ trait ExecutorInternals
             if ($join instanceof JoinClause) {
                 return false;
             }
+
+            if (($join['subquery'] ?? false) === true) {
+                return false;
+            }
         }
 
         foreach ($components['wheres'] as $where) {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Support;
 
+use Closure;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionBeginning;
@@ -13,6 +14,22 @@ use Infocyph\DBLayer\Events\Events;
 
 /**
  * Lightweight telemetry collector/exporter for DB query + transaction events.
+ *
+ * @phpstan-type QueryShapeGroup array{
+ *   fingerprint:string,
+ *   statement:string,
+ *   connection:string,
+ *   sql:string,
+ *   calls:int,
+ *   success_count:int,
+ *   failure_count:int,
+ *   total_time_ms:float,
+ *   min_time_ms:float,
+ *   max_time_ms:float,
+ *   rows_affected_total:int,
+ *   rows_affected_samples:int,
+ *   _durations:list<float>
+ * }
  */
 final class Telemetry
 {
@@ -35,9 +52,11 @@ final class Telemetry
     private static $exporter;
 
     /**
-     * Whether event listeners are already registered.
+     * Stable listener identities used for idempotent re-registration.
+     *
+     * @var array<string,Closure>
      */
-    private static bool $hooked = false;
+    private static array $listeners = [];
 
     /**
      * Maximum retained query events in memory.
@@ -141,6 +160,93 @@ final class Telemetry
     public static function isEnabled(): bool
     {
         return self::$enabled;
+    }
+
+    /**
+     * Aggregate buffered telemetry by normalized SQL fingerprint.
+     *
+     * Parameterized statements with the same SQL shape are grouped together.
+     * Inline literal values remain part of the fingerprint by design.
+     *
+     * @param list<int|float> $percentiles
+     * @return array{
+     *   shape_count:int,
+     *   query_count:int,
+     *   threshold_ms:float|null,
+     *   shapes:list<array<string,mixed>>
+     * }
+     */
+    public static function queryShapeReport(
+        array $percentiles = [50, 90, 95, 99],
+        ?float $minimumMs = null,
+        ?int $limit = 20,
+    ): array {
+        $groups = [];
+        $queryCount = 0;
+
+        foreach (self::$queries as $query) {
+            $duration = Numeric::arrayFloat($query, 'duration_ms');
+
+            if ($minimumMs !== null && $duration < $minimumMs) {
+                continue;
+            }
+
+            [$fingerprint, $connection, $sql] = self::resolveShapeIdentity($query);
+            $key = $connection . "\0" . $fingerprint;
+            $success = ($query['success'] ?? false) === true;
+            $rowsAffected = $query['rows_affected'] ?? null;
+
+            if (!isset($groups[$key])) {
+                $groups[$key] = [
+                    'fingerprint' => $fingerprint,
+                    'statement' => self::queryString($query, 'statement', self::statementFromSql($sql)),
+                    'connection' => $connection,
+                    'sql' => $sql,
+                    'calls' => 0,
+                    'success_count' => 0,
+                    'failure_count' => 0,
+                    'total_time_ms' => 0.0,
+                    'min_time_ms' => $duration,
+                    'max_time_ms' => $duration,
+                    'rows_affected_total' => 0,
+                    'rows_affected_samples' => 0,
+                    '_durations' => [],
+                ];
+            } elseif (
+                $groups[$key]['sql'] === self::REDACTED_VALUE
+                && $sql !== self::REDACTED_VALUE
+            ) {
+                $groups[$key]['sql'] = $sql;
+            }
+
+            $groups[$key]['calls']++;
+            $groups[$key][$success ? 'success_count' : 'failure_count']++;
+            $groups[$key]['total_time_ms'] += $duration;
+            $groups[$key]['min_time_ms'] = min($groups[$key]['min_time_ms'], $duration);
+            $groups[$key]['max_time_ms'] = max($groups[$key]['max_time_ms'], $duration);
+            $groups[$key]['_durations'][] = $duration;
+
+            if (is_int($rowsAffected)) {
+                $groups[$key]['rows_affected_total'] += max(0, $rowsAffected);
+                $groups[$key]['rows_affected_samples']++;
+            }
+
+            $queryCount++;
+        }
+
+        $shapes = self::finalizeShapeGroups($groups, $percentiles);
+        $shapeCount = count($shapes);
+
+        if ($limit !== null) {
+            $shapes = array_slice($shapes, 0, max(1, $limit));
+        }
+
+        return [
+            'shape_count' => $shapeCount,
+            'query_count' => $queryCount,
+            'threshold_ms' => $minimumMs,
+            'shapes' => $shapes,
+        ];
     }
 
     /**
@@ -313,13 +419,7 @@ final class Telemetry
      */
     private static function ensureHooked(): void
     {
-        if (self::$hooked) {
-            return;
-        }
-
-        self::$hooked = true;
-
-        Events::listen('db.query.executed', static function (QueryExecuted $event): void {
+        self::$listeners['db.query.executed'] ??= static function (QueryExecuted $event): void {
             if (!self::$enabled) {
                 return;
             }
@@ -328,6 +428,8 @@ final class Telemetry
             self::$queries[] = [
                 'span_id' => 'q-' . self::$sequence,
                 'sql' => $event->sql,
+                'statement' => self::statementFromSql($event->sql),
+                'fingerprint' => self::queryFingerprint($event->sql),
                 'bindings_count' => \count($event->bindings),
                 'duration_ms' => $event->time,
                 'success' => true,
@@ -336,9 +438,9 @@ final class Telemetry
                 'timestamp' => microtime(true),
             ];
             self::trimQueryBuffer();
-        });
+        };
 
-        Events::listen('db.query.failed', static function (QueryFailed $event): void {
+        self::$listeners['db.query.failed'] ??= static function (QueryFailed $event): void {
             if (!self::$enabled) {
                 return;
             }
@@ -355,15 +457,15 @@ final class Telemetry
                 'connection' => $event->connection->getDriverName(),
                 'timestamp' => microtime(true),
                 'error' => self::REDACTED_VALUE,
-                'statement' => $event->statement,
-                'fingerprint' => $event->fingerprint,
+                'statement' => self::statementFromSql($event->sql),
+                'fingerprint' => self::queryFingerprint($event->sql),
                 'attempts' => $event->attempts,
                 'exception' => $event->exceptionClass,
             ];
             self::trimQueryBuffer();
-        });
+        };
 
-        Events::listen('db.transaction.beginning', static function (TransactionBeginning $event): void {
+        self::$listeners['db.transaction.beginning'] ??= static function (TransactionBeginning $event): void {
             if (!self::$enabled) {
                 return;
             }
@@ -375,9 +477,9 @@ final class Telemetry
                 'timestamp' => $event->time,
             ];
             self::trimTransactionBuffer();
-        });
+        };
 
-        Events::listen('db.transaction.committed', static function (TransactionCommitted $event): void {
+        self::$listeners['db.transaction.committed'] ??= static function (TransactionCommitted $event): void {
             if (!self::$enabled) {
                 return;
             }
@@ -389,9 +491,9 @@ final class Telemetry
                 'timestamp' => microtime(true),
             ];
             self::trimTransactionBuffer();
-        });
+        };
 
-        Events::listen('db.transaction.rolled_back', static function (TransactionRolledBack $event): void {
+        self::$listeners['db.transaction.rolled_back'] ??= static function (TransactionRolledBack $event): void {
             if (!self::$enabled) {
                 return;
             }
@@ -403,7 +505,56 @@ final class Telemetry
                 'timestamp' => microtime(true),
             ];
             self::trimTransactionBuffer();
-        });
+        };
+
+        foreach (self::$listeners as $event => $listener) {
+            if (!in_array($listener, Events::getListeners($event), true)) {
+                Events::listen($event, $listener);
+            }
+        }
+    }
+
+    /**
+     * Convert working query-shape groups into sorted public report rows.
+     *
+     * @param array<string,QueryShapeGroup> $groups
+     * @param list<int|float> $percentiles
+     * @return list<array<string,mixed>>
+     */
+    private static function finalizeShapeGroups(array $groups, array $percentiles): array
+    {
+        $shapes = [];
+
+        foreach ($groups as $group) {
+            $durations = $group['_durations'];
+            sort($durations);
+            $shapePercentiles = [];
+
+            foreach ($percentiles as $percentile) {
+                $value = max(0.0, min(100.0, (float) $percentile));
+                $shapePercentiles[(string) $value] = round(
+                    Numeric::percentile($durations, $value),
+                    4,
+                );
+            }
+
+            $group['total_time_ms'] = round($group['total_time_ms'], 4);
+            $group['mean_time_ms'] = round($group['total_time_ms'] / $group['calls'], 4);
+            $group['min_time_ms'] = round($group['min_time_ms'], 4);
+            $group['max_time_ms'] = round($group['max_time_ms'], 4);
+            $group['percentiles'] = $shapePercentiles;
+            unset($group['_durations']);
+            $shapes[] = $group;
+        }
+
+        usort(
+            $shapes,
+            static fn(array $left, array $right): int => ($right['total_time_ms'] <=> $left['total_time_ms'])
+                ?: ($right['max_time_ms'] <=> $left['max_time_ms'])
+                ?: ($left['fingerprint'] <=> $right['fingerprint']),
+        );
+
+        return $shapes;
     }
 
     /**
@@ -412,6 +563,27 @@ final class Telemetry
     private static function hexHash(string $input, int $length): string
     {
         return substr(hash('sha256', $input), 0, $length);
+    }
+
+    /**
+     * Normalize whitespace and remove DBLayer's optional leading SQL comment.
+     */
+    private static function normalizeSqlShape(string $sql): string
+    {
+        $withoutComment = preg_replace('/\A\s*\/\*.*?\*\/\s*/s', '', $sql) ?? $sql;
+        $normalized = preg_replace('/\s+/', ' ', trim($withoutComment)) ?? $withoutComment;
+
+        return strtolower($normalized);
+    }
+
+    /**
+     * Build a stable statement fingerprint without query-comment context.
+     */
+    private static function queryFingerprint(string $sql): string
+    {
+        $normalized = self::normalizeSqlShape($sql);
+
+        return self::hexHash($normalized, 16);
     }
 
     /**
@@ -430,6 +602,38 @@ final class Telemetry
         }
 
         return $default;
+    }
+
+    /**
+     * Resolve stable grouping fields for one telemetry query event.
+     *
+     * @param array<string,mixed> $query
+     * @return array{0:string,1:string,2:string}
+     */
+    private static function resolveShapeIdentity(array $query): array
+    {
+        $sql = self::queryString($query, 'sql', self::REDACTED_VALUE);
+        $fingerprint = self::queryString($query, 'fingerprint');
+
+        if ($fingerprint === '') {
+            $fingerprint = self::queryFingerprint($sql);
+        }
+
+        return [
+            $fingerprint,
+            self::queryString($query, 'connection', 'unknown'),
+            $sql,
+        ];
+    }
+
+    /**
+     * Resolve the first statement keyword after optional query comments.
+     */
+    private static function statementFromSql(string $sql): string
+    {
+        $normalized = self::normalizeSqlShape($sql);
+
+        return strtoupper(substr($normalized, 0, strcspn($normalized, " \t\n\r")));
     }
 
     /**

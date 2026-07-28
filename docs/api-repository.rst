@@ -19,7 +19,8 @@ Pagination/Streaming
 --------------------
 
 - ``paginate()``, ``simplePaginate()``, ``cursorPaginate()``
-- ``chunk()``, ``chunkById()``, ``cursor()``, ``lazy()``
+- ``chunk()``, ``chunkById()``, ``lazy()``, ``lazyById()``
+- ``cursor()``, ``stream()``, ``unbufferedStream()``
 
 Write APIs
 ----------

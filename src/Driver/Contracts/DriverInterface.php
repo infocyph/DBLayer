@@ -16,6 +16,17 @@ use PDO;
 interface DriverInterface
 {
     /**
+     * Compile a read-only SELECT execution-plan statement.
+     */
+    public function compileExplain(
+        string $sql,
+        bool $analyze = false,
+        bool $buffers = false,
+        bool $verbose = false,
+        ?string $serverVersion = null,
+    ): string;
+
+    /**
      * Create a new query compiler instance for this driver.
      */
     public function createCompiler(): QueryCompilerInterface;

@@ -6,6 +6,7 @@ namespace Infocyph\DBLayer\Driver\SQLite;
 
 use Infocyph\DBLayer\Driver\AbstractPdoDriver;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
+use Infocyph\DBLayer\Exceptions\QueryException;
 
 /**
  * SQLite driver.
@@ -24,6 +25,26 @@ final class SQLiteDriver extends AbstractPdoDriver
 
     protected const string DRIVER_NAME = 'sqlite';
 
+    #[\Override]
+    public function compileExplain(
+        string $sql,
+        bool $analyze = false,
+        bool $buffers = false,
+        bool $verbose = false,
+        ?string $serverVersion = null,
+    ): string {
+        unset($serverVersion);
+
+        if ($analyze || $buffers || $verbose) {
+            throw QueryException::invalidParameter(
+                'explain',
+                'SQLite supports query-plan inspection only; analyze, buffers, and verbose must be false.',
+            );
+        }
+
+        return 'EXPLAIN QUERY PLAN ' . $sql;
+    }
+
     /**
      * @param array<string,mixed> $config
      */
@@ -36,6 +57,34 @@ final class SQLiteDriver extends AbstractPdoDriver
         if (!is_string($database) || $database === '') {
             throw ConnectionException::invalidConfiguration(
                 $driver,
+            );
+        }
+
+        $this->rejectUnsupportedSettings(
+            $config,
+            $driver,
+            [
+                'host',
+                'port',
+                'username',
+                'password',
+                'charset',
+                'collation',
+                'schema',
+                'unix_socket',
+                'sslmode',
+                'ssl_ca',
+                'ssl_cert',
+                'ssl_key',
+                'ssl_verify_server_cert',
+                'read_session_read_only',
+            ],
+        );
+
+        $security = $config['security'] ?? [];
+        if (is_array($security) && ($security['require_tls'] ?? null) !== null) {
+            throw ConnectionException::invalidConfiguration(
+                "Security config key 'require_tls' is not supported by driver 'sqlite'.",
             );
         }
 

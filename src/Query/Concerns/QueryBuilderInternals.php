@@ -222,6 +222,7 @@ trait QueryBuilderInternals
     private function runAggregate(string $function, string $column = '*', bool $ignoreLimitOffset = false): mixed
     {
         $clone = clone $this;
+        unset($clone->bindingBuckets['select']);
 
         if ($ignoreLimitOffset) {
             $this->resetAggregateWindow($clone);
