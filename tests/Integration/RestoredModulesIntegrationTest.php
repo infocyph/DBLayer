@@ -63,6 +63,24 @@ it('uses cachelayer file adapter through DB facade', function (string $driver): 
     expect($cache->exportMetrics())->toBeArray();
     expect(is_dir($cacheDir))->toBeTrue();
 
+    $resolverCalls = 0;
+    $first = $cache->remember('db-query-result', static function () use (&$resolverCalls): array {
+        $resolverCalls++;
+
+        return ['id' => 1, 'name' => 'cached'];
+    }, 30, ['queries']);
+    $second = $cache->remember('db-query-result', static function () use (&$resolverCalls): array {
+        $resolverCalls++;
+
+        return ['id' => 2, 'name' => 'unexpected'];
+    }, 30, ['queries']);
+
+    expect($first)->toBe(['id' => 1, 'name' => 'cached']);
+    expect($second)->toBe($first);
+    expect($resolverCalls)->toBe(1);
+    expect($cache->invalidateTag('queries'))->toBeTrue();
+    expect($cache->get('db-query-result'))->toBeNull();
+
     $cache->clear();
     $removeDirectory($cacheDir);
 })->with('dblayer_drivers');

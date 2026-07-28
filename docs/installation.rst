@@ -6,6 +6,7 @@ Requirements
 
 - PHP ``^8.4``
 - ``ext-pdo``
+- ``infocyph/cachelayer`` ``^2.0``
 - Optional per driver:
   - ``ext-pdo_mysql``
   - ``ext-pdo_pgsql``
