@@ -13,4 +13,9 @@ use Infocyph\DBLayer\Query\Core\QueryPayload;
 interface QueryCompilerInterface
 {
     public function compile(QueryPayload $payload): CompiledQuery;
+
+    /**
+     * Set the connection table prefix once, outside query compilation.
+     */
+    public function setTablePrefix(string $prefix): void;
 }

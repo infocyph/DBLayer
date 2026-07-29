@@ -118,4 +118,6 @@ Non-ORM Scope
 -------------
 
 ``TableRepository`` is intentionally not an ORM implementation. It does not
-provide relationship mapping, unit-of-work, or dirty-state tracking.
+provide relationship properties, implicit relation loading, unit-of-work, or
+dirty-state tracking. Explicit array relation projection is available
+separately through ``DB::relations()``.

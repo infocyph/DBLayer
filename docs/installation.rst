@@ -6,11 +6,15 @@ Requirements
 
 - PHP ``^8.4``
 - ``ext-pdo``
+- ``infocyph/arraykit`` ``^4.6``
 - ``infocyph/cachelayer`` ``^2.0``
+- ``psr/log`` ``^3.0.2``
 - Optional per driver:
   - ``ext-pdo_mysql``
   - ``ext-pdo_pgsql``
   - ``ext-pdo_sqlite``
+- Optional identifier generation: ``infocyph/uid``. DBLayer's ``uuid`` and
+  ``ulid`` schema helpers declare storage and do not require a generator.
 
 Driver Notes
 ------------

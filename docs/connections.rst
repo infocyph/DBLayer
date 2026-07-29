@@ -124,6 +124,22 @@ Use named connections for operational separation:
    $users = DB::table('users', 'primary')->get();
    $events = DB::table('user_events', 'reporting')->get();
 
+Connection selection also applies to the opt-in modules:
+
+.. code-block:: php
+
+   $schema = DB::schema('primary');
+   $relations = DB::relations('reporting', batchSize: 500);
+
+   $runner = new MigrationRunner(
+       connection: DB::connection('primary'),
+       migrations: $compiledMigrations,
+   );
+
+Each module retains only the resolved connection it receives. Schema changes,
+migration ledgers, relation queries, and table prefixes therefore remain
+isolated by named connection.
+
 Pooling
 -------
 

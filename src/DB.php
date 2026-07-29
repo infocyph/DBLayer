@@ -791,6 +791,10 @@ class DB
     {
         static::$pool?->closeAll();
 
+        foreach (static::$connections as $connection) {
+            $connection->disconnect();
+        }
+
         static::$connections = static::$connectionConfigs = [];
         static::$defaultConnection = static::$cache = static::$pool = static::$poolManager = null;
         static::$resultProcessor = static::$securityDefaults = null;
@@ -869,6 +873,19 @@ class DB
         static::$connections[$name] = new Connection($config);
 
         return static::$connections[$name];
+    }
+
+    /**
+     * Create an explicit, bounded relation loader for the selected connection.
+     */
+    public static function relations(
+        ?string $connection = null,
+        int $batchSize = 500,
+    ): \Infocyph\DBLayer\Repository\RelationLoader {
+        return new \Infocyph\DBLayer\Repository\RelationLoader(
+            static::connection($connection),
+            $batchSize,
+        );
     }
 
     /**
@@ -960,6 +977,14 @@ class DB
             $connection,
             static fn(Connection $conn): mixed => $conn->scalar($query, $bindings),
         );
+    }
+
+    /**
+     * Create an opt-in schema manager for the selected connection.
+     */
+    public static function schema(?string $connection = null): \Infocyph\DBLayer\Schema\SchemaManager
+    {
+        return new \Infocyph\DBLayer\Schema\SchemaManager(static::connection($connection));
     }
 
     /**

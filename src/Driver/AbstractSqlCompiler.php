@@ -6,6 +6,7 @@ namespace Infocyph\DBLayer\Driver;
 
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
 use Infocyph\DBLayer\Driver\Support\MutationCompiler;
+use Infocyph\DBLayer\Driver\Support\TablePrefixMapper;
 use Infocyph\DBLayer\Query\Core\CompiledQuery;
 use Infocyph\DBLayer\Query\Core\QueryPayload;
 use Infocyph\DBLayer\Query\Core\QueryType;
@@ -25,6 +26,11 @@ use Stringable;
  */
 abstract class AbstractSqlCompiler implements QueryCompilerInterface
 {
+    /** @var array<string,true> */
+    private array $logicalTables = [];
+
+    private string $tablePrefix = '';
+
     /**
      * Quote an identifier for the current dialect.
      *
@@ -35,21 +41,28 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
     #[\Override]
     public function compile(QueryPayload $payload): CompiledQuery
     {
-        $type = $payload->type;
-        [$sql, $bindings] = match ($type) {
-            QueryType::SELECT => [$this->compileSelect($payload), $payload->bindings],
-            QueryType::INSERT => $this->compileInsert($payload),
-            QueryType::UPDATE => $this->compileUpdate($payload),
-            QueryType::DELETE => [$this->compileDelete($payload), $payload->bindings],
-            QueryType::TRUNCATE => [$this->compileTruncate($payload), []],
-        };
+        if ($this->tablePrefix === '') {
+            return $this->compilePayload($payload);
+        }
 
-        return new CompiledQuery($sql, $bindings, $payload->type);
+        $this->logicalTables = TablePrefixMapper::logicalTables($payload, $this->tablePrefix);
+
+        try {
+            return $this->compilePayload($payload);
+        } finally {
+            $this->logicalTables = [];
+        }
+    }
+
+    #[\Override]
+    public function setTablePrefix(string $prefix): void
+    {
+        $this->tablePrefix = $prefix;
     }
 
     protected function compileDelete(QueryPayload $payload): string
     {
-        $sql = 'DELETE FROM ' . $this->wrapIdentifier($this->requireTable($payload));
+        $sql = 'DELETE FROM ' . $this->wrapTableIdentifier($this->requireTable($payload));
         $where = $this->compileWheres($payload);
 
         if ($where !== '') {
@@ -65,7 +78,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
             return '';
         }
 
-        return 'FROM ' . $this->wrapIdentifier($payload->table);
+        return 'FROM ' . $this->wrapTableIdentifier($payload->table);
     }
 
     protected function compileGroupBy(QueryPayload $payload): string
@@ -77,7 +90,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         $columns = [];
 
         foreach ($payload->groups as $column) {
-            $columns[] = $this->wrapIdentifier($column);
+            $columns[] = $this->wrapColumnIdentifier($column);
         }
 
         return 'GROUP BY ' . implode(', ', $columns);
@@ -104,7 +117,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
             $segment = sprintf(
                 '%s %s ?',
-                $this->wrapIdentifier($column),
+                $this->wrapColumnIdentifier($column),
                 $operator,
             );
 
@@ -125,7 +138,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
     protected function compileInsert(QueryPayload $payload): array
     {
         return MutationCompiler::compileInsert(
-            $this->requireTable($payload),
+            TablePrefixMapper::physicalTable($this->requireTable($payload), $this->tablePrefix),
             $payload->insertRows,
             fn(string $identifier): string => $this->wrapIdentifier($identifier),
         );
@@ -151,14 +164,14 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
                     default => 'INNER',
                 };
 
-                $sql .= sprintf(' %s JOIN %s', $type, $this->wrapIdentifier($table));
+                $sql .= sprintf(' %s JOIN %s', $type, $this->wrapTableIdentifier($table));
 
                 if (isset($join['first'], $join['operator'], $join['second'])) {
                     $sql .= sprintf(
                         ' ON %s %s %s',
-                        $this->stringValue($join['first']),
+                        $this->wrapColumnIdentifier($this->stringValue($join['first'])),
                         $this->stringValue($join['operator']),
-                        $this->stringValue($join['second']),
+                        $this->wrapColumnIdentifier($this->stringValue($join['second'])),
                     );
                 }
             } elseif ($join instanceof Stringable) {
@@ -215,7 +228,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
             $segments[] = sprintf(
                 '%s %s',
-                $this->wrapIdentifier($column),
+                $this->wrapColumnIdentifier($column),
                 $direction,
             );
         }
@@ -276,7 +289,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         if ($aggregate !== null) {
             $function = strtoupper($aggregate['function']);
             $column = $aggregate['column'];
-            $columnSql = $column === '*' ? '*' : $this->wrapIdentifier($column);
+            $columnSql = $column === '*' ? '*' : $this->wrapColumnIdentifier($column);
 
             return sprintf('SELECT %s(%s) AS aggregate', $function, $columnSql);
         }
@@ -294,10 +307,10 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
                 $parts[] = $this->expressionToSql($column);
             } elseif (is_string($column)) {
                 // crude heuristic: avoid wrapping obviously raw expressions
-                if ($column === '*' || str_contains($column, '(') || str_contains($column, ' ')) {
+                if ($column === '*' || str_contains($column, '(')) {
                     $parts[] = $column;
                 } else {
-                    $parts[] = $this->wrapIdentifier($column);
+                    $parts[] = $this->wrapColumnIdentifier($column);
                 }
             }
         }
@@ -307,7 +320,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
     protected function compileTruncate(QueryPayload $payload): string
     {
-        return $this->truncateStatementForTable($this->wrapIdentifier($this->requireTable($payload)));
+        return $this->truncateStatementForTable($this->wrapTableIdentifier($this->requireTable($payload)));
     }
 
     /**
@@ -316,7 +329,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
     protected function compileUpdate(QueryPayload $payload): array
     {
         [$sql, $bindings] = MutationCompiler::compileUpdate(
-            $this->requireTable($payload),
+            TablePrefixMapper::physicalTable($this->requireTable($payload), $this->tablePrefix),
             $payload->updateValues,
             $payload->bindings,
             fn(string $identifier): string => $this->wrapIdentifier($identifier),
@@ -345,7 +358,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
         return sprintf(
             '%s %s ?',
-            $this->wrapIdentifier($column),
+            $this->wrapColumnIdentifier($column),
             $operator,
         );
     }
@@ -366,7 +379,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
         return sprintf(
             '%s %sBETWEEN ? AND ?',
-            $this->wrapIdentifier($column),
+            $this->wrapColumnIdentifier($column),
             $not ? 'NOT ' : '',
         );
     }
@@ -389,7 +402,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
         return sprintf(
             '%s %sIN (%s)',
-            $this->wrapIdentifier($column),
+            $this->wrapColumnIdentifier($column),
             $not ? 'NOT ' : '',
             $placeholders,
         );
@@ -409,7 +422,7 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
 
         return sprintf(
             '%s IS %sNULL',
-            $this->wrapIdentifier($column),
+            $this->wrapColumnIdentifier($column),
             $not ? 'NOT ' : '',
         );
     }
@@ -521,6 +534,20 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         return $this->stringValue($data[$key], $default);
     }
 
+    private function compilePayload(QueryPayload $payload): CompiledQuery
+    {
+        $type = $payload->type;
+        [$sql, $bindings] = match ($type) {
+            QueryType::SELECT => [$this->compileSelect($payload), $payload->bindings],
+            QueryType::INSERT => $this->compileInsert($payload),
+            QueryType::UPDATE => $this->compileUpdate($payload),
+            QueryType::DELETE => [$this->compileDelete($payload), $payload->bindings],
+            QueryType::TRUNCATE => [$this->compileTruncate($payload), []],
+        };
+
+        return new CompiledQuery($sql, $bindings, $payload->type);
+    }
+
     private function stringValue(mixed $value, string $default = ''): string
     {
         if (is_string($value)) {
@@ -532,5 +559,54 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         }
 
         return $default;
+    }
+
+    private function wrapColumnIdentifier(string $identifier): string
+    {
+        if ($this->tablePrefix === '') {
+            return $this->wrapIdentifier($identifier);
+        }
+
+        $identifier = trim($identifier);
+        if ($identifier === '' || $identifier === '*' || str_contains($identifier, '(')) {
+            return $identifier;
+        }
+
+        if (preg_match('/^([^\s]+)\s+(?:as\s+)?([A-Za-z_][A-Za-z0-9_]*)$/iD', $identifier, $matches) === 1) {
+            return sprintf(
+                '%s AS %s',
+                $this->wrapColumnIdentifier($matches[1]),
+                $this->wrapIdentifier($matches[2]),
+            );
+        }
+
+        $parts = explode('.', $identifier);
+        if (count($parts) > 1 && isset($this->logicalTables[$parts[0]])) {
+            $parts[0] = TablePrefixMapper::physicalTable($parts[0], $this->tablePrefix);
+        }
+
+        return $this->wrapIdentifier(implode('.', $parts));
+    }
+
+    private function wrapTableIdentifier(string $table): string
+    {
+        if ($this->tablePrefix === '') {
+            return $this->wrapIdentifier($table);
+        }
+
+        $table = trim($table);
+        if ($table === '' || str_contains($table, '(')) {
+            return $table;
+        }
+
+        if (preg_match('/^([^\s]+)\s+(?:as\s+)?([A-Za-z_][A-Za-z0-9_]*)$/iD', $table, $matches) === 1) {
+            return sprintf(
+                '%s AS %s',
+                $this->wrapIdentifier(TablePrefixMapper::physicalTable($matches[1], $this->tablePrefix)),
+                $this->wrapIdentifier($matches[2]),
+            );
+        }
+
+        return $this->wrapIdentifier(TablePrefixMapper::physicalTable($table, $this->tablePrefix));
     }
 }

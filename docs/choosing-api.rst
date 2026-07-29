@@ -11,6 +11,9 @@ DBLayer intentionally exposes three layers:
 - ``Repository``: reusable table-level rules and behavior.
 
 You usually use all three in one application, but for different reasons.
+``SchemaManager``, ``MigrationRunner``, ``SeedRunner``, and ``RelationLoader``
+are explicit opt-in modules alongside these layers. They are constructed only
+for schema/deployment work or bounded relation projection.
 
 Entry Path (How Most Apps Work)
 -------------------------------
@@ -20,7 +23,9 @@ Most codebases enter through ``DB`` first, then branch:
 1. stay on ``DB`` for infra concerns (transaction boundaries, retries,
    connection capabilities, telemetry/profiler/pooling), or
 2. move to ``DB::table()`` for ad-hoc SQL composition, or
-3. move to ``DB::repository()`` for reusable table rules.
+3. move to ``DB::repository()`` for reusable table rules, or
+4. explicitly request ``DB::relations()``/``DB::schema()`` for those optional
+   operations.
 
 This is the normal and intended flow in DBLayer.
 
@@ -48,6 +53,12 @@ Quick Decision Matrix
    * - Long-running table scan with stable pagination
      - ``QueryBuilder::chunkById()`` or ``Repository::chunkById()``
      - Keyset chunking is safer than offset paging under writes.
+   * - Attach related rows to an already selected parent list
+     - ``DB::relations()``
+     - Bounded set-based projection avoids hidden N+1 queries.
+   * - Create/alter schema or execute deployment manifests
+     - ``DB::schema()``, ``MigrationRunner``, ``SeedRunner``
+     - DDL and deployment work remains explicit and outside ordinary queries.
 
 Mental Model
 ------------
@@ -257,7 +268,7 @@ What this intentionally does not give:
 - ORM relations/identity map/dirty tracking/unit-of-work
 
 TableRepository Scenarios
---------------------
+-------------------------
 
 Read-Repository Connection Split
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -316,5 +327,7 @@ Related Guides
 - See ``examples-cookbook`` for ready-to-use end-to-end snippets.
 - See ``query-builder`` for SQL composition patterns.
 - See ``repository`` for policy features and lifecycle hooks.
+- See ``relation-loading`` for explicit bounded row projection.
+- See ``schema-migrations`` for DDL, migration, and seeding contracts.
 - See ``transactions`` for retry and nested transaction behavior.
 - See ``connections`` for replicas, sticky reads, and pooling.

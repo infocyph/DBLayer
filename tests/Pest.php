@@ -72,6 +72,9 @@ function dblayerAddConnectionForDriver(
     $config = array_replace_recursive($config, $overrides);
 
     DB::addConnection($config, $name);
+    if ($name === 'default') {
+        DB::setDefaultConnection($name);
+    }
 
     return $config;
 }
