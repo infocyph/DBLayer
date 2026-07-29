@@ -7,6 +7,8 @@ namespace Infocyph\DBLayer\Benchmarks;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\Core\CompiledQuery;
 use Infocyph\DBLayer\Query\Core\QueryType;
+use Infocyph\DBLayer\Schema\Blueprint;
+use Infocyph\DBLayer\Schema\SchemaGrammar;
 use PDO;
 use PhpBench\Attributes as Bench;
 
@@ -86,6 +88,35 @@ final class DBLayerBench
         foreach (DB::table('users')->where('id', '<=', 49)->lazyById(50) as $row) {
             unset($row);
         }
+    }
+
+    public function benchRelationLoadTwentyParents(): void
+    {
+        if ($this->fallbackCompileLimitedSelect()) {
+            return;
+        }
+
+        $parents = DB::table('users')->select(['id'])->limit(20)->get();
+        DB::relations(batchSize: 500)->many(
+            $parents,
+            'id',
+            'posts',
+            'user_id',
+            'posts',
+            ['id', 'user_id', 'title'],
+        );
+    }
+
+    public function benchSchemaCompileCreate(): void
+    {
+        $blueprint = new Blueprint('benchmark_records', true);
+        $blueprint->id();
+        $blueprint->uuid('public_id')->unique();
+        $blueprint->string('name')->index();
+        $blueprint->json('payload')->nullable();
+        $blueprint->timestamp('created_at')->useCurrent();
+
+        (new SchemaGrammar('sqlite'))->compile($blueprint);
     }
 
     public function benchSelectByPrimaryKey(): void
@@ -241,6 +272,14 @@ final class DBLayerBench
             )',
         );
         DB::statement('CREATE INDEX idx_users_active_score ON users (active, score)');
+        DB::statement(
+            'CREATE TABLE posts (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL
+            )',
+        );
+        DB::statement('CREATE INDEX idx_posts_user_id ON posts (user_id)');
     }
 
     private static function initializeRuntime(): void
@@ -349,6 +388,10 @@ final class DBLayerBench
                         $id * 10,
                         '2026-01-01 00:00:00',
                     ],
+                );
+                DB::statement(
+                    'INSERT INTO posts (id, user_id, title) VALUES (?, ?, ?)',
+                    [$id, $id, 'Post ' . $id],
                 );
             }
         });

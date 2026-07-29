@@ -70,6 +70,36 @@ PostgreSQL maps ``charset``, ``schema``, ``timeout``, and ``sslmode`` to libpq
 ``connect_timeout`` for PostgreSQL. Native clients can impose additional
 driver- and version-specific behavior.
 
+Table Prefix Semantics
+----------------------
+
+``prefix`` maps logical application table names to physical names once during
+query or schema compilation:
+
+.. code-block:: php
+
+   DB::addConnection([
+       'driver' => 'sqlite',
+       'database' => '/srv/app/database.sqlite',
+       'prefix' => 'tenant_',
+   ], 'tenant');
+
+   // Reads tenant_users and joins tenant_roles. Qualified logical columns are
+   // rewritten consistently.
+   $rows = DB::table('users', 'tenant')
+       ->join('roles', 'users.role_id', '=', 'roles.id')
+       ->select('users.id', 'roles.name')
+       ->get();
+
+The mapping covers select, insert, update, delete, truncate, joins, subqueries,
+relation loading, schema operations, and migration ledgers. CTE names and
+derived-table aliases remain logical and are not prefixed. Already-prefixed and
+schema-qualified table names are not rewritten. Raw SQL and raw expressions
+remain caller-owned and are never parsed to inject a prefix.
+
+Use the same named connection for schema, migrations, relations, and queries.
+Do not manually add the configured prefix to normal logical table names.
+
 Read/Write Config Shape
 -----------------------
 

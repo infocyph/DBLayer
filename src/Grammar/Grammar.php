@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Grammar;
 
+use Infocyph\DBLayer\Driver\Support\TablePrefixMapper;
 use Infocyph\DBLayer\Grammar\Concerns\GrammarComponentNormalization;
 use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\JoinClause;
@@ -51,6 +52,12 @@ abstract class Grammar
      */
     protected string $tablePrefix = '';
 
+    /** @var array<string,true> */
+    private array $logicalTables = [];
+
+    /** @var array<string,true> */
+    private array $virtualTables = [];
+
     /**
      * Wrap a single string in keyword identifiers.
      */
@@ -71,11 +78,17 @@ abstract class Grammar
      */
     public function compileDelete(QueryBuilder $query): string
     {
-        $components = $query->getComponents();
-        $table = $this->wrapTable($this->requireFromTable($components));
-        $where = $this->compileWheres($query, $this->normalizeWheres($components['wheres']));
+        $previousTables = $this->useTableContext($query);
 
-        return \trim("delete from {$table} {$where}");
+        try {
+            $components = $query->getComponents();
+            $table = $this->wrapTable($this->requireFromTable($components));
+            $where = $this->compileWheres($query, $this->normalizeWheres($components['wheres']));
+
+            return \trim("delete from {$table} {$where}");
+        } finally {
+            $this->restoreTableContext($previousTables);
+        }
     }
 
     /**
@@ -97,26 +110,32 @@ abstract class Grammar
      */
     public function compileSelect(QueryBuilder $query): string
     {
-        $components = $query->getComponents();
-        $cteSql = '';
+        $previousTables = $this->useTableContext($query);
 
-        $ctes = $this->normalizeCtes($components['ctes']);
-        if ($ctes !== []) {
-            $cteSql = $this->compileCtes($ctes) . ' ';
+        try {
+            $components = $query->getComponents();
+            $cteSql = '';
+
+            $ctes = $this->normalizeCtes($components['ctes']);
+            if ($ctes !== []) {
+                $cteSql = $this->compileCtes($ctes) . ' ';
+            }
+
+            if (is_array($components['aggregate'])) {
+                return $cteSql . $this->compileAggregate($query);
+            }
+
+            $sql = $this->concatenate($this->compileComponents($query));
+
+            $unions = $this->normalizeUnions($components['unions']);
+            if ($unions !== []) {
+                $sql .= ' ' . $this->compileUnions($query);
+            }
+
+            return $cteSql . $sql;
+        } finally {
+            $this->restoreTableContext($previousTables);
         }
-
-        if (is_array($components['aggregate'])) {
-            return $cteSql . $this->compileAggregate($query);
-        }
-
-        $sql = $this->concatenate($this->compileComponents($query));
-
-        $unions = $this->normalizeUnions($components['unions']);
-        if ($unions !== []) {
-            $sql .= ' ' . $this->compileUnions($query);
-        }
-
-        return $cteSql . $sql;
     }
 
     /**
@@ -134,22 +153,28 @@ abstract class Grammar
      */
     public function compileUpdate(QueryBuilder $query, array $values): string
     {
-        $components = $query->getComponents();
-        $table = $this->wrapTable($this->requireFromTable($components));
+        $previousTables = $this->useTableContext($query);
 
-        $columns = \implode(', ', \array_map(
-            function (mixed $value, string $key): string {
-                unset($value); // signature alignment only
+        try {
+            $components = $query->getComponents();
+            $table = $this->wrapTable($this->requireFromTable($components));
 
-                return $this->wrap($key) . ' = ?';
-            },
-            \array_values($values),
-            \array_keys($values),
-        ));
+            $columns = \implode(', ', \array_map(
+                function (mixed $value, string $key): string {
+                    unset($value); // signature alignment only
 
-        $where = $this->compileWheres($query, $this->normalizeWheres($components['wheres']));
+                    return $this->wrap($key) . ' = ?';
+                },
+                \array_values($values),
+                \array_keys($values),
+            ));
 
-        return \trim("update {$table} set {$columns} {$where}");
+            $where = $this->compileWheres($query, $this->normalizeWheres($components['wheres']));
+
+            return \trim("update {$table} set {$columns} {$where}");
+        } finally {
+            $this->restoreTableContext($previousTables);
+        }
     }
 
     /**
@@ -404,11 +429,11 @@ abstract class Grammar
     protected function compileJoinClause(JoinClause $join): string
     {
         $table = $this->wrapTable($join->getTable());
-        $type = \strtoupper($join->getType());
+        $joinType = \strtoupper($join->getType());
         $conditions = $join->getConditions();
 
         if ($conditions === []) {
-            return "{$type} join {$table}";
+            return "{$joinType} join {$table}";
         }
 
         $clauses = [];
@@ -416,9 +441,9 @@ abstract class Grammar
         foreach ($conditions as $i => $condition) {
             $booleanToken = $this->stringValue($condition['boolean'] ?? 'and', 'and');
             $boolean = $i === 0 ? '' : ' ' . $booleanToken . ' ';
-            $type = $this->stringValue($condition['type'] ?? '');
+            $conditionType = $this->stringValue($condition['type'] ?? '');
 
-            switch ($type) {
+            switch ($conditionType) {
                 case 'basic':
                     $first = $this->stringValue($condition['first'] ?? '');
                     $operator = $this->stringValue($condition['operator'] ?? '=');
@@ -467,7 +492,7 @@ abstract class Grammar
             }
         }
 
-        return "{$type} join {$table} on " . \implode('', $clauses);
+        return "{$joinType} join {$table} on " . \implode('', $clauses);
     }
 
     /**
@@ -776,6 +801,10 @@ abstract class Grammar
      */
     protected function wrapSegments(array $segments): string
     {
+        if (isset($segments[0], $this->logicalTables[$segments[0]])) {
+            $segments[0] = TablePrefixMapper::physicalTable($segments[0], $this->tablePrefix);
+        }
+
         return \implode('.', \array_map(
             fn(string $segment): string => $segment === '*' ? $segment : $this->wrapValue($segment),
             $segments,
@@ -791,7 +820,16 @@ abstract class Grammar
             return $table->getValue();
         }
 
-        return $this->wrap($this->tablePrefix . $table);
+        $table = \trim($table);
+        if (\str_starts_with($table, '(')) {
+            return $table;
+        }
+
+        if (isset($this->virtualTables[$table])) {
+            return $this->wrap($table);
+        }
+
+        return $this->wrap(TablePrefixMapper::physicalTable($table, $this->tablePrefix));
     }
 
     /**
@@ -800,5 +838,44 @@ abstract class Grammar
     protected function wrapUnion(string $sql): string
     {
         return '(' . $sql . ')';
+    }
+
+    /**
+     * Restore a prefix context after nested query compilation.
+     *
+     * @param array{logical:array<string,true>,virtual:array<string,true>} $context
+     */
+    private function restoreTableContext(array $context): void
+    {
+        $this->logicalTables = $context['logical'];
+        $this->virtualTables = $context['virtual'];
+    }
+
+    /**
+     * Replace the current prefix context and return the previous one.
+     *
+     * @return array{logical:array<string,true>,virtual:array<string,true>}
+     */
+    private function useTableContext(QueryBuilder $query): array
+    {
+        $previous = [
+            'logical' => $this->logicalTables,
+            'virtual' => $this->virtualTables,
+        ];
+
+        if ($this->tablePrefix === '') {
+            return $previous;
+        }
+
+        $components = $query->getComponents();
+        $this->logicalTables = TablePrefixMapper::logicalTablesForQuery($query, $this->tablePrefix);
+        $this->virtualTables = [];
+
+        foreach ($this->normalizeCtes($components['ctes']) as $cte) {
+            $this->virtualTables[$cte['name']] = true;
+            unset($this->logicalTables[$cte['name']]);
+        }
+
+        return $previous;
     }
 }

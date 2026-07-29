@@ -286,6 +286,7 @@ final class Connection
         // Resolve driver and compiler up front; all engines go through DriverRegistry.
         $this->driver = DriverRegistry::resolve($this->config->getDriver());
         $this->compiler = $this->driver->createCompiler();
+        $this->compiler->setTablePrefix($this->tablePrefix);
     }
 
     /**
@@ -1089,6 +1090,7 @@ final class Connection
     public function setTablePrefix(string $prefix): self
     {
         $this->tablePrefix = $prefix;
+        $this->compiler->setTablePrefix($prefix);
 
         if ($this->grammar !== null) {
             $this->grammar->setTablePrefix($prefix);

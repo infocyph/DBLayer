@@ -26,11 +26,19 @@ A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with 
 - **Telemetry** - Query + transaction observability export
 - **Performance diagnostics** - Native execution plans and query-shape reports
 - **Pagination** - Offset, composite keyset, opaque next/previous cursors, and resumable chunks
+- **Schema & Migrations** - Portable type catalog plus explicit driver-specific types, generated/spatial columns, deterministic ledger, dry runs, leases, conditional/stepped execution, rollback/reset/refresh/fresh
+- **Seeding** - Explicit transactional seed trees with synchronous nested composition
+- **Relations** - Explicit bounded one, many, and many-to-many array projection without ORM behavior
+
+Schema UUID/ULID helpers define storage only. Applications may generate
+portable UUIDv7/ULID values with `infocyph/uid`, or deliberately configure a
+driver-specific database expression default. DBLayer does not add an identifier
+generator to the normal query path.
 
 ### Performance
 - Reproducible PHPBench scenarios for relative hot-path comparisons
 - Connection pooling for reuse
-- Bounded ``lazyById()`` batches and driver-aware unbuffered streaming
+- Bounded `lazyById()` batches and driver-aware unbuffered streaming
 - Bounded query-log, profiler, telemetry, and local rate-limit state for persistent workers
 
 ### Security
@@ -311,6 +319,8 @@ Hardening controls:
 
 - PHP 8.4+
 - ext-pdo
+- Composer installs `infocyph/arraykit ^4.6`, `infocyph/cachelayer ^2.0`, and
+  `psr/log ^3.0.2`
 - ext-pdo_mysql (for MySQL)
 - ext-pdo_pgsql (for PostgreSQL)
 - ext-pdo_sqlite (for SQLite)

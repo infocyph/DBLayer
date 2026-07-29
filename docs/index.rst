@@ -26,7 +26,9 @@ If you are new to the project, follow this order:
 5. ``table-repository`` for repository-oriented class workflows without ORM.
 6. ``examples-cookbook`` for ready-to-use snippets across all layers.
 7. ``query-builder`` and ``repository`` for day-to-day application code.
-8. ``security`` and ``observability`` before deploying.
+8. ``relation-loading`` for bounded, explicit relationship projection.
+9. ``schema-migrations`` for DDL, deployment migrations, and seeding.
+10. ``security`` and ``observability`` before deploying.
 
 The API reference sections are intentionally method-oriented and are best used
 as lookup pages after reading the guides.
@@ -50,6 +52,8 @@ as lookup pages after reading the guides.
    examples-cookbook
    query-builder
    repository
+   relation-loading
+   schema-migrations
    transactions
    caching
    performance-optimization

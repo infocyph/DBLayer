@@ -76,7 +76,7 @@ Pattern for scoped reads:
    $active = $users->get(fn ($q) => $q->where('active', '=', 1));
 
 Repository-Style App Class (Composition)
------------------------------------
+----------------------------------------
 
 DBLayer repository is not an ORM. If you want repository-oriented naming, wrap the
 repository in an app class:
@@ -121,7 +121,7 @@ repository in an app class:
    name. This helps keep naming consistent for repository-style class names.
 
 Laravel-Like Repository Surface (Without ORM)
-----------------------------------------
+---------------------------------------------
 
 If you want static repository-oriented calls while keeping pure repository style, build
 on top of DBLayer's built-in ``TableRepository``:

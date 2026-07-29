@@ -26,14 +26,15 @@ conditions. It uses SQLite in-memory so you can run it without external setup.
 
 .. code-block:: php
 
-   DB::statement(
-       'create table users (
-           id integer primary key autoincrement,
-           email text not null unique,
-           name text not null,
-           active integer not null default 1
-       )',
-   );
+   use Infocyph\DBLayer\Schema\Blueprint;
+
+   DB::schema()->create('users', static function (Blueprint $table): void {
+       $table->id();
+       $table->string('email')->unique();
+       $table->string('name');
+       $table->boolean('active')->default(true);
+       $table->timestampsTz();
+   });
 
    DB::table('users')->insert([
        ['email' => 'alice@example.test', 'name' => 'Alice', 'active' => 1],
@@ -105,6 +106,8 @@ What To Do Next
 - Move to ``configuration`` for multi-connection and security options.
 - Move to ``connections`` for replica and pooling behavior.
 - Move to ``query-builder`` and ``repository`` for advanced usage patterns.
+- Move to ``relation-loading`` for explicit bounded relation projection.
+- Move to ``schema-migrations`` for the full DDL, migration, and seeding surface.
 
 Copy-Paste Single-File Examples
 -------------------------------
@@ -118,6 +121,7 @@ SQLite (local/dev)
    declare(strict_types=1);
 
    use Infocyph\DBLayer\DB;
+   use Infocyph\DBLayer\Schema\Blueprint;
 
    require __DIR__ . '/vendor/autoload.php';
 
@@ -126,7 +130,10 @@ SQLite (local/dev)
        'database' => ':memory:',
    ], 'sqlite');
 
-   DB::statement('create table users (id integer primary key autoincrement, name text not null)', [], 'sqlite');
+   DB::schema('sqlite')->create('users', static function (Blueprint $table): void {
+       $table->id();
+       $table->string('name');
+   });
    DB::table('users', 'sqlite')->insert(['name' => 'Alice']);
 
    $rows = DB::table('users', 'sqlite')->select('id', 'name')->get();

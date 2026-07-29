@@ -439,14 +439,26 @@ it('keeps examples and integration coverage in sync', function (): void {
         'filtering.php' => ['ExamplesParityIntegrationTest.php'],
         'helpers_and_security.php' => ['ExamplesParityIntegrationTest.php'],
         'locking.php' => ['LockingIntegrationTest.php'],
-        'multi_connections.php' => ['ExamplesParityIntegrationTest.php'],
+        'multi_connections.php' => [
+            'ExamplesParityIntegrationTest.php',
+            'PrefixAndNamedConnectionIntegrationTest.php',
+        ],
         'observability.php' => ['ObservabilityIntegrationTest.php'],
         'read_replicas.php' => [
             'ExamplesParityIntegrationTest.php',
             'ReplicaStrategiesIntegrationTest.php',
             'PoolStickyReplicaStressIntegrationTest.php',
         ],
+        'relation_loading.php' => [
+            'RelationLoaderIntegrationTest.php',
+            'RelationLoaderEdgeCasesIntegrationTest.php',
+        ],
         'restored_modules.php' => ['RestoredModulesIntegrationTest.php'],
+        'schema_migrations.php' => [
+            'SchemaMigrationIntegrationTest.php',
+            'MigrationEdgeCasesIntegrationTest.php',
+            'SeedRunnerEdgeCasesIntegrationTest.php',
+        ],
         'transactions.php' => ['TransactionIntegrationTest.php'],
     ];
 

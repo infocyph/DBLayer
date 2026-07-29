@@ -194,11 +194,13 @@ Non-ORM Boundary
 
 ``TableRepository`` is intentionally not ORM:
 
-- no relationship mapping API
+- no relationship properties or implicit relation loading
 - no unit-of-work
 - no dirty-state tracking
 
-It is a static delegation layer over DBLayer components.
+It is a static delegation layer over DBLayer components. Use
+``DB::relations()`` separately when rows already selected by a repository need
+explicit bounded relation projection.
 
 See Also
 --------
@@ -206,3 +208,4 @@ See Also
 - ``api-table-repository`` for method reference
 - ``choosing-api`` for DB vs QueryBuilder vs Repository decisions
 - ``repository`` for repository capabilities used under ``TableRepository``
+- ``relation-loading`` for explicit one/many/many-to-many projection

@@ -26,22 +26,29 @@ Schema + Seed
 
 .. code-block:: php
 
-   DB::statement(
-       'create table users (
-           id integer primary key autoincrement,
-           tenant_id integer null,
-           email text not null unique,
-           name text not null,
-           active integer not null default 1,
-           version integer not null default 1,
-           deleted_at text null
-       )',
-   );
+   use Infocyph\DBLayer\Connection\Connection;
+   use Infocyph\DBLayer\Migration\SeedContext;
+   use Infocyph\DBLayer\Migration\SeedRunner;
+   use Infocyph\DBLayer\Schema\Blueprint;
 
-   DB::table('users')->insert([
-       ['tenant_id' => 10, 'email' => 'a@example.test', 'name' => 'Alice', 'active' => 1],
-       ['tenant_id' => 10, 'email' => 'b@example.test', 'name' => 'Bob', 'active' => 0],
-       ['tenant_id' => 20, 'email' => 'c@example.test', 'name' => 'Cara', 'active' => 1],
+   DB::schema()->create('users', static function (Blueprint $table): void {
+       $table->id();
+       $table->bigInteger('tenant_id')->nullable()->index();
+       $table->string('email')->unique();
+       $table->string('name');
+       $table->boolean('active')->default(true);
+       $table->integer('version')->default(1);
+       $table->softDeletes();
+   });
+
+   (new SeedRunner(DB::connection()))->run([
+       static function (Connection $connection, SeedContext $context): void {
+           $connection->table('users')->insert([
+               ['tenant_id' => 10, 'email' => 'a@example.test', 'name' => 'Alice', 'active' => 1],
+               ['tenant_id' => 10, 'email' => 'b@example.test', 'name' => 'Bob', 'active' => 0],
+               ['tenant_id' => 20, 'email' => 'c@example.test', 'name' => 'Cara', 'active' => 1],
+           ]);
+       },
    ]);
 
 DB Facade Recipes
@@ -169,10 +176,10 @@ Mapping to DTO
    $dtos = DB::repository('users')->mapInto(UserDto::class);
 
 TableRepository Recipes
-------------------
+-----------------------
 
 Minimal TableRepository Class
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: php
 
@@ -197,7 +204,7 @@ Minimal TableRepository Class
    }
 
 Repository-Oriented Calls
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: php
 
@@ -212,6 +219,26 @@ Per-Call Connection Override
 
    $reportRows = User::query('reporting')->get();
    $reportCount = User::sqlScalar('select count(*) from users', [], 'reporting');
+
+Relation Projection Recipe
+--------------------------
+
+.. code-block:: php
+
+   $users = DB::table('users')->select('id', 'name')->limit(100)->get();
+
+   $users = DB::relations(batchSize: 500)->many(
+       parents: $users,
+       parentKey: 'id',
+       relatedTable: 'posts',
+       relatedKey: 'user_id',
+       as: 'posts',
+       columns: ['id', 'user_id', 'title'],
+   );
+
+This performs bounded ``WHERE IN`` queries rather than one hidden query per
+user. See ``relation-loading`` for one-to-one, many-to-many, query-count, and
+input contracts.
 
 Observability Recipes
 ---------------------
@@ -284,6 +311,10 @@ Choosing the Right Recipe
 - Prefer ``DB::table()`` for one-off query shape.
 - Prefer ``DB::repository()`` for repeated table rules.
 - Prefer ``TableRepository`` when your app wants class-based static ergonomics.
+- Use ``DB::relations()`` for explicit bounded relation projection over rows
+  already selected by the application.
+- Use ``DB::schema()`` and explicit migration/seed manifests for deployment
+  work; they are not loaded by ordinary queries.
 - Use ``DB`` directly for transactions, capabilities, observability, and raw SQL.
 
 Related Pages
@@ -293,4 +324,6 @@ Related Pages
 - ``table-repository``
 - ``query-builder``
 - ``repository``
+- ``relation-loading``
+- ``schema-migrations``
 - ``transactions``

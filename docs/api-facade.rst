@@ -43,7 +43,13 @@ Builder and Repository
 
 - ``table()``
 - ``repository()``
+- ``relations()`` (creates an explicit bounded ``RelationLoader``)
+- ``schema()`` (creates a driver-aware ``SchemaManager``)
 - ``raw()``
+
+Both ``relations(connection, batchSize)`` and ``schema(connection)`` resolve
+only the requested named connection and are instantiated on demand. Migration
+and seed runners are explicit objects rather than process-global facade state.
 
 Transactions
 ------------

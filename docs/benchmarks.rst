@@ -32,6 +32,8 @@ Current benchmark subjects are defined in ``benchmarks/DBLayerBench.php``:
 - ``benchEventDispatchOff`` / ``benchEventDispatchOn``
 - ``benchSelectRowsBuffered`` / ``benchStreamRows``
 - ``benchWithLeastLatencyCachedReplica`` / ``benchWithLeastLatencyUncachedReplica``
+- ``benchRelationLoadTwentyParents``
+- ``benchSchemaCompileCreate``
 
 Report Interpretation
 ---------------------
@@ -64,6 +66,11 @@ throughput. Compare paired benchmark subjects on the same machine/run:
 - ``benchEventDispatchOff`` vs ``benchEventDispatchOn``
 
 Treat these as measured tradeoffs, not guaranteed improvements.
+
+The schema subject measures compilation only because migrations are a
+deploy/console path. The relation subject measures a 20-parent select plus one
+bounded relation query. Keep these separate from ordinary query hot-path
+subjects so opt-in features do not conceal regressions in common operations.
 
 Chart Output
 ------------

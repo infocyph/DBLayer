@@ -174,9 +174,10 @@ application actually requires before treating the rewrite as equivalent.
 Index Design
 ------------
 
-DBLayer does not create indexes automatically. Create them through the
-application's migration/deployment system after validating the production
-query shape.
+DBLayer does not infer or create indexes automatically from observed queries.
+After validating the production query shape, declare the selected index
+explicitly through ``Blueprint::index()``/``unique()`` in an application
+migration.
 
 Practical ordering rules:
 

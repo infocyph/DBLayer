@@ -26,7 +26,7 @@
     "require": {
         "php": "^8.4",
         "ext-pdo": "*",
-        "infocyph/arraykit": "^4.4",
+        "infocyph/arraykit": "^4.6",
         "infocyph/cachelayer": "^2.0",
         "psr/log": "^3.0.2"
     },

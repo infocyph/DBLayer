@@ -13,6 +13,9 @@ Core Components
 - ``Connection``: PDO lifecycle, driver, execution controls.
 - ``QueryBuilder``: fluent SQL builder.
 - ``Repository``: table-oriented abstraction.
+- ``RelationLoader``: explicit, bounded relation projection over parent arrays.
+- ``SchemaManager``: opt-in driver-aware DDL boundary.
+- ``MigrationRunner``: console/deploy-time migration execution over an explicit manifest.
 
 Responsibility Boundaries
 -------------------------
@@ -68,6 +71,8 @@ Runtime Modules
 - Security validation
 - Events, logger, profiler, telemetry
 - Caching strategies
+- Schema compilation, migration ledger/leases, and explicit seeding
+- Bounded relation prefetching
 
 Design Intent
 -------------
@@ -75,5 +80,7 @@ Design Intent
 - Keep raw SQL accessible when needed.
 - Keep fluent APIs predictable and composable.
 - Keep infrastructure concerns opt-in (logger/profiler/telemetry).
+- Keep schema, migration, and relation classes outside normal query paths until
+  explicitly resolved.
 - Keep safety checks centrally configurable.
 - Keep domain/table rules reusable without forcing full ORM-style models.
