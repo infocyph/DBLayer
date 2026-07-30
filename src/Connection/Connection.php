@@ -146,7 +146,7 @@ final class Connection
      *
      * @var array<string,mixed>
      */
-    private array $queryCommentContext = [];
+    private array $queryCommentContext;
 
     /**
      * Optional absolute query deadline (microtime(true) timestamp).
@@ -263,7 +263,7 @@ final class Connection
     /**
      * Table prefix used by the grammar.
      */
-    private string $tablePrefix = '';
+    private string $tablePrefix;
 
     /**
      * Transaction manager for this connection.

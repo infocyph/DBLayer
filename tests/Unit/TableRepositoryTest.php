@@ -3,26 +3,10 @@
 declare(strict_types=1);
 
 use Infocyph\DBLayer\DB;
-use Infocyph\DBLayer\Repository\TableRepository;
 use Infocyph\DBLayer\Query\QueryBuilder;
-use Infocyph\DBLayer\Query\Repository;
 use Infocyph\DBLayer\Support\Collection;
-
-final class TableRepositoryUser extends TableRepository
-{
-    protected static ?string $connection = 'table_repository_conn';
-    protected static string $table = 'users';
-
-    protected static function configureRepository(Repository $repository): Repository
-    {
-        return $repository
-            ->forTenant(10)
-            ->enableSoftDeletes()
-            ->setDefaultOrder('id', 'asc');
-    }
-}
-
-final class BrokenTableRepository extends TableRepository {}
+use Infocyph\DBLayer\Tests\Fixtures\BrokenTableRepository;
+use Infocyph\DBLayer\Tests\Fixtures\TableRepositoryUser;
 
 function setupTableRepositoryFixture(string $driver): void
 {
