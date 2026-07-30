@@ -4,29 +4,9 @@ declare(strict_types=1);
 
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
-
-final class RepositoryUserDto
-{
-    public function __construct(
-        public int $id,
-        public int $tenant_id,
-        public string $email,
-        public string $name,
-        public int $active = 1,
-    ) {}
-}
-
-final class RepositoryHydratedDto
-{
-    public string $email = '';
-
-    public int $id = 0;
-}
-
-abstract class RepositoryAbstractDto
-{
-    public int $id;
-}
+use Infocyph\DBLayer\Tests\Fixtures\RepositoryAbstractDto;
+use Infocyph\DBLayer\Tests\Fixtures\RepositoryHydratedDto;
+use Infocyph\DBLayer\Tests\Fixtures\RepositoryUserDto;
 
 /**
  * @param list<array<string,mixed>> $rows
