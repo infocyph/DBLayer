@@ -191,6 +191,35 @@ trait RepositoryInternals
         return $reflection->getNumberOfParameters();
     }
 
+    /**
+     * Normalize native and stringified database boolean representations.
+     *
+     * PDO normally exposes PostgreSQL booleans as native bools, but explicit
+     * PDO options and intermediary drivers may return "t"/"f" or their full
+     * textual forms. A direct PHP bool cast would incorrectly turn every
+     * non-empty false string into true.
+     */
+    private function castToBool(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_string($value)) {
+            $normalized = strtolower(trim($value));
+
+            if (in_array($normalized, ['', '0', 'f', 'false', 'no', 'off'], true)) {
+                return false;
+            }
+
+            if (in_array($normalized, ['1', 't', 'true', 'yes', 'on'], true)) {
+                return true;
+            }
+        }
+
+        return (bool) $value;
+    }
+
     private function castToFloat(mixed $value): float
     {
         if (is_float($value) || is_int($value)) {
@@ -250,7 +279,7 @@ trait RepositoryInternals
         return match ($type) {
             'int', 'integer' => $value === null ? null : $this->castToInt($value),
             'float', 'double', 'real' => $value === null ? null : $this->castToFloat($value),
-            'bool', 'boolean' => $value === null ? null : (bool) $value,
+            'bool', 'boolean' => $value === null ? null : $this->castToBool($value),
             'string' => $value === null ? null : $this->castToString($value),
             'json', 'array' => $forWrite
                 ? (is_array($value) || is_object($value) ? json_encode($value, JSON_THROW_ON_ERROR) : $value)

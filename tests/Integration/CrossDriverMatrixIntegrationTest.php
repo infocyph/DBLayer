@@ -89,3 +89,19 @@ it('applies effective vendor-specific connection configuration', function (strin
             ]);
     }
 })->with('dblayer_drivers');
+
+it('preserves each pdo drivers native boolean result type', function (string $driver): void {
+    DB::addConnection(dblayerRequireDriver($driver), 'native_boolean');
+    $connection = DB::connection('native_boolean');
+
+    $truthy = $connection->scalar('select true');
+    $falsey = $connection->scalar('select false');
+
+    if ($driver === 'pgsql') {
+        expect($truthy)->toBeTrue()
+            ->and($falsey)->toBeFalse();
+    } else {
+        expect($truthy)->toBe(1)
+            ->and($falsey)->toBe(0);
+    }
+})->with('dblayer_drivers');
