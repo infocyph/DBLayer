@@ -44,6 +44,41 @@ function setupRepositoryFixture(string $driver): string
     return $table;
 }
 
+it('normalizes native and stringified database booleans in repository casts', function (string $driver): void {
+    setupRepositoryFixture($driver);
+    $schemaDriver = dblayerConnectionDriver('repo');
+    $table = dblayerTable('repository_boolean_casts');
+
+    DB::statement(sprintf(
+        'create table %s (id integer primary key, marker %s not null)',
+        $table,
+        dblayerStringType($schemaDriver, 10),
+    ));
+
+    DB::table($table)->insert([
+        ['id' => 1, 'marker' => 'f'],
+        ['id' => 2, 'marker' => 'false'],
+        ['id' => 3, 'marker' => '0'],
+        ['id' => 4, 'marker' => 't'],
+        ['id' => 5, 'marker' => 'true'],
+        ['id' => 6, 'marker' => '1'],
+    ]);
+
+    $rows = DB::repository($table)
+        ->setCasts(['marker' => 'boolean'])
+        ->get(static fn(QueryBuilder $query) => $query->orderBy('id'))
+        ->all();
+
+    expect(array_column($rows, 'marker'))->toBe([
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+    ]);
+})->with('dblayer_drivers');
+
 it('supports repository write helpers and convenience create-or-update operations', function (string $driver): void {
     $table = setupRepositoryFixture($driver);
 

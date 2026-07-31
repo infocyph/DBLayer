@@ -161,6 +161,16 @@ Feature Scopes
 - Casts: ``setCasts()``
 - Hooks: ``beforeCreate()``, ``afterCreate()``, ``beforeUpdate()``, ``afterUpdate()``, ``beforeDelete()``, ``afterDelete()``
 
+Built-in casts are ``int``/``integer``, ``float``/``double``/``real``,
+``bool``/``boolean``, ``string``, ``json``/``array``, and ``datetime``.
+Boolean casts normalize native booleans and common database representations:
+``1``, ``t``, ``true``, ``yes``, and ``on`` are true; ``0``, ``f``,
+``false``, ``no``, ``off``, and an empty string are false. Matching is
+case-insensitive and ignores surrounding whitespace. ``null`` remains
+``null``. This normalization belongs to the repository cast boundary; raw
+``Connection`` and ``QueryBuilder`` results retain the PDO driver's native
+value types.
+
 Soft-delete behavior:
 
 - ``deleteById()`` writes a timestamp when soft deletes are enabled.

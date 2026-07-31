@@ -6,7 +6,7 @@ Requirements
 
 - PHP ``^8.4``
 - ``ext-pdo``
-- ``infocyph/arraykit`` ``^4.6``
+- ``infocyph/arraykit`` ``^4.6.1``
 - ``infocyph/cachelayer`` ``^2.0``
 - ``psr/log`` ``^3.0.2``
 - Optional per driver:

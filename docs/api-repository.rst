@@ -40,6 +40,13 @@ Scopes and Features
 - Optimistic locking: ``enableOptimisticLocking()``, ``disableOptimisticLocking()``
 - Casts: ``setCasts()``
 
+``setCasts()`` accepts the built-in names ``int``/``integer``,
+``float``/``double``/``real``, ``bool``/``boolean``, ``string``,
+``json``/``array``, and ``datetime``, or a callable. Boolean casts understand
+native booleans plus the case-insensitive database forms ``1``/``0``,
+``t``/``f``, ``true``/``false``, ``yes``/``no``, and ``on``/``off``.
+Raw connection and query-builder reads are intentionally not normalized.
+
 Hooks and Mapping
 -----------------
 
