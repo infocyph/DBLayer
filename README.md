@@ -319,7 +319,7 @@ Hardening controls:
 
 - PHP 8.4+
 - ext-pdo
-- Composer installs `infocyph/arraykit ^4.6.1`, `infocyph/cachelayer ^2.0`, and
+- Composer installs `infocyph/arraykit ^4.6.1`, `infocyph/cachelayer ^2.0.1`, and
   `psr/log ^3.0.2`
 - ext-pdo_mysql (for MySQL)
 - ext-pdo_pgsql (for PostgreSQL)
