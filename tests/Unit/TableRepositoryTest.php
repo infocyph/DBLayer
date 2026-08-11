@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
+use Infocyph\ArrayKit\Collection\Collection;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
-use Infocyph\DBLayer\Support\Collection;
 use Infocyph\DBLayer\Tests\Fixtures\BrokenTableRepository;
 use Infocyph\DBLayer\Tests\Fixtures\TableRepositoryUser;
 
@@ -100,10 +100,10 @@ it('delegates to query builder API while preserving repository policies', functi
     expect(TableRepositoryUser::builder()->count())->toBe(2);
 })->with('dblayer_drivers');
 
-it('forwards DB facade methods and injects configured connection when available', function (string $driver): void {
+it('keeps infrastructure explicit while retaining raw SQL helpers', function (string $driver): void {
     setupTableRepositoryFixture($driver);
 
-    expect(TableRepositoryUser::statement(
+    expect(TableRepositoryUser::sqlStatement(
         'insert into users (tenant_id, email, name, active, deleted_at) values (?, ?, ?, ?, ?)',
         [10, 'raw@example.test', 'Raw Insert', 1, null],
     ))->toBeTrue();
@@ -112,10 +112,10 @@ it('forwards DB facade methods and injects configured connection when available'
     expect((int) ($rows[0]['c'] ?? 0))->toBe(1);
     expect(TableRepositoryUser::sqlScalar('select count(*) from users'))->toBe(1);
 
-    $lastId = TableRepositoryUser::lastInsertId();
+    $lastId = TableRepositoryUser::connection()->lastInsertId();
     expect($lastId)->not->toBeFalse();
 
-    $stats = TableRepositoryUser::stats();
+    $stats = DB::stats('table_repository_conn');
     expect($stats['database'] ?? null)->not->toBeNull();
     expect($stats['driver'] ?? null)->toBe(dblayerConnectionDriver('table_repository_conn'));
 })->with('dblayer_drivers');

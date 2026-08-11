@@ -68,11 +68,11 @@ After an operation, inspect ``lastQueryCount()`` and
 ``lastRelatedRowCount()``. The first is the number of statements performed by
 the last loader operation. For ``one``/``many``, the row count is the number of
 fetched related rows; for ``manyToMany``, it is pivot rows plus related rows.
-These counters are operation-local and use the connection's existing
-statistics; no always-on listener or trace buffer is created.
+These counters are operation-local and increment only when the loader itself
+executes a statement; unrelated connection activity cannot change them.
 
 Use a batch size below the selected driver's parameter limit and below any
-configured ``security.max_parameter_count``. The default is 500, which is safe
+configured ``security.max_params``. The default is 500, which is safe
 for common SQLite limits while remaining useful for MySQL and PostgreSQL.
 
 Input Contract
@@ -88,6 +88,11 @@ Input Contract
   projection so attachment remains deterministic.
 - ``one`` attaches one row or ``null``; ``many`` and ``manyToMany`` attach a
   list.
+- ``one`` requires an explicit ``orderBy()`` in its scope when more than one
+  related row may match and deterministic selection matters.
+- ``manyToMany`` does not promise database-natural pivot ordering. Add an
+  explicit ordering facility in application query design before relying on a
+  particular related-row sequence.
 - Scopes must mutate the supplied ``QueryBuilder``. They must not execute the
   builder or perform per-parent I/O.
 

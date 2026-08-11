@@ -76,7 +76,7 @@ Observability and Utility
 - ``listen()``, ``whenQueryingForLongerThan()``
 - ``stats()``, ``health()``, ``capabilities()``, ``supportsReturning()``, ``supportsJson()``, ``supportsWindowFunctions()``
 - ``pool()``, ``poolManager()``, ``withPooledConnection()``
-- ``cache()``, ``useFileCache()``
+- ``cache()``, ``setCache()``
 - ``resetRuntimeState()`` (useful for long-running workers between requests/jobs)
 
 Long-Running Worker Note

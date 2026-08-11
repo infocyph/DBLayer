@@ -10,7 +10,6 @@ use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository as QueryRepository;
 use InvalidArgumentException;
-use ReflectionMethod;
 
 /**
  * TableRepository
@@ -40,7 +39,6 @@ abstract class TableRepository
      * Forward unknown static calls by priority:
      * 1) Repository API
      * 2) QueryBuilder API
-     * 3) DB facade API (connection-aware forwarding)
      *
      * @param array<int,mixed> $arguments
      */
@@ -56,12 +54,8 @@ abstract class TableRepository
             return $query->$method(...$arguments);
         }
 
-        if (method_exists(DB::class, $method)) {
-            return self::forwardToFacade($method, $arguments);
-        }
-
         throw new BadMethodCallException(sprintf(
-            'Method %s::%s() does not exist on repository, query builder, or DB facade.',
+            'Method %s::%s() does not exist on the repository or query builder.',
             static::class,
             $method,
         ));
@@ -198,45 +192,5 @@ abstract class TableRepository
         }
 
         return $table;
-    }
-
-    /**
-     * Forward a call to DB facade while injecting repository connection argument
-     * by parameter name when supported by the target method.
-     *
-     * @param array<int,mixed> $arguments
-     */
-    private static function forwardToFacade(string $method, array $arguments): mixed
-    {
-        /** @var array<string,ReflectionMethod> $reflections */
-        static $reflections = [];
-
-        $reflection = $reflections[$method] ??= new ReflectionMethod(DB::class, $method);
-        $params = $reflection->getParameters();
-        $namedArgs = [];
-
-        foreach ($arguments as $index => $argument) {
-            if (!isset($params[$index])) {
-                $namedArgs[] = $argument;
-
-                continue;
-            }
-
-            $namedArgs[$params[$index]->getName()] = $argument;
-        }
-
-        foreach ($params as $param) {
-            if ($param->getName() !== 'connection') {
-                continue;
-            }
-
-            if (!array_key_exists('connection', $namedArgs)) {
-                $namedArgs['connection'] = static::resolveConnectionName();
-            }
-
-            break;
-        }
-
-        return DB::$method(...$namedArgs);
     }
 }

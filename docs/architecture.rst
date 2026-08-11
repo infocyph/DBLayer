@@ -9,8 +9,9 @@ Core Components
 ---------------
 
 - ``DB`` facade: static entrypoint.
-- ``TableRepository``: repository-oriented static adapter over repository/builder/facade.
-- ``Connection``: PDO lifecycle, driver, execution controls.
+- ``TableRepository``: repository-oriented static adapter over repository and builder APIs.
+- ``Connection``: PDO lifecycle and execution controls.
+- ``ReplicaSelector``: read strategy, health cooldown, weighted selection, and latency state.
 - ``QueryBuilder``: fluent SQL builder.
 - ``Repository``: table-oriented abstraction.
 - ``RelationLoader``: explicit, bounded relation projection over parent arrays.
@@ -37,10 +38,11 @@ Data Flow
 Typical request flow:
 
 1. Application code calls ``DB::table()`` or ``DB::repository()``.
-2. Builder/repository creates query payload + bindings.
-3. ``Connection`` validates and executes through driver/compiler.
-4. Events are emitted for logging/profiling/telemetry hooks.
-5. Result processors/casts adapt output for caller usage.
+2. Builder/repository creates a typed ``CompiledQuery`` with bindings and provenance.
+3. ``Connection`` applies generated/raw validation and executes through the driver.
+4. Opt-in cache reads use CacheLayer ``remember()``; writes schedule tag invalidation after commit.
+5. Events are emitted for logging/profiling/telemetry hooks.
+6. Result processors/casts adapt output for caller usage.
 
 Layer Lifecycles
 ----------------
@@ -52,12 +54,17 @@ Layer Lifecycles
 This lifecycle mismatch is the main reason DBLayer does not collapse these
 three concepts into one class.
 
-Driver Stack
-------------
+Canonical Query Pipeline
+------------------------
 
-- MySQL, PostgreSQL, SQLite drivers.
-- Grammar/compiler per dialect.
-- ``Capabilities`` flags for feature checks.
+Every structured builder operation follows one compilation path:
+
+``QueryBuilder → QueryPayload → driver compiler → CompiledQuery → Connection``.
+
+MySQL, PostgreSQL, and SQLite provide dialect compilers, while ``Capabilities``
+flags decide whether returning, insert-ignore, upsert, and related semantics are
+available. ``Executor`` only coordinates batching and portable read-back; it is
+not a second compiler, event dispatcher, or security boundary.
 
 Dialect-sensitive features (for example ``RETURNING`` or lock syntax) are
 resolved through this layer, not through conditional logic in application code.

@@ -1,5 +1,5 @@
-Events and Helpers
-==================
+Events and Array Utilities
+==========================
 
 Events
 ------
@@ -47,20 +47,21 @@ Built-in database event names:
 - ``statement``
 - ``fingerprint``
 
-Helpers
--------
+ArrayKit Integration
+--------------------
 
-From ``src/helpers.php``:
+DBLayer does not register generic global helpers. Use the explicit ``DB``
+facade for database operations and ArrayKit 5 directly for general array work:
 
-- DB helpers: ``db()``, ``db_table()``, ``db_select()``, ``db_transaction()``, ``db_after_commit()``
-- Data helpers: ``data_get()``, ``data_set()``
-- Utility helpers: ``collect()``, ``retry()``, ``rescue()``, ``blank()``, ``filled()``, ``now()``
+.. code-block:: php
 
-``collect()`` returns ``Infocyph\DBLayer\Support\Collection`` (ArrayKit-backed).
+   use Infocyph\ArrayKit\Array\DotNotation;
 
-Helper Philosophy
------------------
+   $payload = [];
+   DotNotation::set($payload, 'profile.name', 'Ada');
+   $name = DotNotation::get($payload, 'profile.name');
 
-Helpers are convenience wrappers, not a required API surface. You can use the
-fully qualified static facade methods if you prefer explicitness in large code
-bases.
+``QueryBuilder::collect()`` and Repository collection methods return
+``Infocyph\ArrayKit\Collection\Collection`` directly. For bounded result
+pipelines, ``QueryBuilder::lazyCollection()`` returns ArrayKit's
+``LazyCollection``.

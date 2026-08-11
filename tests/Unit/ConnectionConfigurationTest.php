@@ -188,3 +188,22 @@ it('accepts only null or sufficiently long cursor signing keys', function (): vo
         ],
     ]))->toThrow(ConnectionException::class, 'at least 32 bytes');
 });
+
+it('rejects invalid strategies replicas security limits and allowlist regexes', function (array $override): void {
+    expect(fn() => new ConnectionConfig(array_replace_recursive([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], $override)))->toThrow(ConnectionException::class);
+})->with([
+    'unknown read strategy' => [['read_strategy' => 'fastest']],
+    'non-positive replica weight' => [['read' => [['database' => ':memory:', 'weight' => 0]]]],
+    'malformed replica entry' => [['read' => ['not-a-replica']]],
+    'zero maximum parameters' => [['security' => ['max_params' => 0]]],
+    'negative maximum binding bytes' => [['security' => ['max_param_bytes' => -1]]],
+    'invalid raw allowlist regex' => [[
+        'security' => [
+            'raw_sql_policy' => 'allowlist',
+            'raw_sql_allowlist' => ['/[invalid/'],
+        ],
+    ]],
+]);

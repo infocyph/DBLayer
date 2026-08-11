@@ -309,7 +309,7 @@ trait RepositoryInternals
      */
     private function freshTimestamp(): string
     {
-        return new \DateTimeImmutable('now')->format($this->grammar->getDateFormat());
+        return new \DateTimeImmutable('now')->format($this->connection->getDriver()->dateFormat());
     }
 
     /**
@@ -419,7 +419,7 @@ trait RepositoryInternals
     private function normalizeDateTimeForWrite(mixed $value): mixed
     {
         if ($value instanceof \DateTimeInterface) {
-            return $value->format($this->grammar->getDateFormat());
+            return $value->format($this->connection->getDriver()->dateFormat());
         }
 
         return $value;

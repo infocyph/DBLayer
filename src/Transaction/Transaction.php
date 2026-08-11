@@ -57,7 +57,6 @@ final class Transaction
      *   committed:int,
      *   rolled_back:int,
      *   deadlocks:int,
-     *   timeouts:int,
      *   in_transaction:bool,
      *   current_level:int,
      *   savepoints:int,
@@ -69,7 +68,6 @@ final class Transaction
         'committed' => 0,
         'rolled_back' => 0,
         'deadlocks' => 0,
-        'timeouts' => 0,
         'in_transaction' => false,
         'current_level' => 0,
         'savepoints' => 0,
@@ -108,7 +106,7 @@ final class Transaction
     public function begin(): void
     {
         if ($this->level === 0) {
-            $this->connection->beginTransaction();
+            $this->connection->beginNativeTransaction();
             $this->stats['total']++;
             $this->stats['in_transaction'] = true;
             $this->startedAt = microtime(true);
@@ -127,10 +125,33 @@ final class Transaction
      */
     public function commit(): void
     {
-        $this->finishTransactionLevel(
-            $this->finalizeCommit(...),
-            $this->releaseSavepoint(...),
+        if ($this->level === 0) {
+            return;
+        }
+
+        if ($this->level > 1) {
+            $completedLevel = $this->level;
+            $targetLevel = $completedLevel - 1;
+            $this->releaseSavepoint($targetLevel);
+            $this->level = $targetLevel;
+            $this->stats['current_level'] = $this->level;
+            $this->promoteAfterCommitCallbacks($completedLevel, $targetLevel);
+
+            return;
+        }
+
+        $this->connection->commitNativeTransaction();
+        $durationMs = $this->transactionDurationMs();
+        $this->stats['committed']++;
+        $this->level = 0;
+        $this->stats['current_level'] = 0;
+        $this->finishTopLevel();
+        $callbacks = $this->drainAfterCommitCallbacks();
+        Events::dispatch(
+            'db.transaction.committed',
+            [new TransactionCommitted($this->connection, $durationMs)],
         );
+        $this->runAfterCommitCallbacks($callbacks);
     }
 
     /**
@@ -162,7 +183,13 @@ final class Transaction
                 throw $e;
             }
 
-            $this->rollBack();
+            try {
+                $this->rollBack();
+            } catch (Throwable $rollbackFailure) {
+                $this->connection->disconnect();
+
+                throw TransactionException::rollbackAlsoFailed($e, $rollbackFailure);
+            }
 
             if ($attempt < $attempts && $this->causedByRetryableTransactionError($e)) {
                 $this->stats['deadlocks']++;
@@ -190,7 +217,6 @@ final class Transaction
      *   committed:int,
      *   rolled_back:int,
      *   deadlocks:int,
-     *   timeouts:int,
      *   in_transaction:bool,
      *   current_level:int,
      *   savepoints:int,
@@ -228,7 +254,6 @@ final class Transaction
             'committed' => 0,
             'rolled_back' => 0,
             'deadlocks' => 0,
-            'timeouts' => 0,
             'in_transaction' => $this->level > 0,
             'current_level' => $this->level,
             'savepoints' => 0,
@@ -246,11 +271,31 @@ final class Transaction
      */
     public function rollBack(): void
     {
-        $this->discardAfterCommitCallbacks($this->level);
+        if ($this->level === 0) {
+            return;
+        }
 
-        $this->finishTransactionLevel(
-            $this->finalizeRollback(...),
-            $this->rollbackToSavepoint(...),
+        if ($this->level > 1) {
+            $completedLevel = $this->level;
+            $targetLevel = $completedLevel - 1;
+            $this->rollbackToSavepoint($targetLevel);
+            $this->discardAfterCommitCallbacks($completedLevel);
+            $this->level = $targetLevel;
+            $this->stats['current_level'] = $this->level;
+
+            return;
+        }
+
+        $this->connection->rollBackNativeTransaction();
+        $durationMs = $this->transactionDurationMs();
+        $this->discardAfterCommitCallbacks(1);
+        $this->stats['rolled_back']++;
+        $this->level = 0;
+        $this->stats['current_level'] = 0;
+        $this->finishTopLevel();
+        Events::dispatch(
+            'db.transaction.rolled_back',
+            [new TransactionRolledBack($this->connection, $durationMs)],
         );
     }
 
@@ -282,7 +327,9 @@ final class Transaction
         $supportsSavepoints = $this->connection->getCapabilities()->supportsSavepoints;
 
         if (!$supportsSavepoints) {
-            return;
+            throw TransactionException::failed(
+                new \LogicException('Nested transactions require driver savepoint support.'),
+            );
         }
 
         $this->connection->statement('SAVEPOINT trans_' . $level);
@@ -313,57 +360,6 @@ final class Transaction
         return $callbacks;
     }
 
-    private function finalizeCommit(): void
-    {
-        $this->finalizeTopLevelChange(
-            fn(): bool => $this->connection->commit(),
-            'committed',
-            'db.transaction.committed',
-            fn(float $durationMs): TransactionCommitted => new TransactionCommitted($this->connection, $durationMs),
-        );
-    }
-
-    private function finalizeRollback(): void
-    {
-        $this->finalizeTopLevelChange(
-            fn(): bool => $this->connection->rollBack(),
-            'rolled_back',
-            'db.transaction.rolled_back',
-            fn(float $durationMs): TransactionRolledBack => new TransactionRolledBack($this->connection, $durationMs),
-        );
-    }
-
-    /**
-     * @param callable():bool $operation
-     * @param callable(float):object $eventFactory
-     * @param 'committed'|'rolled_back' $counterKey
-     */
-    private function finalizeTopLevelChange(
-        callable $operation,
-        string $counterKey,
-        string $eventName,
-        callable $eventFactory,
-    ): void {
-        try {
-            $operation();
-        } catch (Throwable $exception) {
-            $this->afterCommitCallbacks = [];
-
-            throw $exception;
-        }
-
-        if ($counterKey === 'committed') {
-            $this->stats['committed']++;
-        } else {
-            $this->stats['rolled_back']++;
-        }
-
-        $durationMs = $this->transactionDurationMs();
-        $this->finishTopLevel();
-        $this->runAfterCommitCallbacks($this->drainAfterCommitCallbacks());
-        Events::dispatch($eventName, [$eventFactory($durationMs)]);
-    }
-
     /**
      * Finalize stats for a completed top-level transaction.
      */
@@ -375,32 +371,6 @@ final class Transaction
 
         $this->startedAt = null;
         $this->stats['in_transaction'] = false;
-    }
-
-    /**
-     * Shared level transition for commit/rollback.
-     *
-     * @param callable():void $finalizeTopLevel
-     * @param callable(int):void $finalizeNested
-     */
-    private function finishTransactionLevel(callable $finalizeTopLevel, callable $finalizeNested): void
-    {
-        if ($this->level === 0) {
-            return;
-        }
-
-        $completedLevel = $this->level;
-        $this->level--;
-        $this->stats['current_level'] = $this->level;
-
-        if ($this->level === 0) {
-            $finalizeTopLevel();
-
-            return;
-        }
-
-        $finalizeNested($this->level);
-        $this->promoteAfterCommitCallbacks($completedLevel, $this->level);
     }
 
     private function promoteAfterCommitCallbacks(int $fromLevel, int $toLevel): void
@@ -424,7 +394,9 @@ final class Transaction
         $supportsSavepoints = $this->connection->getCapabilities()->supportsSavepoints;
 
         if (!$supportsSavepoints) {
-            return;
+            throw TransactionException::failed(
+                new \LogicException('Nested transactions require driver savepoint support.'),
+            );
         }
 
         $this->connection->statement('RELEASE SAVEPOINT trans_' . $level);
@@ -438,7 +410,9 @@ final class Transaction
         $supportsSavepoints = $this->connection->getCapabilities()->supportsSavepoints;
 
         if (!$supportsSavepoints) {
-            return;
+            throw TransactionException::failed(
+                new \LogicException('Nested transactions require driver savepoint support.'),
+            );
         }
 
         $this->connection->statement('ROLLBACK TO SAVEPOINT trans_' . $level);

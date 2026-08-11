@@ -127,8 +127,8 @@ Use builder for joins and aggregate shaping:
 
 .. code-block:: php
 
-   $rows = DB::table('orders as o')
-       ->join('users as u', 'o.user_id', '=', 'u.id')
+   $rows = DB::table('orders')->as('o')
+       ->joinAs('users', 'u', 'o.user_id', '=', 'u.id')
        ->select('u.email')
        ->selectRaw('count(*) as orders_count')
        ->groupBy('u.email')

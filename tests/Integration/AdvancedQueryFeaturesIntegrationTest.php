@@ -6,6 +6,34 @@ use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\QueryException;
 
+it('compiles structured source and join aliases without raw identifier strings', function (string $driver): void {
+    $connection = 'structured_aliases_' . $driver;
+    dblayerAddConnectionForDriver($driver, $connection);
+    $schemaDriver = dblayerConnectionDriver($connection);
+    $users = dblayerTable('alias_users');
+    $orders = dblayerTable('alias_orders');
+
+    DB::statement(sprintf('create table %s (%s, name %s)', $users, dblayerAutoIncrementPrimaryKey($schemaDriver), dblayerStringType($schemaDriver)), [], $connection);
+    DB::statement(sprintf('create table %s (%s, user_id integer not null)', $orders, dblayerAutoIncrementPrimaryKey($schemaDriver)), [], $connection);
+    DB::table($users, $connection)->insert(['name' => 'Alice']);
+    DB::table($orders, $connection)->insert(['user_id' => 1]);
+
+    $query = DB::table($orders, $connection)
+        ->as('o')
+        ->joinAs($users, 'u', 'o.user_id', '=', 'u.id')
+        ->addSelectAs('o.id', 'order_id')
+        ->addSelectAs('u.name', 'user_name');
+    $identifierQuote = $schemaDriver === 'mysql' ? '`' : '"';
+
+    expect($query->toSql())
+        ->toContain(" AS {$identifierQuote}o{$identifierQuote}")
+        ->toContain(" AS {$identifierQuote}u{$identifierQuote}")
+        ->and($query->get())->toBe([['order_id' => 1, 'user_name' => 'Alice']]);
+
+    expect(fn() => DB::table($orders . ' as o', $connection))
+        ->toThrow(QueryException::class);
+})->with('dblayer_drivers');
+
 it('supports CTEs and subquery sources', function (string $driver): void {
     dblayerAddConnectionForDriver($driver, 'advanced_query_features');
     $schemaDriver = dblayerConnectionDriver('advanced_query_features');
@@ -248,6 +276,7 @@ it('aggregates enabled telemetry by parameterized query shape', function (string
         ['name' => 'two'],
     ]);
 
+    DB::flushTelemetry();
     DB::enableTelemetry();
 
     DB::table($table, $connection)->where('id', '=', 1)->get();

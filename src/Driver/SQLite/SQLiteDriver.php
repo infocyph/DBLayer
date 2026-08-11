@@ -7,6 +7,8 @@ namespace Infocyph\DBLayer\Driver\SQLite;
 use Infocyph\DBLayer\Driver\AbstractPdoDriver;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\QueryException;
+use PDO;
+use PDOException;
 
 /**
  * SQLite driver.
@@ -24,6 +26,16 @@ final class SQLiteDriver extends AbstractPdoDriver
     ];
 
     protected const string DRIVER_NAME = 'sqlite';
+
+    #[\Override]
+    public function applyStatementTimeout(PDO $pdo, int $timeoutMs): void
+    {
+        try {
+            $pdo->exec('pragma busy_timeout = ' . max(0, $timeoutMs));
+        } catch (PDOException) {
+            // SQLite exposes lock-wait timeout only; DBLayer tracks execution budget.
+        }
+    }
 
     #[\Override]
     public function compileExplain(

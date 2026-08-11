@@ -69,6 +69,8 @@ trait QueryBuilderInternals
         bool $recursive,
         array $bindings,
     ): self {
+        $this->validateColumnIdentifier($name, false);
+
         if (\is_callable($query)) {
             $builder = $this->newQuery();
             $query($builder);
@@ -77,6 +79,8 @@ trait QueryBuilderInternals
 
         if (\is_string($query)) {
             $this->validateRawFragment($query, $bindings);
+        } else {
+            $this->containsRawFragments = $this->containsRawFragments || $query->containsRawFragments;
         }
 
         $this->ctes[] = [
@@ -192,6 +196,35 @@ trait QueryBuilderInternals
         }
 
         return str_contains(strtolower($sql), strtolower($rule));
+    }
+
+    /**
+     * Normalize a SQL boolean combinator to its closed supported set.
+     */
+    private function normalizeBoolean(string $boolean): string
+    {
+        $boolean = strtolower(trim($boolean));
+
+        if (!in_array($boolean, ['and', 'or'], true)) {
+            throw QueryException::invalidParameter('boolean', 'Boolean combinator must be AND or OR.');
+        }
+
+        return $boolean;
+    }
+
+    /**
+     * Normalize a JOIN type to its closed supported set.
+     */
+    private function normalizeJoinType(string $type, bool $allowCross = true): string
+    {
+        $type = strtolower(trim($type));
+        $allowed = $allowCross ? ['inner', 'left', 'right', 'cross'] : ['inner', 'left', 'right'];
+
+        if (!in_array($type, $allowed, true)) {
+            throw QueryException::invalidParameter('type', 'Unsupported JOIN type.');
+        }
+
+        return $type;
     }
 
     /**
@@ -334,15 +367,16 @@ trait QueryBuilderInternals
         $this->enforceRawSqlPolicy($sql);
 
         try {
-            Security::validateQuery($sql, $bindings, [
-                'enabled' => true,
-                'max_sql_length' => 8_192,
-                'max_params' => 256,
-                'max_param_bytes' => 2_048,
-            ]);
+            Security::validateQuery(
+                $sql,
+                $bindings,
+                $this->connection->getConfig()->securityConfig(),
+            );
         } catch (SecurityException $e) {
             throw QueryException::buildingFailed('Unsafe raw SQL fragment: ' . $e->getMessage());
         }
+
+        $this->containsRawFragments = true;
     }
 
     /**

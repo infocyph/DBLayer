@@ -9,6 +9,7 @@ use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Pagination\CursorCodec;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Support\SqlFingerprint;
 
 /**
  * Internal mechanics for stable keyset iteration and cursor pagination.
@@ -125,6 +126,14 @@ trait QueryBuilderKeysetPagination
         );
     }
 
+    /** @param list<array{column:string,direction:string}> $orders */
+    private function assertCursorResultMappings(array $orders): void
+    {
+        foreach ($orders as $order) {
+            $this->cursorResultKey($order['column']);
+        }
+    }
+
     /**
      * @param list<array<string,mixed>> $results
      */
@@ -164,6 +173,7 @@ trait QueryBuilderKeysetPagination
         }
 
         $query = $this->cloneBuilder();
+        $query->withoutCache();
         $query->limit = null;
         $query->offset = null;
         $query->orders = $orders;
@@ -199,7 +209,7 @@ trait QueryBuilderKeysetPagination
 
     private function cursorFingerprint(QueryBuilder $query): string
     {
-        $parts = [$query->toSelectSql()];
+        $parts = [SqlFingerprint::normalize($query->toSelectSql())];
 
         foreach ($query->getBindings() as $binding) {
             $parts[] = $this->cursorBindingFingerprint($binding);
@@ -210,9 +220,57 @@ trait QueryBuilderKeysetPagination
 
     private function cursorResultKey(string $column): string
     {
-        $segments = \explode('.', $column);
+        $selected = [];
+        $outputCounts = [];
 
-        return $segments[\count($segments) - 1];
+        foreach ($this->columns as $selectedColumn) {
+            if (!is_string($selectedColumn) || $selectedColumn === '*') {
+                continue;
+            }
+
+            [$source, $alias] = $this->cursorSelectedColumn($selectedColumn);
+            $segments = explode('.', $source);
+            $output = $alias ?? $segments[count($segments) - 1];
+            $selected[$source] = $output;
+            $selected[$output] ??= $output;
+            $outputCounts[$output] = ($outputCounts[$output] ?? 0) + 1;
+        }
+
+        if (isset($selected[$column])) {
+            $output = $selected[$column];
+            if (($outputCounts[$output] ?? 0) > 1) {
+                throw QueryException::invalidParameter(
+                    'cursor',
+                    "Ordered column [{$column}] has an ambiguous result key; select it with addSelectAs().",
+                );
+            }
+
+            return $output;
+        }
+
+        $segments = \explode('.', $column);
+        $output = $segments[\count($segments) - 1];
+
+        if (count($segments) > 1 && $this->joins !== []) {
+            throw QueryException::invalidParameter(
+                'cursor',
+                "Qualified ordered column [{$column}] must be selected with addSelectAs() in a joined query.",
+            );
+        }
+
+        return $output;
+    }
+
+    /**
+     * @return array{0:string,1:?string}
+     */
+    private function cursorSelectedColumn(string $column): array
+    {
+        if (preg_match('/^([^\s]+)\s+(?:as\s+)?([A-Za-z_][A-Za-z0-9_]*)$/iD', trim($column), $matches) === 1) {
+            return [$matches[1], $matches[2]];
+        }
+
+        return [trim($column), null];
     }
 
     private function cursorSigningKey(): ?string
@@ -267,6 +325,7 @@ trait QueryBuilderKeysetPagination
         string $direction,
     ): array {
         $clone = $this->cloneBuilder();
+        $clone->withoutCache();
         $this->resetCursorWindow($clone);
         $column = $this->requireNonEmptyString($column, 'column');
 
@@ -335,10 +394,14 @@ trait QueryBuilderKeysetPagination
         $orders = $this->orders;
 
         if ($orders === []) {
-            return [[
+            $orders = [[
                 'column' => $uniqueColumn,
                 'direction' => $direction ?? 'asc',
             ]];
+
+            $this->assertCursorResultMappings($orders);
+
+            return $orders;
         }
 
         $columns = \array_column($orders, 'column');
@@ -356,6 +419,8 @@ trait QueryBuilderKeysetPagination
                 'direction' => $direction ?? $orders[\count($orders) - 1]['direction'],
             ];
 
+            $this->assertCursorResultMappings($orders);
+
             return $orders;
         }
 
@@ -372,6 +437,8 @@ trait QueryBuilderKeysetPagination
                 'The direction conflicts with the existing unique tie-breaker order.',
             );
         }
+
+        $this->assertCursorResultMappings($orders);
 
         return $orders;
     }

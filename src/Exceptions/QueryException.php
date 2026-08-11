@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Exceptions;
 
+use Infocyph\DBLayer\Support\SqlFingerprint;
+
 /**
  * Errors related to query building, compilation, or execution.
  */
@@ -42,8 +44,8 @@ final class QueryException extends DBException
         string $error,
         ?string $code = null,
     ): self {
-        $statement = strtoupper(substr(ltrim($sql), 0, strcspn(ltrim($sql), " \t\n\r")));
-        $fingerprint = substr(hash('sha256', strtolower(trim(preg_replace('/\s+/', ' ', $sql) ?? $sql))), 0, 16);
+        $statement = SqlFingerprint::statement($sql);
+        $fingerprint = SqlFingerprint::hash($sql);
         $message = 'Query execution failed: ' . $error
             . ' [statement: ' . $statement . ']'
             . ' [fingerprint: ' . $fingerprint . ']';
@@ -53,6 +55,14 @@ final class QueryException extends DBException
         }
 
         return new self($message);
+    }
+
+    /**
+     * A successful insert did not expose its generated identifier.
+     */
+    public static function generatedIdUnavailable(): self
+    {
+        return new self('Insert succeeded, but the generated identifier is unavailable.');
     }
 
     /**
@@ -107,5 +117,13 @@ final class QueryException extends DBException
     public static function invalidParameter(string $name, string $reason): self
     {
         return new self("Invalid query parameter [{$name}]: {$reason}");
+    }
+
+    /**
+     * Requested query semantics are unavailable on the active driver.
+     */
+    public static function unsupportedCapability(string $capability, string $driver): self
+    {
+        return new self("Query capability [{$capability}] is not supported by driver [{$driver}].");
     }
 }

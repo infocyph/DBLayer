@@ -4,11 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Driver\Support;
 
-use Infocyph\DBLayer\Driver\MySQL\MySQLGrammar;
-use Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLGrammar;
-use Infocyph\DBLayer\Driver\SQLite\SQLiteGrammar;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
-use Infocyph\DBLayer\Grammar\Grammar;
 use PDOException;
 use Throwable;
 
@@ -18,9 +14,7 @@ use Throwable;
  * Central place for driver-specific configuration that is needed
  * by non-driver classes (Connection, Transaction, ConnectionConfig).
  *
- * Responsibilities:
- *  - Create Grammar instances for a given driver
- *  - Classify deadlock errors per driver
+ * Responsibility: classify transient and transaction errors per driver.
  */
 final class DriverProfile
 {
@@ -207,21 +201,6 @@ final class DriverProfile
             self::messageSuggestsRetryableTransactionConflict(...),
             self::metadataSuggestsRetryableTransactionConflict(...),
         );
-    }
-
-    /**
-     * Create a Grammar instance for the given driver.
-     */
-    public static function createGrammar(string $driver): Grammar
-    {
-        $driver = strtolower($driver);
-
-        return match ($driver) {
-            'mysql', 'mariadb' => new MySQLGrammar(),
-            'pgsql', 'postgres', 'postgresql' => new PostgreSQLGrammar(),
-            'sqlite', 'sqlite3' => new SQLiteGrammar(),
-            default => throw ConnectionException::unsupportedDriver($driver),
-        };
     }
 
     /**

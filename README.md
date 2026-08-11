@@ -8,19 +8,22 @@
 ![GitHub Code Size](https://img.shields.io/github/languages/code-size/infocyph/DBLayer)
 [![Documentation](https://img.shields.io/badge/Documentation-DBLayer-blue?logo=readthedocs&logoColor=white)](https://docs.infocyph.com/projects/DBLayer/)
 
-A robust, secure, and feature-rich database abstraction layer for PHP 8.4+ with multi-driver compatibility.
+A high-performance, secure database layer for PHP 8.4+. DBLayer combines a
+QueryBuilder, reusable repository policies, explicit static table ergonomics,
+multi-driver execution, and operational controls without becoming an ORM.
 
 ## Features
 
 ### Core Features
 - **Query Builder** - Fluent, Laravel-like API
-- **Repository Layer** - Thin class-based repositories on top of Query Builder
+- **Repository Layer** - Reusable table policies, casts, hooks, tenancy, soft deletes, and optimistic locking
+- **TableRepository** - Static repository and QueryBuilder ergonomics with explicit infrastructure access
 - **Connection Manager** - Connection pooling + read replicas
-- **Replica Strategies** - `random`, `round_robin`, `least_latency`
+- **Replica Strategies** - `random`, `round_robin`, `least_latency`, `weighted`
 - **Multi-Driver** - MySQL, PostgreSQL, SQLite
 - **Security** - Multi-layer SQL injection protection
 - **Transactions** - Nested transactions with savepoints
-- **Caching** - Lazy CacheLayer 2 memory/file adapter integration
+- **Caching** - Opt-in CacheLayer 3 query results with tags and commit-safe invalidation
 - **Profiling** - Performance monitoring
 - **Events** - Lifecycle hooks
 - **Telemetry** - Query + transaction observability export
@@ -78,7 +81,7 @@ DB::addConnection([
 // Read replicas
 DB::addConnection([
     'driver' => 'mysql',
-    'read_strategy' => 'round_robin', // random | round_robin | least_latency
+    'read_strategy' => 'round_robin', // random | round_robin | least_latency | weighted
     'read' => [
         ['host' => 'replica1.example.com'],
         ['host' => 'replica2.example.com'],
@@ -178,15 +181,17 @@ DB::table('users')
 DB::table('users')->where('id', $id)->delete();
 
 // Complex queries
-$orders = DB::table('orders as o')
-    ->join('users as u', 'o.user_id', '=', 'u.id')
-    ->leftJoin('products as p', 'o.product_id', '=', 'p.id')
+$orders = DB::table('orders')->as('o')
+    ->joinAs('users', 'u', 'o.user_id', '=', 'u.id')
+    ->leftJoinAs('products', 'p', 'o.product_id', '=', 'p.id')
     ->where('o.status', 'completed')
     ->where(function($q) {
         $q->where('o.total', '>', 1000)
           ->orWhere('u.vip', true);
     })
-    ->select('o.*', 'u.name as user_name', 'p.name as product_name')
+    ->select('o.*')
+    ->addSelectAs('u.name', 'user_name')
+    ->addSelectAs('p.name', 'product_name')
     ->get();
 
 // Aggregates
@@ -206,6 +211,35 @@ $all = $users->all();
 $one = $users->find(1);
 $active = $users->get(fn ($q) => $q->where('active', 1));
 ```
+
+### Collections and Result Caching
+
+Array results remain the default. Opt into DBLayer 5 collection APIs or
+bounded lazy transformations explicitly:
+
+```php
+$collection = DB::table('users')->where('active', '=', 1)->collect();
+$lazy = DB::table('users')->orderBy('id')->lazyCollection(chunkSize: 500);
+```
+
+Query result caching is also explicit. Cache misses are resolved through
+CacheLayer 3 `remember()`; writes invalidate conservative table tags only after
+the surrounding transaction commits.
+
+```php
+use Infocyph\CacheLayer\Cache\Cache;
+
+DB::setCache(Cache::memory('application'));
+
+$active = DB::table('users')
+    ->where('active', '=', 1)
+    ->cacheFor(120)
+    ->cacheTags('users')
+    ->get();
+```
+
+Transactions, sticky read-after-write state, locking reads, cursors, streaming,
+unsupported bindings, and unsafe raw shapes bypass shared query caching.
 
 ### Choosing APIs (DB vs QueryBuilder vs Repository)
 
@@ -240,7 +274,7 @@ final class User extends TableRepository
 
 $one = User::find(1);                              // Repository method
 $rows = User::where('active', '=', 1)->get();     // QueryBuilder method
-$stats = User::stats();                            // DB facade method
+$stats = DB::stats('main');                        // Infrastructure stays explicit
 $reportRows = User::query('reporting')->get();     // Per-call connection override
 ```
 
@@ -319,7 +353,7 @@ Hardening controls:
 
 - PHP 8.4+
 - ext-pdo
-- Composer installs `infocyph/arraykit ^4.6.1`, `infocyph/cachelayer ^2.0.1`, and
+- Composer installs `infocyph/DBLayer ^5.1`, `infocyph/cachelayer ^3.1`, and
   `psr/log ^3.0.2`
 - ext-pdo_mysql (for MySQL)
 - ext-pdo_pgsql (for PostgreSQL)
@@ -327,17 +361,33 @@ Hardening controls:
 
 ## Security
 
-Protected by [PHPForge](https://github.com/infocyph/PHPForge) — an automated quality and security gate for PHP projects.
+Do not disclose suspected vulnerabilities in a public issue, discussion or pull request. Follow [SECURITY.md](SECURITY.md) and use [GitHub private vulnerability reporting](https://github.com/infocyph/DBLayer/security/advisories/new).
+
+DBLayer is protected by [PHPForge](https://github.com/infocyph/PHPForge), which provides automated tests, static and taint analysis, dependency auditing, architecture checks and release-readiness gates. Automated controls do not replace responsible disclosure or manual review.
+
 
 ---
 
 <div align="center">
   <sub><strong>Made with ❤️ for the PHP community</strong></sub><br />
   <sub><a href="LICENSE">MIT Licensed</a></sub><br />
-  <a href="https://docs.infocyph.com/projects/DBLayer">Documentation</a> •
+  <a href="https://docs.infocyph.com/projects/DBLayer/">Documentation</a> •
   <a href="SECURITY.md">Security</a> •
   <a href="CODE_OF_CONDUCT.md">Code of Conduct</a> •
-  <a href="CONTRIBUTING.md">Contributing</a> •
-  <a href="https://github.com/infocyph/DBLayer/issues">Report Bug</a> •
-  <a href="https://github.com/infocyph/DBLayer/issues">Request Feature</a>
+  <a href="CONTRIBUTING.md">Contributing</a><br />
+  <span title="Issue templates" aria-label="Issue templates">🗂️</span>
+  <a href="https://github.com/infocyph/DBLayer/issues/new?template=bug_report.yml">Bug</a> •
+  <a href="https://github.com/infocyph/DBLayer/issues/new?template=feature_request.yml">Feature</a> •
+  <a href="https://github.com/infocyph/DBLayer/issues/new?template=docs_improvement.yml">Documentation</a> •
+  <a href="https://github.com/infocyph/DBLayer/issues/new?template=question.yml">Question</a> •
+  <a href="https://github.com/infocyph/DBLayer/issues/new?template=ci_failure.yml">CI failure</a><br />
+  <span title="Pull request templates" aria-label="Pull request templates">🔀</span>
+  <a href="https://github.com/infocyph/DBLayer/compare/main...HEAD?quick_pull=1&amp;template=PULL_REQUEST_TEMPLATE.md">General</a> •
+  <a href="https://github.com/infocyph/DBLayer/compare/main...HEAD?quick_pull=1&amp;template=bug_fix.md">Bug fix</a> •
+  <a href="https://github.com/infocyph/DBLayer/compare/main...HEAD?quick_pull=1&amp;template=feature.md">Feature</a> •
+  <a href="https://github.com/infocyph/DBLayer/compare/main...HEAD?quick_pull=1&amp;template=refactor.md">Refactor</a> •
+  <a href="https://github.com/infocyph/DBLayer/compare/main...HEAD?quick_pull=1&amp;template=performance.md">Performance</a> •
+  <a href="https://github.com/infocyph/DBLayer/compare/main...HEAD?quick_pull=1&amp;template=security_reliability.md">Security &amp; reliability</a> •
+  <a href="https://github.com/infocyph/DBLayer/compare/main...HEAD?quick_pull=1&amp;template=documentation.md">Documentation</a> •
+  <a href="https://github.com/infocyph/DBLayer/compare/main...HEAD?quick_pull=1&amp;template=maintenance.md">Maintenance</a>
 </div>

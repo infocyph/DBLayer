@@ -8,6 +8,8 @@ use Closure;
 use Generator;
 use Infocyph\CacheLayer\Cache\Cache;
 use Infocyph\CacheLayer\Cache\CacheInterface;
+use Infocyph\DBLayer\Concerns\DBBatchOperations;
+use Infocyph\DBLayer\Concerns\DBQueryTimeMonitors;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\Connection\ConnectionSecurityConfigValidator;
@@ -15,10 +17,10 @@ use Infocyph\DBLayer\Connection\Pool;
 use Infocyph\DBLayer\Connection\PoolManager;
 use Infocyph\DBLayer\Driver\Support\Capabilities;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
-use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuting;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
+use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository;
 use Infocyph\DBLayer\Query\ResultProcessor;
@@ -27,7 +29,7 @@ use Infocyph\DBLayer\Support\Logger;
 use Infocyph\DBLayer\Support\Profiler;
 use Infocyph\DBLayer\Support\QueryExecutedBridge;
 use Infocyph\DBLayer\Support\QueryFailureBridge;
-use Infocyph\DBLayer\Support\Str;
+use Infocyph\DBLayer\Support\TableNameNormalizer;
 use Infocyph\DBLayer\Support\Telemetry;
 use PDO;
 use Psr\Log\LoggerInterface as PsrLoggerInterface;
@@ -47,6 +49,9 @@ use Throwable;
  */
 class DB
 {
+    use DBBatchOperations;
+    use DBQueryTimeMonitors;
+
     private const int DEFAULT_MAX_QUERY_LOG_ENTRIES = 2_000;
 
     /**
@@ -167,8 +172,6 @@ class DB
 
     private static ?Closure $queryExecutedEventBridge = null;
 
-    private static ?Closure $queryExecutingEventBridge = null;
-
     private static ?Closure $queryFailedEventBridge = null;
 
     /**
@@ -190,8 +193,18 @@ class DB
     {
         $configObject = static::normalizeConfig($config);
 
+        $existing = static::$connections[$name] ?? null;
+        if ($existing instanceof Connection) {
+            if ($existing->inTransaction()) {
+                throw ConnectionException::invalidConfiguration(
+                    "Cannot replace connection [{$name}] while it has an active transaction.",
+                );
+            }
+            $existing->disconnect();
+        }
+
         static::$connectionConfigs[$name] = $configObject;
-        static::$connections[$name] = new Connection($configObject);
+        static::$connections[$name] = new Connection($configObject, $name);
         static::$pool?->addConfig($name, $configObject);
 
         if (static::$defaultConnection === null) {
@@ -212,85 +225,6 @@ class DB
     }
 
     /**
-     * Execute multiple queries in sequence.
-     *
-     * Supported item shapes:
-     *  - Legacy SELECT batch: [sql, bindings?]
-     *  - Typed batch: [operation, sql, bindings?]
-     *
-     * Supported operations:
-     *  - select
-     *  - select_one
-     *  - select_result_sets
-     *  - scalar
-     *  - statement
-     *  - insert
-     *  - update
-     *  - delete
-     *  - unprepared
-     *
-     * @param list<array<int,mixed>> $queries
-     * @return list<mixed>
-     */
-    public static function batch(array $queries, ?string $connection = null): array
-    {
-        $results = [];
-        $operations = [
-            'select',
-            'select_one',
-            'select_result_sets',
-            'scalar',
-            'statement',
-            'insert',
-            'update',
-            'delete',
-            'unprepared',
-        ];
-
-        foreach ($queries as $query) {
-            if ($query === [] || !isset($query[0]) || !is_string($query[0])) {
-                throw new \InvalidArgumentException('Each batch query must start with a SQL string or operation name.');
-            }
-
-            $head = strtolower(trim($query[0]));
-            $isTyped = \in_array($head, $operations, true);
-
-            if (!$isTyped) {
-                $sql = $query[0];
-                $bindings = isset($query[1]) && is_array($query[1])
-                    ? self::normalizeBatchBindings($query[1])
-                    : [];
-                $results[] = static::select($sql, $bindings, $connection);
-
-                continue;
-            }
-
-            if (!isset($query[1]) || !is_string($query[1])) {
-                throw new \InvalidArgumentException('Typed batch queries must provide SQL as the second item.');
-            }
-
-            $sql = $query[1];
-            $bindings = isset($query[2]) && is_array($query[2])
-                ? self::normalizeBatchBindings($query[2])
-                : [];
-
-            $results[] = match ($head) {
-                'select' => static::select($sql, $bindings, $connection),
-                'select_one' => static::selectOne($sql, $bindings, $connection),
-                'select_result_sets' => static::selectResultSets($sql, $bindings, $connection),
-                'scalar' => static::scalar($sql, $bindings, $connection),
-                'statement' => static::statement($sql, $bindings, $connection),
-                'insert' => static::insert($sql, $bindings, $connection),
-                'update' => static::update($sql, $bindings, $connection),
-                'delete' => static::delete($sql, $bindings, $connection),
-                'unprepared' => static::unprepared($sql, $connection),
-            };
-        }
-
-        return $results;
-    }
-
-    /**
      * Begin a transaction.
      *
      * @throws ConnectionException
@@ -303,16 +237,10 @@ class DB
     /**
      * Get shared cache manager instance.
      */
-    public static function cache(?CacheInterface $cache = null): CacheInterface
+    public static function cache(): CacheInterface
     {
         if (static::$cache === null) {
-            static::$cache = $cache ?? Cache::memory('dblayer');
-
-            return static::$cache;
-        }
-
-        if ($cache !== null) {
-            static::$cache = $cache;
+            static::$cache = Cache::memory('dblayer');
         }
 
         return static::$cache;
@@ -360,12 +288,12 @@ class DB
 
         if ($fresh) {
             // Fresh, non-cached Connection for this DB config.
-            return new Connection($config);
+            return new Connection($config, $name);
         }
 
         // Shared singleton: lazily (re)instantiate if missing.
         if (!isset(static::$connections[$name])) {
-            static::$connections[$name] = new Connection($config);
+            static::$connections[$name] = new Connection($config, $name);
         }
 
         return static::$connections[$name];
@@ -674,13 +602,35 @@ class DB
     }
 
     /**
+     * Schedule cache-tag invalidation after the surrounding transaction commits.
+     *
+     * @param list<string> $tags
+     */
+    public static function invalidateCacheTagsAfterCommit(
+        array $tags,
+        ?string $connection = null,
+    ): void {
+        if (static::$cache === null || $tags === []) {
+            return;
+        }
+
+        $cache = static::$cache;
+        static::afterCommit(
+            static function () use ($cache, $tags): void {
+                $cache->invalidateTags($tags);
+            },
+            $connection,
+        );
+    }
+
+    /**
      * Get last insert ID.
      *
      * @throws ConnectionException
      */
-    public static function lastInsertId(?string $name = null, ?string $connection = null): string|false
+    public static function lastInsertId(?string $name = null, ?string $connection = null): string
     {
-        return static::connection($connection)->getPdo()->lastInsertId($name);
+        return static::connection($connection)->lastInsertId($name);
     }
 
     /**
@@ -833,9 +783,9 @@ class DB
      *
      * @throws ConnectionException
      */
-    public static function raw(mixed $value): mixed
+    public static function raw(string $value): Expression
     {
-        return static::connection()->raw(self::stringifyScalar($value));
+        return new Expression($value);
     }
 
     /**
@@ -867,12 +817,15 @@ class DB
             throw ConnectionException::connectionNotFound($name ?? 'null');
         }
 
-        $config = static::$connectionConfigs[$name];
+        if (isset(static::$connections[$name])) {
+            $connection = static::$connections[$name];
+            $connection->disconnect();
+        } else {
+            $connection = new Connection(static::$connectionConfigs[$name], $name);
+            static::$connections[$name] = $connection;
+        }
 
-        // Drop existing shared instance (if any) and create a new one.
-        static::$connections[$name] = new Connection($config);
-
-        return static::$connections[$name];
+        return $connection;
     }
 
     /**
@@ -905,7 +858,6 @@ class DB
             {
                 parent::__construct(
                     $connection,
-                    $connection->getGrammarInstance(),
                     $connection->getExecutorInstance(),
                     $results,
                 );
@@ -935,6 +887,12 @@ class DB
             static::$pool?->closeAll();
             static::$pool = null;
             static::$poolManager = null;
+        } else {
+            foreach (static::$connections as $connection) {
+                if (!$connection->resetRuntimeStateForReuse()) {
+                    $connection->disconnect();
+                }
+            }
         }
 
         self::resetFacadeQueryObservationState();
@@ -1037,6 +995,14 @@ class DB
             $connection,
             static fn(Connection $conn): array => $conn->selectResultSets($query, $bindings),
         );
+    }
+
+    /**
+     * Replace the CacheLayer instance used by opt-in query caching.
+     */
+    public static function setCache(CacheInterface $cache): void
+    {
+        static::$cache = $cache;
     }
 
     /**
@@ -1157,7 +1123,8 @@ class DB
      *   database:string,
      *   prefix:string,
      *   transaction_level:int,
-     *   total_queries:int
+     *   total_queries:int,
+     *   query_log_entries:int
      * }
      *
      * @throws ConnectionException
@@ -1165,13 +1132,15 @@ class DB
     public static function stats(?string $connection = null): array
     {
         $conn = static::connection($connection);
+        $connectionStats = $conn->getStats();
 
         return [
             'driver' => $conn->getDriverName(),
             'database' => $conn->getDatabaseName(),
             'prefix' => $conn->getTablePrefix(),
             'transaction_level' => $conn->transactionLevel(),
-            'total_queries' => static::$queryLogCount,
+            'total_queries' => $connectionStats['queries'],
+            'query_log_entries' => static::$queryLogCount,
         ];
     }
 
@@ -1269,7 +1238,6 @@ class DB
      *   committed:int,
      *   rolled_back:int,
      *   deadlocks:int,
-     *   timeouts:int,
      *   in_transaction:bool,
      *   current_level:int,
      *   savepoints:int,
@@ -1339,14 +1307,6 @@ class DB
             static fn(Connection $conn): int => $conn->update($query, $bindings),
             static fn(int $result): int => $result,
         );
-    }
-
-    /**
-     * Switch shared cache instance to file-backed persistence.
-     */
-    public static function useFileCache(?string $directory = null): CacheInterface
-    {
-        return static::cache(Cache::file('dblayer', $directory));
     }
 
     /**
@@ -1526,11 +1486,23 @@ class DB
                 self::mergeSecurityDefaults($config->securityConfig(), $config->getDriver()),
             );
 
+            if ($refreshExisting || !isset(static::$connections[$name])) {
+                $existing = static::$connections[$name] ?? null;
+                if ($existing instanceof Connection) {
+                    if ($existing->inTransaction()) {
+                        throw ConnectionException::invalidConfiguration(
+                            "Cannot refresh connection [{$name}] security while a transaction is active.",
+                        );
+                    }
+                    $existing->disconnect();
+                }
+            }
+
             static::$connectionConfigs[$name] = $normalized;
             static::$pool?->addConfig($name, $normalized);
 
             if ($refreshExisting || !isset(static::$connections[$name])) {
-                static::$connections[$name] = new Connection($normalized);
+                static::$connections[$name] = new Connection($normalized, $name);
             }
         }
     }
@@ -1549,31 +1521,6 @@ class DB
 
         static::$eventsHooked = true;
         self::registerEventBridges();
-    }
-
-    /**
-     * Evaluate cumulative query-time thresholds and fire callbacks once.
-     */
-    private static function evaluateQueryTimeMonitors(QueryExecuted $event): void
-    {
-        if (static::$queryTimeMonitors === []) {
-            return;
-        }
-
-        foreach (static::$queryTimeMonitors as $index => $monitor) {
-            if ($monitor['fired']) {
-                continue;
-            }
-
-            $monitor['cumulative_ms'] += $event->time;
-
-            if ($monitor['cumulative_ms'] >= $monitor['threshold_ms']) {
-                $monitor['fired'] = true;
-                self::invokeQueryTimeMonitor($monitor['callback'], $event);
-            }
-
-            static::$queryTimeMonitors[$index] = $monitor;
-        }
     }
 
     /**
@@ -1624,35 +1571,18 @@ class DB
     }
 
     /**
-     * Handle pre-execution query event.
-     */
-    private static function handleQueryExecuting(QueryExecuting $event): void
-    {
-        unset($event);
-
-        if (static::$profiler !== null && static::$profiler->isEnabled()) {
-            static::$profiler->start();
-        }
-    }
-
-    /**
      * Determine whether query lifecycle events currently have listeners.
      */
     private static function hasQueryLifecycleEventListeners(): bool
     {
         if (
-            self::$queryExecutingEventBridge === null
-            || self::$queryExecutedEventBridge === null
+            self::$queryExecutedEventBridge === null
             || self::$queryFailedEventBridge === null
         ) {
             return false;
         }
 
         return \in_array(
-            self::$queryExecutingEventBridge,
-            Events::getListeners('db.query.executing'),
-            true,
-        ) && \in_array(
             self::$queryExecutedEventBridge,
             Events::getListeners('db.query.executed'),
             true,
@@ -1716,7 +1646,7 @@ class DB
 
     /**
      * @param array<mixed> $bindings
-     * @return array<int,mixed>
+     * @return list<mixed>
      */
     private static function normalizeBatchBindings(array $bindings): array
     {
@@ -1748,7 +1678,7 @@ class DB
             return $table;
         }
 
-        return Str::snake($table);
+        return TableNameNormalizer::normalize($table);
     }
 
     /**
@@ -1795,9 +1725,6 @@ class DB
      */
     private static function registerEventBridges(): void
     {
-        self::$queryExecutingEventBridge ??= static function (QueryExecuting $event): void {
-            self::handleQueryExecuting($event);
-        };
         self::$queryExecutedEventBridge ??= static function (QueryExecuted $event): void {
             self::handleQueryExecuted($event);
         };
@@ -1812,10 +1739,6 @@ class DB
                 self::appendQueryLogEntry(...),
             );
         };
-
-        if (!\in_array(self::$queryExecutingEventBridge, Events::getListeners('db.query.executing'), true)) {
-            Events::listen('db.query.executing', self::$queryExecutingEventBridge);
-        }
 
         if (!\in_array(self::$queryExecutedEventBridge, Events::getListeners('db.query.executed'), true)) {
             Events::listen('db.query.executed', self::$queryExecutedEventBridge);
@@ -1836,7 +1759,7 @@ class DB
         static::$loggingQueries = false;
         static::$maxQueryLogEntries = self::DEFAULT_MAX_QUERY_LOG_ENTRIES;
         static::$logger = static::$profiler = null;
-        Telemetry::clear();
+        Telemetry::resetRuntimeState();
     }
 
     /**

@@ -10,8 +10,9 @@ use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuting;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\QueryException;
-use Infocyph\DBLayer\Grammar\Grammar;
 use Infocyph\DBLayer\Query\Concerns\ExecutorInternals;
+use Infocyph\DBLayer\Query\Core\CompiledQuery;
+use Infocyph\DBLayer\Query\Core\DriverResult;
 
 /**
  * Query Executor
@@ -88,10 +89,6 @@ final class Executor
          * Database connection.
          */
         private readonly Connection $connection,
-        /**
-         * SQL grammar compiler (legacy path).
-         */
-        private readonly Grammar $grammar,
     ) {}
 
     /**
@@ -105,24 +102,21 @@ final class Executor
     }
 
     /**
+     * Compile one SELECT exactly once for cache identity and execution.
+     */
+    public function compileSelect(QueryBuilder $query): CompiledQuery
+    {
+        return $this->connection->getCompiler()->compile($query->toPayload());
+    }
+
+    /**
      * Execute a DELETE query.
      */
     public function delete(QueryBuilder $query): int
     {
-        if ($this->canUseDriverCompilerForMutation($query)) {
-            $compiled = $this->connection->getCompiler()->compile($query->toDeletePayload());
-            $sql = $this->normalizeSql($compiled->sql);
-            $bindings = $this->normalizeBindings($compiled->bindings);
-        } else {
-            $sql = $this->normalizeSql($this->grammar->compileDelete($query));
-            $bindings = $this->normalizeBindings($query->getBindings());
-        }
+        $compiled = $this->connection->getCompiler()->compile($query->toDeletePayload());
 
-        return $this->executeAffecting(
-            $sql,
-            $bindings,
-            fn(): int => $this->connection->delete($sql, $bindings),
-        );
+        return $this->runCompiledObserved($compiled)->rowCount;
     }
 
     /**
@@ -302,11 +296,19 @@ final class Executor
             return true;
         }
 
-        $compiled = $this->connection->getCompiler()->compile($query->toInsertPayload($rows));
-        $sql = $this->normalizeSql($compiled->sql);
-        $bindings = $this->normalizeBindings($compiled->bindings);
+        $batchSize = $this->maxRowsPerBatch($rows[0]);
 
-        return $this->executeInsertLike($sql, $bindings, \count($rows));
+        if (count($rows) > $batchSize) {
+            $operation = (fn(): bool => array_all(array_chunk($rows, $batchSize), fn($batch) => $this->insert($query, $batch)));
+
+            return $this->connection->inTransaction()
+                ? $operation()
+                : (bool) $this->connection->transaction($operation);
+        }
+
+        $compiled = $this->connection->getCompiler()->compile($query->toInsertPayload($rows));
+
+        return $this->runCompiledObserved($compiled)->rowCount > 0;
     }
 
     /**
@@ -324,61 +326,67 @@ final class Executor
             return true;
         }
 
-        // Prefer driver-specific ignore semantics when available.
-        if (\method_exists($this->grammar, 'compileInsertIgnore')) {
-            $sql = $this->normalizeSql($this->grammar->compileInsertIgnore($query, $rows));
-        } elseif (\method_exists($this->grammar, 'compileInsertOrIgnore')) {
-            $sql = $this->normalizeSql($this->grammar->compileInsertOrIgnore($query, $rows));
-        } else {
-            // Graceful fallback to regular insert().
-            return $this->insert($query, $rows);
+        $batchSize = $this->maxRowsPerBatch($rows[0]);
+
+        if (count($rows) > $batchSize) {
+            $operation = (fn(): bool => array_all(array_chunk($rows, $batchSize), fn($batch) => $this->insertIgnore($query, $batch)));
+
+            return $this->connection->inTransaction()
+                ? $operation()
+                : (bool) $this->connection->transaction($operation);
         }
 
-        $bindings = $this->getInsertBindings($rows);
+        if (!$this->connection->capabilities()->supportsInsertIgnore) {
+            throw QueryException::unsupportedCapability('insertIgnore', $this->connection->getDriverName());
+        }
 
-        return $this->executeInsertLike($sql, $bindings, \count($rows));
+        $compiled = $this->connection->getCompiler()->compile(
+            $query->toInsertPayload($rows, mode: 'ignore'),
+        );
+
+        return $this->runCompiledObserved($compiled)->rowCount > 0;
     }
 
     /**
      * Execute an INSERT with RETURNING semantics when supported.
      *
-     * On PostgreSQL, uses INSERT ... RETURNING.
-     * On other drivers, falls back to insert() + lastInsertId().
+     * Uses INSERT ... RETURNING when declared by the driver. Otherwise one
+     * INSERT is followed only by normalized generated-id retrieval.
      *
      * @param array<int,array<string,mixed>>|array<string,mixed> $values
-     * @return array<string,mixed>|null First returned row or simulated row from lastInsertId()
+     * @return DriverResult Returned rows and mutation outcome.
      */
-    public function insertReturning(
+    public function insertReturningResult(
         QueryBuilder $query,
         array $values,
         ?string $column = null,
-    ): ?array {
+    ): DriverResult {
         $rows = $this->normalizeInsertValues($values);
 
         if ($rows === []) {
-            return null;
+            return new DriverResult([], 0);
         }
 
         $column ??= 'id';
 
-        if (\method_exists($this->grammar, 'compileInsertGetId')) {
-            $sql = $this->normalizeSql($this->grammar->compileInsertGetId($query, $rows, $column));
-            $bindings = $this->getInsertBindings($rows);
+        if ($this->connection->capabilities()->supportsReturning) {
+            $compiled = $this->connection->getCompiler()->compile(
+                $query->toInsertPayload($rows, returning: [$column]),
+            );
 
-            $resultRows = $this->raw($sql, $bindings);
-
-            return $resultRows[0] ?? null;
+            return $this->runCompiledObserved($compiled);
         }
 
-        // Fallback path: normal insert plus lastInsertId().
-        $this->insert($query, $rows);
-        $id = $this->connection->lastInsertId($column);
-
-        if ($id === '') {
-            return null;
+        if (count($rows) !== 1) {
+            throw QueryException::invalidParameter(
+                'insertReturning',
+                'Bulk INSERT RETURNING requires native driver support.',
+            );
         }
 
-        return [$column => $id];
+        $compiled = $this->connection->getCompiler()->compile($query->toInsertPayload($rows));
+
+        return $this->runCompiledObserved($compiled);
     }
 
     /**
@@ -436,32 +444,21 @@ final class Executor
     /**
      * Execute a SELECT query.
      *
-     * Prefer the driver compiler + payload pipeline when available,
-     * and gracefully fall back to the legacy Grammar path otherwise.
+     * Compile through the connection's canonical driver compiler.
      *
      * @return list<array<string,mixed>>
      */
     public function select(QueryBuilder $query): array
     {
-        // Use compiler path only for query shapes known to be equivalent to grammar output.
-        if (
-            $this->canUseDriverCompiler($query)
-        ) {
-            $payload = $query->toPayload();
-            $compiler = $this->connection->getCompiler();
-            $compiled = $compiler->compile($payload);
+        return $this->selectCompiled($this->compileSelect($query));
+    }
 
-            return $this->raw(
-                $this->normalizeSql($compiled->sql),
-                $this->normalizeBindings($compiled->bindings),
-            );
-        }
+    /** @return list<array<string,mixed>> */
+    public function selectCompiled(CompiledQuery $compiled): array
+    {
+        $result = $this->runCompiledObserved($compiled);
 
-        // Legacy path: Grammar-based compilation.
-        $sql = $this->normalizeSql($this->grammar->compileSelect($query));
-        $bindings = $this->normalizeBindings($query->getBindings());
-
-        return $this->raw($sql, $bindings);
+        return $this->normalizeRows($result->rows ?? []);
     }
 
     /**
@@ -499,15 +496,9 @@ final class Executor
     public function truncate(QueryBuilder $query): bool
     {
         $compiled = $this->connection->getCompiler()->compile($query->toTruncatePayload());
-        $sql = $this->normalizeSql($compiled->sql);
+        $this->runCompiledObserved($compiled);
 
-        return $this->executeStatementLike(
-            $sql,
-            [],
-            function () use ($sql): void {
-                $this->connection->execute($sql);
-            },
-        );
+        return true;
     }
 
     /**
@@ -521,20 +512,9 @@ final class Executor
             return 0;
         }
 
-        if ($this->canUseDriverCompilerForMutation($query)) {
-            $compiled = $this->connection->getCompiler()->compile($query->toUpdatePayload($values));
-            $sql = $this->normalizeSql($compiled->sql);
-            $bindings = $this->normalizeBindings($compiled->bindings);
-        } else {
-            $sql = $this->normalizeSql($this->grammar->compileUpdate($query, $values));
-            $bindings = $this->normalizeBindings(\array_merge(\array_values($values), $query->getBindings()));
-        }
+        $compiled = $this->connection->getCompiler()->compile($query->toUpdatePayload($values));
 
-        return $this->executeAffecting(
-            $sql,
-            $bindings,
-            fn(): int => $this->connection->update($sql, $bindings),
-        );
+        return $this->runCompiledObserved($compiled)->rowCount;
     }
 
     /**
@@ -558,20 +538,33 @@ final class Executor
             return true;
         }
 
-        $updateAssoc = $this->resolveUpsertUpdateAssoc($rows[0], $uniqueBy, $update);
+        $batchSize = $this->maxRowsPerBatch($rows[0]);
 
-        if (\method_exists($this->grammar, 'compileUpsert')) {
-            $sql = $this->normalizeSql($this->grammar->compileUpsert($query, $rows, $uniqueBy, $updateAssoc));
-        } elseif (\method_exists($this->grammar, 'compileInsertOnDuplicateKeyUpdate')) {
-            $sql = $this->normalizeSql($this->grammar->compileInsertOnDuplicateKeyUpdate($query, $rows, $updateAssoc));
-        } else {
-            // Graceful fallback: behave like insert().
-            return $this->insert($query, $rows);
+        if (count($rows) > $batchSize) {
+            $operation = (fn(): bool => array_all(array_chunk($rows, $batchSize), fn($batch) => $this->upsert($query, $batch, $uniqueBy, $update)));
+
+            return $this->connection->inTransaction()
+                ? $operation()
+                : (bool) $this->connection->transaction($operation);
         }
 
-        $bindings = $this->getInsertBindings($rows);
+        $updateAssoc = $this->resolveUpsertUpdateAssoc($rows[0], $uniqueBy, $update);
 
-        return $this->executeInsertLike($sql, $bindings, \count($rows));
+        if (!$this->connection->capabilities()->supportsUpsert) {
+            throw QueryException::unsupportedCapability('upsert', $this->connection->getDriverName());
+        }
+
+        $compiled = $this->connection->getCompiler()->compile(
+            $query->toInsertPayload(
+                $rows,
+                mode: 'upsert',
+                uniqueBy: $uniqueBy,
+                upsertUpdate: array_keys($updateAssoc),
+            ),
+        );
+        $this->runCompiledObserved($compiled);
+
+        return true;
     }
 
     /**
@@ -594,6 +587,31 @@ final class Executor
 
         if ($rows === []) {
             return [];
+        }
+
+        $batchSize = $this->maxRowsPerBatch($rows[0]);
+
+        if (count($rows) > $batchSize) {
+            $operation = function () use ($query, $rows, $uniqueBy, $update, $returning, $batchSize): array {
+                $returned = [];
+
+                foreach (array_chunk($rows, $batchSize) as $batch) {
+                    array_push(
+                        $returned,
+                        ...$this->upsertReturning($query, $batch, $uniqueBy, $update, $returning),
+                    );
+                }
+
+                return $returned;
+            };
+
+            if ($this->connection->inTransaction()) {
+                return $operation();
+            }
+
+            return $this->normalizeReturnedRows(
+                $this->connection->transaction($operation),
+            );
         }
 
         $updateAssoc = $this->resolveUpsertUpdateAssoc($rows[0], $uniqueBy, $update);

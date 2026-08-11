@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection;
 
+use Infocyph\DBLayer\Exceptions\ConnectionException;
+
 /**
  * PoolManager
  *
@@ -73,8 +75,9 @@ final class PoolManager
         }
 
         if ($name === null) {
-            // Unknown to this manager; nothing to release.
-            return;
+            throw ConnectionException::invalidConfiguration(
+                'Cannot release a connection that was not checked out by this pool manager.',
+            );
         }
 
         unset($this->connectionNames[$id]);

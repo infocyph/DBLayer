@@ -77,15 +77,16 @@ needed:
    $reportRows = User::query('reporting')->get();
    $reportCount = User::sqlScalar('select count(*) from users', [], 'reporting');
 
-DB Interface Access
--------------------
+Infrastructure Access
+---------------------
 
-You can call DB facade methods through ``TableRepository`` static dispatch:
+Repository and QueryBuilder methods participate in static dispatch.
+Infrastructure stays explicit through ``DB`` or ``connection()``:
 
 .. code-block:: php
 
-   $stats = User::stats();                // forwarded to DB::stats()
-   $caps = User::capabilities();          // forwarded to DB::capabilities()
+   $stats = DB::stats('main');
+   $caps = User::connection()->getCapabilities();
    $rows = User::sqlSelect('select 1');   // explicit raw SQL helper
 
 For raw SQL, prefer ``sqlSelect/sqlStatement/sqlScalar`` to avoid ambiguity with
@@ -112,7 +113,7 @@ Example
 
    $one = User::find(1);
    $rows = User::where('active', '=', 1)->limit(20)->get();
-   $stats = User::stats();
+   $stats = DB::stats('main');
 
 Non-ORM Scope
 -------------

@@ -48,7 +48,7 @@ final class QueryValidator
     {
         foreach (self::INJECTION_PATTERNS as $pattern) {
             if (preg_match($pattern, $sql) === 1) {
-                $fragment = mb_substr($sql, 0, 256, 'UTF-8');
+                $fragment = substr($sql, 0, 256);
 
                 throw SecurityException::sqlInjectionDetected($pattern, $fragment);
             }

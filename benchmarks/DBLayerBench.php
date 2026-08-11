@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Benchmarks;
 
+require_once __DIR__ . '/RequiresSqlite.php';
+
+use Infocyph\CacheLayer\Cache\Cache;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\Core\CompiledQuery;
 use Infocyph\DBLayer\Query\Core\QueryType;
-use Infocyph\DBLayer\Schema\Blueprint;
-use Infocyph\DBLayer\Schema\SchemaGrammar;
-use PDO;
 use PhpBench\Attributes as Bench;
 
 #[Bench\BeforeMethods(['setUpBeforeSubject'])]
@@ -17,37 +17,46 @@ use PhpBench\Attributes as Bench;
 #[Bench\Revs(50)]
 #[Bench\Warmup(2)]
 #[Bench\OutputTimeUnit('microseconds', 2)]
+#[RequiresSqlite]
 final class DBLayerBench
 {
-    private const SEED_ROWS = 1000;
+    private const SEED_ROWS = 5000;
+
+    /** @var list<array{id:int,name:string,email:string,active:int,score:int,created_at:string}> */
+    private static array $bulkRows100 = [];
+
+    /** @var list<array{id:int,name:string,email:string,active:int,score:int,created_at:string}> */
+    private static array $bulkRows1000 = [];
+
+    private static int $cacheMissCounter = 0;
 
     private static ?string $cursorToken = null;
 
     private static bool $initialized = false;
 
-    private static bool $sqliteAvailable = false;
-
     private static int $subjectCounter = 0;
 
     private int $currentUserId = 1;
 
-    public function benchBuildSelectSql(): void
+    public function benchAfterCommitCacheInvalidation(): void
     {
-        DB::table('users')
-            ->select('id', 'name', 'email', 'score')
-            ->where('active', 1)
-            ->whereBetween('score', [100, 5000])
-            ->orderByDesc('id')
-            ->limit(25)
-            ->toSql();
+        DB::transaction(static function (): void {
+            DB::invalidateCacheTagsAfterCommit(['table.users']);
+        });
+    }
+
+    public function benchArrayResultFiftyRows(): void
+    {
+        DB::table('users')->orderBy('id')->limit(50)->get();
+    }
+
+    public function benchCollectFiftyRows(): void
+    {
+        DB::table('users')->orderBy('id')->limit(50)->collect();
     }
 
     public function benchCursorPaginateComposite(): void
     {
-        if ($this->fallbackCompileLimitedSelect()) {
-            return;
-        }
-
         DB::table('users')
             ->where('active', '=', 1)
             ->orderBy('created_at', 'desc')
@@ -56,10 +65,6 @@ final class DBLayerBench
 
     public function benchEventDispatchOff(): void
     {
-        if ($this->fallbackCompileById()) {
-            return;
-        }
-
         DB::connection('bench_events_off')->withoutQueryEvents(function (): void {
             DB::connection('bench_events_off')->select('select ? as value', [$this->currentUserId]);
         });
@@ -72,30 +77,63 @@ final class DBLayerBench
 
     public function benchExecuteRaw(): void
     {
-        if ($this->fallbackCompileById()) {
-            return;
-        }
-
         DB::connection('bench')->execute('select score from users where id = ?', [$this->currentUserId]);
+    }
+
+    public function benchFindManyHundredIds(): void
+    {
+        DB::repository('users')->findMany(range(1, 100));
     }
 
     public function benchLazyByIdRows(): void
     {
-        if ($this->fallbackCompileLimitedSelect()) {
-            return;
-        }
-
         foreach (DB::table('users')->where('id', '<=', 49)->lazyById(50) as $row) {
             unset($row);
         }
     }
 
+    public function benchLazyCollectionRows(): void
+    {
+        DB::table('users')->where('id', '<=', 49)->lazyCollection(50)->all();
+    }
+
+    public function benchQueryCacheDisabled(): void
+    {
+        DB::table('users')->where('id', '=', 1)->get();
+    }
+
+    public function benchQueryCacheHitFiftyRows(): void
+    {
+        $this->runCachedRows(50);
+    }
+
+    public function benchQueryCacheHitFiveHundredRows(): void
+    {
+        $this->runCachedRows(500);
+    }
+
+    public function benchQueryCacheHitFiveThousandRows(): void
+    {
+        $this->runCachedRows(5000);
+    }
+
+    public function benchQueryCacheHitOneRow(): void
+    {
+        $this->runCachedRows(1);
+    }
+
+    public function benchQueryCacheMiss(): void
+    {
+        DB::table('users')
+            ->where('id', '=', 1)
+            ->cacheFor(60)
+            ->cacheTags('benchmark')
+            ->cacheKey('bench.miss.' . ++self::$cacheMissCounter)
+            ->get();
+    }
+
     public function benchRelationLoadTwentyParents(): void
     {
-        if ($this->fallbackCompileLimitedSelect()) {
-            return;
-        }
-
         $parents = DB::table('users')->select(['id'])->limit(20)->get();
         DB::relations(batchSize: 500)->many(
             $parents,
@@ -107,24 +145,13 @@ final class DBLayerBench
         );
     }
 
-    public function benchSchemaCompileCreate(): void
+    public function benchRepositoryCachedFind(): void
     {
-        $blueprint = new Blueprint('benchmark_records', true);
-        $blueprint->id();
-        $blueprint->uuid('public_id')->unique();
-        $blueprint->string('name')->index();
-        $blueprint->json('payload')->nullable();
-        $blueprint->timestamp('created_at')->useCurrent();
-
-        (new SchemaGrammar('sqlite'))->compile($blueprint);
+        DB::repository('users')->cacheFor(60)->find(1);
     }
 
     public function benchSelectByPrimaryKey(): void
     {
-        if ($this->fallbackCompileById()) {
-            return;
-        }
-
         DB::table('users')
             ->where('id', '=', $this->currentUserId)
             ->first();
@@ -132,10 +159,6 @@ final class DBLayerBench
 
     public function benchSelectRowsBuffered(): void
     {
-        if ($this->fallbackCompileLimitedSelect()) {
-            return;
-        }
-
         DB::connection('bench')->select('select id, name from users order by id asc limit 50');
     }
 
@@ -151,10 +174,6 @@ final class DBLayerBench
 
     public function benchStreamRows(): void
     {
-        if ($this->fallbackCompileLimitedSelect()) {
-            return;
-        }
-
         foreach (DB::connection('bench')->stream('select id, name from users order by id asc limit 50') as $row) {
             unset($row);
         }
@@ -165,13 +184,6 @@ final class DBLayerBench
         $firstId = $this->currentUserId;
         $secondId = $firstId === self::SEED_ROWS ? 1 : $firstId + 1;
 
-        if (!self::$sqliteAvailable) {
-            DB::table('users')->where('id', '=', $firstId)->toSql();
-            DB::table('users')->where('id', '=', $secondId)->toSql();
-
-            return;
-        }
-
         DB::transaction(static function () use ($firstId, $secondId): void {
             DB::select('SELECT score FROM users WHERE id = ?', [$firstId]);
             DB::select('SELECT score FROM users WHERE id = ?', [$secondId]);
@@ -180,10 +192,6 @@ final class DBLayerBench
 
     public function benchTypedRunCompiled(): void
     {
-        if ($this->fallbackCompileById()) {
-            return;
-        }
-
         $compiled = new CompiledQuery(
             'select id, score from users where id = ?',
             [$this->currentUserId],
@@ -195,10 +203,6 @@ final class DBLayerBench
 
     public function benchUnbufferedStreamRows(): void
     {
-        if ($this->fallbackCompileLimitedSelect()) {
-            return;
-        }
-
         foreach (DB::connection('bench')->unbufferedStream(
             'select id, name from users order by id asc limit 50',
             fetchSize: 10,
@@ -209,21 +213,16 @@ final class DBLayerBench
 
     public function benchUpdateSingleColumn(): void
     {
-        if (!self::$sqliteAvailable) {
-            DB::table('users')
-                ->select('id')
-                ->where('id', '=', $this->currentUserId)
-                ->where('score', '<', $this->currentUserId * 10)
-                ->toSql();
-
-            return;
-        }
-
         DB::table('users')
             ->where('id', '=', $this->currentUserId)
             ->update([
                 'score' => $this->currentUserId * 10,
             ]);
+    }
+
+    public function benchUpsertChunkingHundredRows(): void
+    {
+        DB::table('users')->upsert(self::$bulkRows100, ['id'], ['score']);
     }
 
     public function benchWithLeastLatencyCachedReplica(): void
@@ -285,22 +284,6 @@ final class DBLayerBench
     private static function initializeRuntime(): void
     {
         DB::purge();
-
-        self::$sqliteAvailable = \in_array('sqlite', PDO::getAvailableDrivers(), true);
-
-        if (!self::$sqliteAvailable) {
-            // Compile-only fallback for environments without pdo_sqlite.
-            DB::addConnection([
-                'driver' => 'mysql',
-                'host' => '127.0.0.1',
-                'database' => 'bench',
-                'username' => 'bench',
-                'password' => 'bench',
-            ], 'bench');
-            DB::setDefaultConnection('bench');
-
-            return;
-        }
 
         DB::addConnection([
             'driver' => 'sqlite',
@@ -366,6 +349,28 @@ final class DBLayerBench
 
         self::createSchema();
         self::seedUsers();
+        DB::setCache(Cache::memory('dblayer-benchmark'));
+        self::$bulkRows1000 = array_map(
+            static fn(int $id): array => [
+                'id' => $id,
+                'name' => 'Bulk ' . $id,
+                'email' => 'bulk' . $id . '@example.test',
+                'active' => $id % 2,
+                'score' => $id * 10,
+                'created_at' => '2026-01-01 00:00:00',
+            ],
+            range(2_001, 3_000),
+        );
+        self::$bulkRows100 = array_slice(self::$bulkRows1000, 0, 100);
+        foreach ([1, 50, 500, 5000] as $rowCount) {
+            DB::table('users')
+                ->orderBy('id')
+                ->limit($rowCount)
+                ->cacheFor(60)
+                ->cacheKey('bench.hit.' . $rowCount)
+                ->get();
+        }
+        DB::repository('users')->cacheFor(60)->find(1);
         self::$cursorToken = DB::table('users')
             ->where('active', '=', 1)
             ->orderBy('created_at', 'desc')
@@ -397,30 +402,14 @@ final class DBLayerBench
         });
     }
 
-    private function fallbackCompileById(): bool
+    private function runCachedRows(int $rowCount): void
     {
-        if (self::$sqliteAvailable) {
-            return false;
-        }
-
         DB::table('users')
-            ->where('id', '=', $this->currentUserId)
-            ->toSql();
-
-        return true;
-    }
-
-    private function fallbackCompileLimitedSelect(): bool
-    {
-        if (self::$sqliteAvailable) {
-            return false;
-        }
-
-        DB::table('users')
-            ->limit(50)
-            ->toSql();
-
-        return true;
+            ->orderBy('id')
+            ->limit($rowCount)
+            ->cacheFor(60)
+            ->cacheKey('bench.hit.' . $rowCount)
+            ->get();
     }
 
     /**
@@ -428,10 +417,6 @@ final class DBLayerBench
      */
     private function runConnectionSelect(string $connection, string $sql, array $bindings = []): void
     {
-        if ($this->fallbackCompileById()) {
-            return;
-        }
-
         DB::connection($connection)->select($sql, $bindings);
     }
 

@@ -7,13 +7,15 @@ namespace Infocyph\DBLayer\Query;
 use Generator;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Exceptions\QueryException;
-use Infocyph\DBLayer\Grammar\Grammar;
 use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
-use Infocyph\DBLayer\Pagination\SimplePaginator;
+use Infocyph\DBLayer\Query\Concerns\QueryBuilderCaching;
+use Infocyph\DBLayer\Query\Concerns\QueryBuilderCompilation;
 use Infocyph\DBLayer\Query\Concerns\QueryBuilderInternals;
 use Infocyph\DBLayer\Query\Concerns\QueryBuilderKeysetPagination;
+use Infocyph\DBLayer\Query\Concerns\QueryBuilderResults;
 use Infocyph\DBLayer\Query\Core\QueryPayload;
 use Infocyph\DBLayer\Query\Core\QueryType;
+use Infocyph\DBLayer\Query\Core\WindowExpression;
 
 /**
  * SQL Query Builder
@@ -32,8 +34,11 @@ use Infocyph\DBLayer\Query\Core\QueryType;
  */
 class QueryBuilder
 {
+    use QueryBuilderCaching;
+    use QueryBuilderCompilation;
     use QueryBuilderInternals;
     use QueryBuilderKeysetPagination;
+    use QueryBuilderResults;
 
     /**
      * Allowed operators for where/having/join clauses.
@@ -102,9 +107,14 @@ class QueryBuilder
     /**
      * SELECT columns.
      *
-     * @var list<string|Expression>
+     * @var list<string|Expression|WindowExpression>
      */
     private array $columns = ['*'];
+
+    /**
+     * Whether a developer-controlled raw fragment entered this builder.
+     */
+    private bool $containsRawFragments = false;
 
     /**
      * Bindings from CTE definitions (must be emitted before main-query bindings).
@@ -129,6 +139,16 @@ class QueryBuilder
      * FROM table.
      */
     private ?string $from = null;
+
+    /**
+     * Structured alias for the FROM source.
+     */
+    private ?string $fromAlias = null;
+
+    /**
+     * Structured child payload for a builder-backed derived source.
+     */
+    private ?QueryBuilder $fromSubquery = null;
 
     /**
      * GROUP BY columns.
@@ -201,10 +221,6 @@ class QueryBuilder
          */
         private readonly Connection $connection,
         /**
-         * SQL grammar compiler.
-         */
-        private readonly Grammar $grammar,
-        /**
          * Query executor.
          */
         private readonly Executor $executor,
@@ -227,18 +243,21 @@ class QueryBuilder
     }
 
     /**
-     * Execute an aggregate function on a cloned builder.
-     *
-     * This keeps the original query state untouched.
+     * Add a selected column with a separately validated output alias.
      */
-    public function aggregate(string $function, string $column = '*'): mixed
+    public function addSelectAs(string $column, string $alias): self
     {
-        $function = trim($function);
-        if ($function === '') {
-            throw QueryException::invalidParameter('function', 'Aggregate function must not be empty.');
+        $this->validateColumnIdentifier($column, false);
+        $this->validateColumnIdentifier($alias, false);
+
+        if ($this->columns === ['*']) {
+            $this->columns = [];
         }
 
-        return $this->runAggregate($function, $column, false);
+        $this->type = 'select';
+        $this->columns[] = $column . ' AS ' . $alias;
+
+        return $this;
     }
 
     /**
@@ -327,13 +346,20 @@ class QueryBuilder
     }
 
     /**
-     * Iterate over rows lazily using the underlying PDO cursor.
-     *
-     * @return Generator<mixed>
+     * Add a structured CROSS JOIN alias.
      */
-    public function cursor(?int $fetchMode = null): Generator
+    public function crossJoinAs(string $table, string $alias): self
     {
-        yield from $this->stream($fetchMode);
+        $this->validateTableIdentifier($table);
+        $this->validateColumnIdentifier($alias, false);
+
+        $this->joins[] = [
+            'type' => 'cross',
+            'table' => $table,
+            'alias' => $alias,
+        ];
+
+        return $this;
     }
 
     /**
@@ -341,7 +367,13 @@ class QueryBuilder
      */
     public function delete(): int
     {
-        return $this->executor->delete($this);
+        $affected = $this->executor->delete($this);
+
+        if ($affected > 0) {
+            $this->invalidateCachedTables();
+        }
+
+        return $affected;
     }
 
     /**
@@ -447,6 +479,8 @@ class QueryBuilder
         $this->validateTableIdentifier($table);
 
         $this->from = $table;
+        $this->fromAlias = null;
+        $this->fromSubquery = null;
 
         return $this;
     }
@@ -468,7 +502,10 @@ class QueryBuilder
         }
 
         if ($query instanceof self) {
-            $this->from = '(' . $query->toSelectSql() . ') as ' . $as;
+            $this->containsRawFragments = $this->containsRawFragments || $query->containsRawFragments;
+            $this->from = null;
+            $this->fromSubquery = $query;
+            $this->fromAlias = $as;
             $this->appendBindingBucket('from', $query->getBindings());
 
             return $this;
@@ -476,19 +513,11 @@ class QueryBuilder
 
         $this->validateRawFragment($query, $bindings);
         $this->from = '(' . $query . ') as ' . $as;
+        $this->fromSubquery = null;
+        $this->fromAlias = null;
         $this->appendBindingBucket('from', $bindings);
 
         return $this;
-    }
-
-    /**
-     * Execute the query and get all results.
-     *
-     * @return list<array<string,mixed>>
-     */
-    public function get(): array
-    {
-        return $this->executor->select($this);
     }
 
     /**
@@ -514,14 +543,15 @@ class QueryBuilder
     }
 
     /**
-     * Get all query components (for Grammar).
+     * Get a read-only snapshot of builder components.
      *
      * @return array{
      *   type:?string,
      *   ctes:list<array{name:string,query:string|QueryBuilder,recursive:bool}>,
-     *   columns:list<string|Expression>,
+     *   columns:list<string|Expression|WindowExpression>,
      *   distinct:bool,
      *   from:?string,
+     *   fromAlias:?string,
      *   joins:list<array<string,mixed>|JoinClause>,
      *   wheres:list<array<string,mixed>>,
      *   groups:list<string>,
@@ -542,6 +572,7 @@ class QueryBuilder
             'columns' => $this->columns,
             'distinct' => $this->distinct,
             'from' => $this->from,
+            'fromAlias' => $this->fromAlias,
             'joins' => $this->joins,
             'wheres' => $this->wheres,
             'groups' => $this->groups,
@@ -596,6 +627,8 @@ class QueryBuilder
         mixed $value = null,
         string $boolean = 'and',
     ): self {
+        $boolean = $this->normalizeBoolean($boolean);
+
         if (\func_num_args() === 2) {
             $value = $operator;
             $operator = '=';
@@ -628,56 +661,87 @@ class QueryBuilder
      */
     public function insert(array $values): bool
     {
-        return $this->executor->insert($this, $values);
+        $inserted = $this->executor->insert($this, $values);
+
+        if ($inserted) {
+            $this->invalidateCachedTables();
+        }
+
+        return $inserted;
     }
 
     /**
      * Insert and get the ID.
      *
      * Uses insertReturning() when supported to avoid extra round trips.
-     * Falls back to insert() + lastInsertId().
+     * Uses one INSERT and reads the normalized generated identifier when the
+     * driver does not expose RETURNING.
      *
      * @param array<string,mixed>|array<int,array<string,mixed>> $values
      */
     public function insertGetId(array $values, ?string $sequence = null): string
     {
         $column = $sequence ?? 'id';
+        $this->validateColumnIdentifier($column, false);
+        $result = $this->executor->insertReturningResult($this, $values, $column);
+        $this->invalidateCachedTables();
+        $row = $result->rows[0] ?? null;
 
-        $row = $this->insertReturning($values, $column);
-
-        if ($row !== null && \array_key_exists($column, $row)) {
+        if (is_array($row) && \array_key_exists($column, $row)) {
             return $this->stringifyScalar($row[$column]);
         }
 
-        $this->insert($values);
+        if ($result->lastInsertId !== null && $result->lastInsertId !== '') {
+            return $result->lastInsertId;
+        }
 
-        return $this->connection->lastInsertId($sequence);
+        throw QueryException::generatedIdUnavailable();
     }
 
     /**
      * Insert ignoring duplicate-key errors when the driver supports it.
      *
-     * Falls back to insert() on drivers without native support.
+     * Throws when the active driver does not declare native support.
      *
      * @param array<string,mixed>|array<int,array<string,mixed>> $values
      */
     public function insertIgnore(array $values): bool
     {
-        return $this->executor->insertIgnore($this, $values);
+        $inserted = $this->executor->insertIgnore($this, $values);
+
+        if ($inserted) {
+            $this->invalidateCachedTables();
+        }
+
+        return $inserted;
     }
 
     /**
      * Insert and return generated key/row when supported.
      *
-     * On PostgreSQL, uses INSERT ... RETURNING.
-     * On other drivers, falls back to lastInsertId() and synthesizes a row.
+     * Uses native RETURNING when declared by the driver. Otherwise the single
+     * INSERT's normalized generated identifier is exposed as a synthesized row.
      *
      * @param array<string,mixed>|array<int,array<string,mixed>> $values
      * @return array<string,mixed>|null
      */
     public function insertReturning(array $values, ?string $column = null): ?array
     {
-        return $this->executor->insertReturning($this, $values, $column);
+        $column ??= 'id';
+        $this->validateColumnIdentifier($column, false);
+        $result = $this->executor->insertReturningResult($this, $values, $column);
+        $this->invalidateCachedTables();
+        $row = $result->rows[0] ?? null;
+
+        if (is_array($row)) {
+            return $row;
+        }
+
+        if ($result->lastInsertId !== null) {
+            return [$column => $result->lastInsertId];
+        }
+
+        return null;
     }
 
     /**
@@ -690,6 +754,7 @@ class QueryBuilder
         string $second,
         string $type = 'inner',
     ): self {
+        $type = $this->normalizeJoinType($type);
         $this->validateTableIdentifier($table);
         $this->validateColumnIdentifier($first, false);
         $this->validateColumnIdentifier($second, false);
@@ -707,6 +772,36 @@ class QueryBuilder
     }
 
     /**
+     * Add a simple JOIN with a separately validated table alias.
+     */
+    public function joinAs(
+        string $table,
+        string $alias,
+        string $first,
+        string $operator,
+        string $second,
+        string $type = 'inner',
+    ): self {
+        $type = $this->normalizeJoinType($type);
+        $this->validateTableIdentifier($table);
+        $this->validateColumnIdentifier($alias, false);
+        $this->validateColumnIdentifier($first, false);
+        $this->validateColumnIdentifier($second, false);
+        $operator = $this->assertValidOperator($operator);
+
+        $this->joins[] = [
+            'type' => $type,
+            'table' => $table,
+            'alias' => $alias,
+            'first' => $first,
+            'operator' => $operator,
+            'second' => $second,
+        ];
+
+        return $this;
+    }
+
+    /**
      * Add a complex JOIN with closure.
      *
      * The callback receives a JoinClause instance.
@@ -715,11 +810,38 @@ class QueryBuilder
      */
     public function joinComplex(string $table, callable $callback, string $type = 'inner'): self
     {
+        $type = $this->normalizeJoinType($type);
         $this->validateTableIdentifier($table);
 
         $join = new JoinClause($table, $type);
         $callback($join);
 
+        $this->joins[] = $join;
+
+        if ($join->getBindings() !== []) {
+            $this->appendBindingBucket('join', $join->getBindings());
+        }
+
+        return $this;
+    }
+
+    /**
+     * Add a complex JOIN with a separately validated table alias.
+     *
+     * @param callable(JoinClause):void $callback
+     */
+    public function joinComplexAs(
+        string $table,
+        string $alias,
+        callable $callback,
+        string $type = 'inner',
+    ): self {
+        $type = $this->normalizeJoinType($type);
+        $this->validateTableIdentifier($table);
+        $this->validateColumnIdentifier($alias, false);
+
+        $join = new JoinClause($table, $type, $alias);
+        $callback($join);
         $this->joins[] = $join;
 
         if ($join->getBindings() !== []) {
@@ -748,14 +870,7 @@ class QueryBuilder
         $this->validateColumnIdentifier($first, false);
         $this->validateColumnIdentifier($second, false);
         $operator = $this->assertValidOperator($operator);
-        $type = strtolower(trim($type));
-
-        if (!in_array($type, ['inner', 'left', 'right'], true)) {
-            throw QueryException::invalidParameter(
-                'type',
-                'Subquery join type must be inner, left, or right.',
-            );
-        }
+        $type = $this->normalizeJoinType($type, false);
 
         if (is_callable($query)) {
             $builder = $this->newQuery();
@@ -764,8 +879,22 @@ class QueryBuilder
         }
 
         if ($query instanceof self) {
-            $sql = $query->toSelectSql();
+            $this->containsRawFragments = $this->containsRawFragments || $query->containsRawFragments;
             $bindings = $query->getBindings();
+            $this->joins[] = [
+                'type' => $type,
+                'query' => $query,
+                'alias' => $as,
+                'subquery' => true,
+                'first' => $first,
+                'operator' => $operator,
+                'second' => $second,
+            ];
+            if ($bindings !== []) {
+                $this->appendBindingBucket('join', $bindings);
+            }
+
+            return $this;
         } else {
             $this->validateRawFragment($query, $bindings);
             $sql = $query;
@@ -810,29 +939,16 @@ class QueryBuilder
     }
 
     /**
-     * Iterate in bounded keyset batches, releasing the statement between batches.
-     *
-     * @return Generator<array<string,mixed>>
-     */
-    public function lazyById(
-        int $chunkSize = 1000,
-        string $column = 'id',
-        mixed $fromId = null,
-        string $direction = 'asc',
-    ): Generator {
-        foreach ($this->keysetChunks($chunkSize, $column, $fromId, $direction) as [$rows]) {
-            foreach ($rows as $row) {
-                yield $row;
-            }
-        }
-    }
-
-    /**
      * Add a LEFT JOIN clause.
      */
     public function leftJoin(string $table, string $first, string $operator, string $second): self
     {
         return $this->join($table, $first, $operator, $second, 'left');
+    }
+
+    public function leftJoinAs(string $table, string $alias, string $first, string $operator, string $second): self
+    {
+        return $this->joinAs($table, $alias, $first, $operator, $second, 'left');
     }
 
     /**
@@ -897,7 +1013,7 @@ class QueryBuilder
      */
     public function newQuery(): self
     {
-        return new self($this->connection, $this->grammar, $this->executor);
+        return new self($this->connection, $this->executor);
     }
 
     /**
@@ -1040,6 +1156,11 @@ class QueryBuilder
         return $this->join($table, $first, $operator, $second, 'right');
     }
 
+    public function rightJoinAs(string $table, string $alias, string $first, string $operator, string $second): self
+    {
+        return $this->joinAs($table, $alias, $first, $operator, $second, 'right');
+    }
+
     /**
      * Add a RIGHT JOIN against a derived-table subquery.
      *
@@ -1078,33 +1199,6 @@ class QueryBuilder
     }
 
     /**
-     * Add a convenience window-function expression into the SELECT list.
-     *
-     * @param list<string> $partitionBy
-     * @param list<string> $orderBy
-     */
-    public function selectWindow(
-        string $functionExpression,
-        string $alias,
-        array $partitionBy = [],
-        array $orderBy = [],
-    ): self {
-        $clauses = [];
-
-        if ($partitionBy !== []) {
-            $clauses[] = 'partition by ' . \implode(', ', $partitionBy);
-        }
-
-        if ($orderBy !== []) {
-            $clauses[] = 'order by ' . \implode(', ', $orderBy);
-        }
-
-        $over = $clauses === [] ? 'over ()' : 'over (' . \implode(' ', $clauses) . ')';
-
-        return $this->selectRaw("{$functionExpression} {$over} as {$alias}");
-    }
-
-    /**
      * Lock the selected rows in shared mode.
      */
     public function sharedLock(): self
@@ -1112,32 +1206,6 @@ class QueryBuilder
         $this->lock = 'shared';
 
         return $this;
-    }
-
-    /**
-     * Simple pagination without a COUNT(*) query.
-     *
-     * @throws QueryException
-     */
-    public function simplePaginate(int $perPage = 15, ?int $page = null): SimplePaginator
-    {
-        if ($perPage <= 0) {
-            throw QueryException::invalidLimit($perPage);
-        }
-
-        $page = \max(1, $page ?? 1);
-
-        $clone = $this->cloneBuilder();
-        $clone->aggregate = null;
-
-        $offset = ($page - 1) * $perPage;
-        $clone->offset = $offset;
-        $clone->limit = $perPage + 1; // fetch one extra row
-
-        $results = $clone->get();
-        [$items, $hasMore] = $this->resolvePaginatedItems($results, $perPage);
-
-        return new SimplePaginator($items, $perPage, $page, $hasMore);
     }
 
     /**
@@ -1204,50 +1272,25 @@ class QueryBuilder
      * Build a compiler payload for INSERT.
      *
      * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @param list<string> $uniqueBy
+     * @param list<string> $upsertUpdate
+     * @param list<string> $returning
      */
-    public function toInsertPayload(array $values): QueryPayload
-    {
+    public function toInsertPayload(
+        array $values,
+        string $mode = 'insert',
+        array $uniqueBy = [],
+        array $upsertUpdate = [],
+        array $returning = [],
+    ): QueryPayload {
         return $this->toPayload()->with([
             'type' => QueryType::INSERT,
             'insertRows' => $this->normalizePayloadInsertRows($values),
+            'insertMode' => $mode,
+            'uniqueBy' => $uniqueBy,
+            'upsertUpdate' => $upsertUpdate,
+            'returning' => $returning,
         ]);
-    }
-
-    /**
-     * New pipeline: convert the current query into a QueryPayload
-     * so the driver/compiler can generate SQL.
-     */
-    public function toPayload(): QueryPayload
-    {
-        $type = $this->mapTypeToEnum($this->type);
-
-        $unionPayloads = [];
-
-        foreach ($this->unions as $union) {
-            $unionQuery = $union['query'];
-
-            $unionPayloads[] = [
-                'query' => $unionQuery->toPayload(),
-                'all' => (bool) $union['all'],
-            ];
-        }
-
-        return new QueryPayload(
-            type: $type,
-            table: $this->from,
-            columns: $this->columns,
-            wheres: $this->wheres,
-            joins: $this->joins,
-            groups: $this->groups,
-            havings: $this->havings,
-            orders: $this->orders,
-            limit: $this->limit,
-            offset: $this->offset,
-            unions: $unionPayloads,
-            lock: $this->lock,
-            aggregate: $this->aggregate,
-            bindings: $this->getBindings(),
-        );
     }
 
     /**
@@ -1259,7 +1302,7 @@ class QueryBuilder
             $this->type = 'select';
         }
 
-        return $this->grammar->compileSelect($this);
+        return $this->connection->getCompiler()->compile($this->toPayload())->sql;
     }
 
     /**
@@ -1302,7 +1345,13 @@ class QueryBuilder
      */
     public function truncate(): bool
     {
-        return $this->executor->truncate($this);
+        $truncated = $this->executor->truncate($this);
+
+        if ($truncated) {
+            $this->invalidateCachedTables();
+        }
+
+        return $truncated;
     }
 
     /**
@@ -1339,6 +1388,8 @@ class QueryBuilder
             $query($builder);
             $query = $builder;
         }
+
+        $this->containsRawFragments = $this->containsRawFragments || $query->containsRawFragments;
 
         $this->unions[] = [
             'query' => $query,
@@ -1388,7 +1439,13 @@ class QueryBuilder
             return 0;
         }
 
-        return $this->executor->update($this, $values);
+        $affected = $this->executor->update($this, $values);
+
+        if ($affected > 0) {
+            $this->invalidateCachedTables();
+        }
+
+        return $affected;
     }
 
     /**
@@ -1400,7 +1457,13 @@ class QueryBuilder
      */
     public function upsert(array $values, array $uniqueBy, ?array $update = null): bool
     {
-        return $this->executor->upsert($this, $values, $uniqueBy, $update);
+        $upserted = $this->executor->upsert($this, $values, $uniqueBy, $update);
+
+        if ($upserted) {
+            $this->invalidateCachedTables();
+        }
+
+        return $upserted;
     }
 
     /**
@@ -1418,7 +1481,10 @@ class QueryBuilder
         ?array $update = null,
         array $returning = ['*'],
     ): array {
-        return $this->executor->upsertReturning($this, $values, $uniqueBy, $update, $returning);
+        $rows = $this->executor->upsertReturning($this, $values, $uniqueBy, $update, $returning);
+        $this->invalidateCachedTables();
+
+        return $rows;
     }
 
     /**
@@ -1464,6 +1530,8 @@ class QueryBuilder
         mixed $value = null,
         string $boolean = 'and',
     ): self {
+        $boolean = $this->normalizeBoolean($boolean);
+
         // Handle closure for nested where.
         if (\is_callable($column)) {
             return $this->whereNested($column, $boolean);
@@ -1502,6 +1570,7 @@ class QueryBuilder
      */
     public function whereBetween(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
+        $boolean = $this->normalizeBoolean($boolean);
         $this->validateColumnIdentifier($column, false);
 
         return $this->appendWhere(
@@ -1523,8 +1592,10 @@ class QueryBuilder
      */
     public function whereExists(callable $callback, string $boolean = 'and', bool $not = false): self
     {
+        $boolean = $this->normalizeBoolean($boolean);
         $query = $this->newQuery();
         $callback($query);
+        $this->containsRawFragments = $this->containsRawFragments || $query->containsRawFragments;
 
         return $this->appendWhere(
             [
@@ -1544,6 +1615,7 @@ class QueryBuilder
      */
     public function whereIn(string $column, array $values, string $boolean = 'and', bool $not = false): self
     {
+        $boolean = $this->normalizeBoolean($boolean);
         $this->validateColumnIdentifier($column, false);
 
         return $this->appendWhere(
@@ -1565,8 +1637,10 @@ class QueryBuilder
      */
     public function whereNested(callable $callback, string $boolean = 'and'): self
     {
+        $boolean = $this->normalizeBoolean($boolean);
         $query = $this->newQuery();
         $callback($query);
+        $this->containsRawFragments = $this->containsRawFragments || $query->containsRawFragments;
 
         if ($query->wheres !== []) {
             $this->wheres[] = [
@@ -1614,6 +1688,7 @@ class QueryBuilder
      */
     public function whereNull(string $column, string $boolean = 'and', bool $not = false): self
     {
+        $boolean = $this->normalizeBoolean($boolean);
         $this->validateColumnIdentifier($column, false);
 
         $this->wheres[] = [
@@ -1633,6 +1708,7 @@ class QueryBuilder
      */
     public function whereRaw(string $sql, array $bindings = [], string $boolean = 'and'): self
     {
+        $boolean = $this->normalizeBoolean($boolean);
         $this->validateRawFragment($sql, $bindings);
 
         $this->wheres[] = [
@@ -1679,7 +1755,6 @@ class QueryBuilder
     }
 
     /**
-     * @param 'select'|'from'|'join'|'having'|'union' $bucket
      * @param list<mixed> $bindings
      */
     private function appendBindingBucket(string $bucket, array $bindings): void
@@ -1757,6 +1832,7 @@ class QueryBuilder
     {
         for ($page = 1; ; $page++) {
             $clone = $this->cloneBuilder();
+            $clone->withoutCache();
             $clone->offset = ($page - 1) * $chunkSize;
             $clone->limit = $chunkSize;
 

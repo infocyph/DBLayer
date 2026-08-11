@@ -45,6 +45,27 @@ Use ``toSql()`` + ``getBindings()`` during debugging to verify generated SQL:
    $sql = $query->toSql();
    $bindings = $query->getBindings();
 
+Result Shapes and Opt-In Cache
+------------------------------
+
+``get()`` returns a plain row list. ``collect()`` returns ArrayKit 5's
+``Collection`` directly, while ``lazyCollection()`` adapts bounded keyset
+iteration to ArrayKit's ``LazyCollection`` transformations.
+
+.. code-block:: php
+
+   $rows = DB::table('users')->where('active', '=', 1)->collect();
+   $lazy = DB::table('users')->orderBy('id')->lazyCollection(500);
+
+   $cached = DB::table('users')
+       ->where('active', '=', 1)
+       ->cacheFor(120)
+       ->cacheTags('users')
+       ->get();
+
+Caching is strictly opt-in. See ``caching`` for transaction-safe invalidation
+and automatic bypass rules.
+
 Writes
 ------
 
@@ -57,8 +78,19 @@ Writes
 
    DB::table('users')->where('id', '=', $id)->update(['name' => 'Alice Updated']);
 
-For bulk conflict handling, use ``upsert()``. For read-back behavior after
-upsert, use ``upsertReturning()`` and rely on capability-aware fallback.
+For bulk conflict handling, use ``upsert()``. Inserts, ignored inserts, upserts,
+and returning upserts automatically split oversized parameter sets into safe,
+transactional batches. For read-back behavior, use ``upsertReturning()`` and
+rely on capability-aware fallback. Unsupported insert-ignore or upsert behavior
+raises ``QueryException``; DBLayer never degrades either operation to plain
+``INSERT``.
+
+``truncate()`` has one conservative cross-driver contract: remove every row,
+preserve the current identity/sequence position, never cascade to dependent
+tables, and invalidate the table cache dependency only after durable commit.
+MySQL and SQLite compile this operation as ``DELETE FROM``; PostgreSQL uses
+``TRUNCATE TABLE`` without ``RESTART IDENTITY`` or ``CASCADE``. Rollback follows
+the active engine's transaction guarantees.
 
 Running SQL Queries
 -------------------
@@ -100,6 +132,19 @@ Advanced SQL
 - Window helper: ``selectWindow()``
 - Upsert returning: ``upsertReturning()``
 - Native execution plans: ``explain()``
+- Structured source aliases: ``as()``
+- Structured join aliases: ``joinAs()`` / ``leftJoinAs()`` / ``rightJoinAs()``
+
+Aliases are separate validated identifiers; do not put ``"orders as o"`` in a
+table argument:
+
+.. code-block:: php
+
+   $rows = DB::table('orders')->as('o')
+       ->joinAs('users', 'u', 'o.user_id', '=', 'u.id')
+       ->addSelectAs('o.id', 'order_id')
+       ->addSelectAs('u.email', 'user_email')
+       ->get();
 
 Example CTE:
 
@@ -200,6 +245,11 @@ final order, preventing equal ``created_at`` values from being skipped.
 Ordered columns must be selected, non-null scalar values. Cursors are bound to
 the filter bindings and order definition, so changing tenant, filters, or order
 invalidates the token.
+
+Cursor pagination accepts at most eight order columns. If a joined projection
+contains qualified columns with the same output name (for example
+``users.id`` and ``orders.id``), select ordered columns with ``addSelectAs()``;
+ambiguous cursor result keys are rejected before execution.
 
 Keyset speed still depends on the database index. Put equality filters first,
 then the ordered cursor columns in the same sequence. The example above

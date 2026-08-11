@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection;
 
+use Infocyph\ArrayKit\Array\ArrayShape;
 use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
 use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
@@ -127,18 +128,38 @@ final class ConnectionConfig
 
         // Merge with generic defaults (shallow; security handled separately).
         $config = array_replace(self::DEFAULTS, $config);
+        $config['read_strategy'] = $this->normalizeReadStrategy($config['read_strategy'] ?? 'random');
 
         // Normalize security configuration.
         $config['security'] = array_replace(
             self::SECURITY_DEFAULT,
             $this->normalizeStringKeyArray($config['security'] ?? []),
         );
+        ArrayShape::require($config, [
+            'driver' => 'string',
+            'database' => 'string',
+            'options' => 'array',
+            'write' => 'array',
+            'read' => 'array',
+            'security' => 'array',
+        ]);
         $this->validateSecurityConfig($config['security']);
 
         // Resolve once so defaulting and validation share the same driver instance.
         $driver = $this->resolveDriver($config['driver'] ?? null);
         if ($driver instanceof DriverInterface) {
             $config = $driver->mergeDefaults($config);
+        }
+
+        foreach (['read', 'write'] as $replicaKey) {
+            $config[$replicaKey] = $this->expandReplicaHostVariants(
+                $this->normalizeReplicaConfigs($this->requireReplicaArray($config[$replicaKey] ?? [], $replicaKey)),
+            );
+
+            foreach ($config[$replicaKey] as $replica) {
+                $this->validateReplicaDescriptor($replica, $replicaKey);
+                $driver?->validateConfig(array_replace($config, $replica, ['read' => [], 'write' => []]));
+            }
         }
 
         // Basic structural validation.
@@ -297,22 +318,10 @@ final class ConnectionConfig
      */
     public function getReadStrategy(): string
     {
-        $strategy = $this->config['read_strategy'] ?? 'random';
+        /** @var string $strategy */
+        $strategy = $this->config['read_strategy'];
 
-        if (!is_string($strategy)) {
-            return 'random';
-        }
-
-        $strategy = strtolower(trim($strategy));
-
-        return match ($strategy) {
-            'round-robin' => 'round_robin',
-            'least-latency' => 'least_latency',
-            'weighted-random' => 'weighted',
-            'health-aware' => 'weighted',
-            'random', 'round_robin', 'least_latency', 'weighted' => $strategy,
-            default => 'random',
-        };
+        return $strategy;
     }
 
     /**
@@ -489,7 +498,7 @@ final class ConnectionConfig
 
             foreach ($hosts as $host) {
                 if (!is_string($host) || trim($host) === '') {
-                    continue;
+                    throw ConnectionException::invalidConfiguration('Replica host lists must contain non-empty strings.');
                 }
 
                 $copy = $replica;
@@ -516,6 +525,23 @@ final class ConnectionConfig
         return self::DRIVER_ALIASES[$driver] ?? $driver;
     }
 
+    private function normalizeReadStrategy(mixed $strategy): string
+    {
+        if (!is_string($strategy)) {
+            throw ConnectionException::invalidConfiguration('read_strategy must be a string.');
+        }
+
+        $strategy = strtolower(trim($strategy));
+
+        if (!in_array($strategy, ['random', 'round_robin', 'weighted', 'least_latency'], true)) {
+            throw ConnectionException::invalidConfiguration(
+                'read_strategy must be one of: random, round_robin, weighted, least_latency.',
+            );
+        }
+
+        return $strategy;
+    }
+
     /**
      * Normalize replica configuration into a list of associative arrays.
      *
@@ -532,10 +558,12 @@ final class ConnectionConfig
             $normalized = [];
 
             foreach ($replicas as $replica) {
-                if (is_array($replica) && $replica !== []) {
-                    /** @var array<string,mixed> $replica */
-                    $normalized[] = $replica;
+                if (!is_array($replica) || $replica === []) {
+                    throw ConnectionException::invalidConfiguration('Replica lists must contain non-empty configuration arrays.');
                 }
+
+                /** @var array<string,mixed> $replica */
+                $normalized[] = $replica;
             }
 
             return $normalized;
@@ -597,6 +625,16 @@ final class ConnectionConfig
         return $value;
     }
 
+    /** @return array<int|string,mixed> */
+    private function requireReplicaArray(mixed $replicas, string $key): array
+    {
+        if (!is_array($replicas)) {
+            throw ConnectionException::invalidConfiguration("Config key '{$key}' must be an array.");
+        }
+
+        return $replicas;
+    }
+
     private function resolveDriver(mixed $driverName): ?DriverInterface
     {
         if (!is_string($driverName) || $driverName === '') {
@@ -622,9 +660,8 @@ final class ConnectionConfig
             return [];
         }
 
-        return $this->expandReplicaHostVariants(
-            $this->normalizeReplicaConfigs($replica),
-        );
+        /** @var list<array<string,mixed>> $replica */
+        return $replica;
     }
 
     private function shouldRedactConfigKey(string $key): bool
@@ -672,6 +709,22 @@ final class ConnectionConfig
                         sprintf("Config key '%s' is required for driver '%s'.", $key, $driver),
                     );
                 }
+            }
+        }
+    }
+
+    /** @param array<string,mixed> $replica */
+    private function validateReplicaDescriptor(array $replica, string $key): void
+    {
+        if (array_key_exists('host', $replica) && !is_string($replica['host'])) {
+            throw ConnectionException::invalidConfiguration("{$key} replica host must be a string.");
+        }
+
+        if (array_key_exists('weight', $replica)) {
+            $weight = $replica['weight'];
+
+            if ((!is_int($weight) && !is_float($weight)) || $weight <= 0) {
+                throw ConnectionException::invalidConfiguration("{$key} replica weight must be a positive number.");
             }
         }
     }

@@ -163,6 +163,10 @@ Operational Notes
 - ``idle_timeout`` evicts idle connections.
 - ``max_lifetime`` rotates old connections.
 - ``health_check_interval`` controls probe cadence.
+- A zero value disables the corresponding idle timeout, lifetime rotation, or
+  scheduled health probe. Negative values are invalid.
+- Health probes run only against idle, already-opened connections; a borrowed
+  connection is never interrupted by ``SELECT 1``.
 
 Use pool stats to tune these settings under real workload:
 

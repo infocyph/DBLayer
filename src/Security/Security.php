@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Security;
 
 use Infocyph\DBLayer\Exceptions\SecurityException;
+use Infocyph\DBLayer\Support\SqlFingerprint;
 
 /**
  * Query Guard Manager
@@ -319,14 +320,6 @@ final class Security
     }
 
     /**
-     * Sanitize input value.
-     */
-    public static function sanitizeInput(mixed $value): mixed
-    {
-        return SecurityValidator::sanitizeInput($value);
-    }
-
-    /**
      * Sanitize LIKE pattern.
      */
     public static function sanitizeLikePattern(string $pattern): string
@@ -366,6 +359,37 @@ final class Security
     public static function validateColumnName(string $column): void
     {
         SecurityValidator::validateColumnName($column);
+    }
+
+    /**
+     * Validate compiler-generated SQL without repeating raw-SQL heuristics.
+     *
+     * Identifiers, operators, and developer-owned fragments have already been
+     * validated at builder boundaries. Execution still enforces query and
+     * binding resource limits.
+     *
+     * @param array<int|string,mixed> $bindings
+     * @param array<string,mixed>|null $config
+     */
+    public static function validateGeneratedQuery(
+        string $sql,
+        array $bindings = [],
+        ?array $config = null,
+    ): void {
+        $mode = self::$mode;
+
+        if ($mode === SecurityMode::OFF || self::shouldSkipForConnection($config)) {
+            return;
+        }
+
+        $maxLength = self::resolveMaxQueryLength($mode, $config);
+
+        if ($maxLength > 0) {
+            SecurityValidator::validateQueryLength($sql, $maxLength);
+        }
+
+        [$maxParams, $maxParamBytes] = self::extractBindingLimits($config);
+        self::enforceBindingLimits($bindings, $maxParams, $maxParamBytes);
     }
 
     /**
@@ -629,10 +653,8 @@ final class Security
      */
     private static function summarizeSqlForLogs(string $sql): array
     {
-        $trimmed = ltrim($sql);
-        $statement = strtoupper(substr($trimmed, 0, strcspn($trimmed, " \t\n\r")));
-        $normalized = strtolower(trim(preg_replace('/\s+/', ' ', $sql) ?? $sql));
-        $fingerprint = substr(hash('sha256', $normalized), 0, 16);
+        $statement = SqlFingerprint::statement($sql);
+        $fingerprint = SqlFingerprint::hash($sql);
 
         return [
             'statement' => $statement,

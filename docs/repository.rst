@@ -68,6 +68,18 @@ Core Methods
 - ``all()``, ``get()``, ``first()``, ``find()``, ``findMany()``
 - ``create()``, ``updateById()``, ``deleteById()``
 - ``firstOrCreate()``, ``updateOrCreate()``, ``upsert()``
+- ``cacheFor()`` for an opt-in table/tenant/record-tagged read policy
+
+``findMany()`` deduplicates database lookup keys, applies driver/security
+parameter ceilings, and restores the caller's requested identifier order (and
+duplicates) when the primary key is selected. Its internal identity encoding
+keeps integer ``1`` distinct from string ``"1"``; database coercion can still
+make both values resolve to the same physical row on permissive schemas.
+
+``create()`` first attempts to reload the persisted row by submitted primary
+key, normalized ``lastInsertId()``, or submitted attributes. If read-back is
+not possible, it returns the cast, tenant-enriched submitted payload. Callers
+that require database defaults must ensure the row can be uniquely reloaded.
 
 Pattern for scoped reads:
 
@@ -160,6 +172,12 @@ Feature Scopes
 - Optimistic locking: ``enableOptimisticLocking()``, ``updateByIdWithVersion()``
 - Casts: ``setCasts()``
 - Hooks: ``beforeCreate()``, ``afterCreate()``, ``beforeUpdate()``, ``afterUpdate()``, ``beforeDelete()``, ``afterDelete()``
+
+Hook coverage is intentionally explicit: ``create()`` and each ``bulkInsert()``
+row run create hooks; ``updateById()``, ``updateOrCreate()``'s update branch,
+and optimistic updates run update hooks exactly once; ``deleteById()`` and
+``forceDeleteById()`` run delete hooks. ``upsert()`` and ``restoreById()`` bypass
+these hooks because they are dedicated bulk/state-transition operations.
 
 Built-in casts are ``int``/``integer``, ``float``/``double``/``real``,
 ``bool``/``boolean``, ``string``, ``json``/``array``, and ``datetime``.

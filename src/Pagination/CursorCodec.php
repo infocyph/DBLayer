@@ -78,16 +78,24 @@ final class CursorCodec
             );
         }
 
-        $payload = self::base64UrlEncode(json_encode([
-            'v' => self::VERSION,
-            'd' => $direction,
-            'o' => array_map(
-                static fn(array $order): array => [$order['column'], $order['direction']],
-                $orders,
-            ),
-            'p' => $values,
-            'q' => $fingerprint,
-        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+        self::assertFiniteValues($values);
+
+        try {
+            $json = json_encode([
+                'v' => self::VERSION,
+                'd' => $direction,
+                'o' => array_map(
+                    static fn(array $order): array => [$order['column'], $order['direction']],
+                    $orders,
+                ),
+                'p' => $values,
+                'q' => $fingerprint,
+            ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        } catch (JsonException) {
+            throw QueryException::invalidParameter('cursor', 'Cursor values cannot be encoded safely.');
+        }
+
+        $payload = self::base64UrlEncode($json);
 
         if ($signingKey === null) {
             return $payload;
@@ -121,6 +129,16 @@ final class CursorCodec
                 'cursor',
                 'Cursor ordering does not match the current query.',
             );
+        }
+    }
+
+    /** @param list<bool|float|int|string> $values */
+    private static function assertFiniteValues(array $values): void
+    {
+        foreach ($values as $value) {
+            if (is_float($value) && !is_finite($value)) {
+                throw QueryException::invalidParameter('cursor', 'Cursor float positions must be finite.');
+            }
         }
     }
 
@@ -226,6 +244,10 @@ final class CursorCodec
                     'cursor',
                     'Cursor positions must contain only non-null scalar values.',
                 );
+            }
+
+            if (is_float($value) && !is_finite($value)) {
+                throw QueryException::invalidParameter('cursor', 'Cursor float positions must be finite.');
             }
 
             $result[] = $value;

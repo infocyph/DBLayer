@@ -294,10 +294,16 @@ it('refuses concurrent migration ownership', function (): void {
     $connection = schemaTestConnection();
     $directory = sys_get_temp_dir() . '/dblayer-migration-locks-' . bin2hex(random_bytes(4));
     $provider = new FileLockProvider($directory);
-    $key = sprintf(
-        'dblayer:migrations:sqlite:%s:migrations',
-        hash('xxh3', ':memory:'),
-    );
+    $identity = implode("\0", [
+        $connection->getDriverName(),
+        (string) $connection->getConfig()->get('host', ''),
+        (string) $connection->getConfig()->get('unix_socket', ''),
+        (string) $connection->getConfig()->get('port', ''),
+        $connection->getDatabaseName(),
+        (string) $connection->getConfig()->get('schema', ''),
+        'migrations',
+    ]);
+    $key = 'dblayer:migrations:' . hash('sha256', $identity);
     $handle = $provider->acquire($key, 0.0, 30.0);
     $runner = new MigrationRunner(
         $connection,

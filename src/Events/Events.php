@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Events;
 
+use InvalidArgumentException;
+use Throwable;
+
 /**
  * Event Dispatcher
  *
@@ -19,6 +22,13 @@ namespace Infocyph\DBLayer\Events;
  */
 final class Events
 {
+    private const int MAX_DIAGNOSTICS = 100;
+
+    private const int MAX_QUEUED_EVENTS = 1_000;
+
+    /** @var list<array{event:string,error:string,time:float}> */
+    private static array $diagnostics = [];
+
     /**
      * Enable/disable event dispatching globally.
      */
@@ -41,10 +51,10 @@ final class Events
     /**
      * Event statistics.
      *
-     * @var array{dispatched:int,queued:int}
+     * @var array{emitted:int,queued:int}
      */
     private static array $stats = [
-        'dispatched' => 0,
+        'emitted' => 0,
         'queued' => 0,
     ];
 
@@ -86,12 +96,12 @@ final class Events
             return;
         }
 
-        self::$stats['dispatched']++;
+        self::$stats['emitted']++;
 
         // 1) Exact listeners
         if (isset(self::$listeners[$event])) {
             foreach (self::$listeners[$event] as $listener) {
-                $listener(...$payload);
+                self::invokeListener($event, $listener, $payload);
             }
         }
 
@@ -102,7 +112,7 @@ final class Events
             }
 
             foreach ($listeners as $listener) {
-                $listener(...$payload);
+                self::invokeListener($event, $listener, $payload);
             }
         }
     }
@@ -158,6 +168,12 @@ final class Events
         self::$wildcardListeners = [];
     }
 
+    /** @return list<array{event:string,error:string,time:float}> */
+    public static function getDiagnostics(): array
+    {
+        return self::$diagnostics;
+    }
+
     /**
      * Get all registered event names.
      *
@@ -189,7 +205,7 @@ final class Events
      * Get event statistics and some derived counts.
      *
      * @return array{
-     *   dispatched:int,
+     *   emitted:int,
      *   queued:int,
      *   registered_events:int,
      *   queued_events:int,
@@ -202,7 +218,7 @@ final class Events
           + \array_sum(\array_map(count(...), self::$wildcardListeners));
 
         return [
-            'dispatched' => self::$stats['dispatched'],
+            'emitted' => self::$stats['emitted'],
             'queued' => self::$stats['queued'],
             'registered_events' => \count(self::$listeners) + \count(self::$wildcardListeners),
             'queued_events' => \count(self::$queue),
@@ -247,6 +263,10 @@ final class Events
      */
     public static function queue(string $event, array $payload = []): void
     {
+        if (count(self::$queue) >= self::MAX_QUEUED_EVENTS) {
+            array_shift(self::$queue);
+        }
+
         self::$queue[] = [
             'event' => $event,
             'payload' => $payload,
@@ -256,15 +276,29 @@ final class Events
         self::$stats['queued']++;
     }
 
+    public static function reportDiagnostic(string $event, Throwable $exception): void
+    {
+        if (count(self::$diagnostics) >= self::MAX_DIAGNOSTICS) {
+            array_shift(self::$diagnostics);
+        }
+
+        self::$diagnostics[] = [
+            'event' => $event,
+            'error' => $exception->getMessage(),
+            'time' => microtime(true),
+        ];
+    }
+
     /**
      * Reset statistics counters.
      */
     public static function resetStats(): void
     {
         self::$stats = [
-            'dispatched' => 0,
+            'emitted' => 0,
             'queued' => 0,
         ];
+        self::$diagnostics = [];
     }
 
     /**
@@ -275,7 +309,9 @@ final class Events
         foreach ($subscriber->subscribe() as $event => $listener) {
             if (\is_string($listener)) {
                 if (!\method_exists($subscriber, $listener)) {
-                    continue;
+                    throw new InvalidArgumentException(
+                        sprintf('Event subscriber method [%s] does not exist.', $listener),
+                    );
                 }
 
                 $method = $listener;
@@ -321,6 +357,18 @@ final class Events
 
         if ($bucket[$event] === []) {
             unset($bucket[$event]);
+        }
+    }
+
+    /**
+     * @param array<int,mixed> $payload
+     */
+    private static function invokeListener(string $event, callable $listener, array $payload): void
+    {
+        try {
+            $listener(...$payload);
+        } catch (Throwable $exception) {
+            self::reportDiagnostic($event, $exception);
         }
     }
 
