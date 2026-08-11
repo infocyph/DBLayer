@@ -15,25 +15,6 @@ use Infocyph\DBLayer\Connection\Connection;
 final class TransactionManager
 {
     /**
-     * Global statistics.
-     *
-     * @var array{
-     *   total_transactions:int,
-     *   active_transactions:int,
-     *   total_commits:int,
-     *   total_rollbacks:int,
-     *   total_deadlocks:int
-     * }
-     */
-    private array $globalStats = [
-        'total_transactions' => 0,
-        'active_transactions' => 0,
-        'total_commits' => 0,
-        'total_rollbacks' => 0,
-        'total_deadlocks' => 0,
-    ];
-
-    /**
      * Transaction instances keyed by connection object id.
      *
      * @var array<int,Transaction>
@@ -45,7 +26,7 @@ final class TransactionManager
      */
     public function activeCount(): int
     {
-        return $this->globalStats['active_transactions'];
+        return $this->getGlobalStats()['active_transactions'];
     }
 
     /**
@@ -64,10 +45,6 @@ final class TransactionManager
     public function begin(Connection $connection): void
     {
         $transaction = $this->forConnection($connection);
-
-        if (!$transaction->inTransaction()) {
-            $this->globalStats['active_transactions']++;
-        }
 
         $transaction->begin();
     }
@@ -91,7 +68,6 @@ final class TransactionManager
             static function (Transaction $transaction): void {
                 $transaction->commit();
             },
-            'total_commits',
         );
     }
 
@@ -120,14 +96,7 @@ final class TransactionManager
     {
         $transaction = $this->forConnection($connection);
 
-        try {
-            return $transaction->execute($callback, $attempts);
-        } catch (\Throwable $e) {
-            $stats = $transaction->getStats();
-            $this->globalStats['total_deadlocks'] += $stats['deadlocks'];
-
-            throw $e;
-        }
+        return $transaction->execute($callback, $attempts);
     }
 
     /**
@@ -139,7 +108,6 @@ final class TransactionManager
 
         if (!isset($this->transactions[$hash])) {
             $this->transactions[$hash] = new Transaction($connection);
-            $this->globalStats['total_transactions']++;
         }
 
         return $this->transactions[$hash];
@@ -158,7 +126,27 @@ final class TransactionManager
      */
     public function getGlobalStats(): array
     {
-        return $this->globalStats;
+        $stats = [
+            'total_transactions' => 0,
+            'active_transactions' => 0,
+            'total_commits' => 0,
+            'total_rollbacks' => 0,
+            'total_deadlocks' => 0,
+        ];
+
+        foreach ($this->transactions as $transaction) {
+            $current = $transaction->getStats();
+            $stats['total_transactions'] += $current['total'];
+            $stats['total_commits'] += $current['committed'];
+            $stats['total_rollbacks'] += $current['rolled_back'];
+            $stats['total_deadlocks'] += $current['deadlocks'];
+
+            if ($transaction->inTransaction()) {
+                $stats['active_transactions']++;
+            }
+        }
+
+        return $stats;
     }
 
     /**
@@ -169,7 +157,6 @@ final class TransactionManager
      *   committed:int,
      *   rolled_back:int,
      *   deadlocks:int,
-     *   timeouts:int,
      *   in_transaction:bool,
      *   current_level:int,
      *   savepoints:int,
@@ -220,14 +207,6 @@ final class TransactionManager
      */
     public function resetStats(): void
     {
-        $this->globalStats = [
-            'total_transactions' => 0,
-            'active_transactions' => 0,
-            'total_commits' => 0,
-            'total_rollbacks' => 0,
-            'total_deadlocks' => 0,
-        ];
-
         foreach ($this->transactions as $transaction) {
             $transaction->resetStats();
         }
@@ -243,7 +222,6 @@ final class TransactionManager
             static function (Transaction $transaction): void {
                 $transaction->rollBack();
             },
-            'total_rollbacks',
         );
     }
 
@@ -271,21 +249,10 @@ final class TransactionManager
 
     /**
      * @param callable(Transaction):void $operation
-     * @param 'total_commits'|'total_rollbacks' $counterKey
      */
-    private function finalizeTransaction(Connection $connection, callable $operation, string $counterKey): void
+    private function finalizeTransaction(Connection $connection, callable $operation): void
     {
         $transaction = $this->forConnection($connection);
         $operation($transaction);
-
-        if (!$transaction->inTransaction()) {
-            $this->globalStats['active_transactions']--;
-
-            if ($counterKey === 'total_commits') {
-                $this->globalStats['total_commits']++;
-            } else {
-                $this->globalStats['total_rollbacks']++;
-            }
-        }
     }
 }

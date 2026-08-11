@@ -122,6 +122,20 @@ final class Pool
             'max_lifetime' => (int) $merged['max_lifetime'],
             'health_check_interval' => (int) $merged['health_check_interval'],
         ];
+
+        if ($this->poolConfig['max_connections'] <= 0) {
+            throw ConnectionException::invalidConfiguration('Pool max_connections must be greater than zero.');
+        }
+
+        if ($this->poolConfig['min_connections'] < 0 || $this->poolConfig['min_connections'] > $this->poolConfig['max_connections']) {
+            throw ConnectionException::invalidConfiguration('Pool min_connections must be between zero and max_connections.');
+        }
+
+        foreach (['idle_timeout', 'max_lifetime', 'health_check_interval'] as $key) {
+            if ($this->poolConfig[$key] < 0) {
+                throw ConnectionException::invalidConfiguration("Pool {$key} must be non-negative.");
+            }
+        }
     }
 
     /**
@@ -129,7 +143,26 @@ final class Pool
      */
     public function addConfig(string $name, ConnectionConfig $config): void
     {
+        if (isset($this->configs[$name])) {
+            foreach ($this->connections[$name] ?? [] as $id => $data) {
+                if (!isset($this->idle[$name][$id])) {
+                    throw ConnectionException::invalidConfiguration(
+                        "Cannot replace pool config [{$name}] while a connection is checked out.",
+                    );
+                }
+                $this->removeConnection($name, $data['connection']);
+            }
+        }
+
         $this->configs[$name] = $config;
+
+        while (count($this->connections[$name] ?? []) < $this->poolConfig['min_connections'] && $this->canCreateConnection()) {
+            $connection = $this->createConnection($name);
+            $this->idle[$name][spl_object_id($connection)] = [
+                'connection' => $connection,
+                'idle_since' => microtime(true),
+            ];
+        }
     }
 
     /**
@@ -176,6 +209,10 @@ final class Pool
 
         // Check if we can create a new connection.
         if ($this->canCreateConnection()) {
+            return $this->createConnection($name);
+        }
+
+        if ($this->reclaimIdleConnection($name)) {
             return $this->createConnection($name);
         }
 
@@ -253,25 +290,33 @@ final class Pool
      */
     public function releaseConnection(string $name, Connection $connection): void
     {
+        $connectionId = spl_object_id($connection);
+
+        if (!isset($this->connections[$name][$connectionId])) {
+            throw ConnectionException::invalidConfiguration('Cannot release a foreign connection into the pool.');
+        }
+
+        if (!$connection->resetRuntimeStateForReuse()) {
+            $this->removeConnection($name, $connection);
+
+            return;
+        }
+
         // Check if connection is healthy.
-        if (!$connection->isHealthy()) {
+        if ($connection->isConnected() && !$connection->isHealthy()) {
             $this->removeConnection($name, $connection);
 
             return;
         }
 
         // Check connection lifetime.
-        $connectionId = spl_object_id($connection);
+        $createdAt = $this->connections[$name][$connectionId]['created_at'];
+        $lifetime = microtime(true) - $createdAt;
 
-        if (isset($this->connections[$name][$connectionId])) {
-            $createdAt = $this->connections[$name][$connectionId]['created_at'];
-            $lifetime = microtime(true) - $createdAt;
+        if ($this->poolConfig['max_lifetime'] > 0 && $lifetime > $this->poolConfig['max_lifetime']) {
+            $this->removeConnection($name, $connection);
 
-            if ($lifetime > $this->poolConfig['max_lifetime']) {
-                $this->removeConnection($name, $connection);
-
-                return;
-            }
+            return;
         }
 
         // Add to idle pool.
@@ -342,8 +387,12 @@ final class Pool
     {
         $candidates = [];
 
-        foreach ($this->connections as $name => $connections) {
+        foreach ($this->idle as $name => $connections) {
             foreach ($connections as $data) {
+                if (!$data['connection']->isConnected()) {
+                    continue;
+                }
+
                 $candidates[] = [
                     'name' => $name,
                     'connection' => $data['connection'],
@@ -363,7 +412,7 @@ final class Pool
     private function createConnection(string $name): Connection
     {
         $config = $this->configs[$name];
-        $connection = new Connection($config);
+        $connection = new Connection($config, $name);
 
         // Attach HealthCheck monitor tuned with pool config.
         $connection->attachHealthCheck(
@@ -403,7 +452,7 @@ final class Pool
 
         // Check idle timeout.
         $idleTime = microtime(true) - $data['idle_since'];
-        if ($idleTime >= $this->poolConfig['idle_timeout']) {
+        if ($this->poolConfig['idle_timeout'] > 0 && $idleTime >= $this->poolConfig['idle_timeout']) {
             $this->removeConnection($name, $data['connection']);
 
             // Try next one.
@@ -414,7 +463,7 @@ final class Pool
         unset($this->idle[$name][$connectionId]);
 
         // Check health before returning (uses HealthCheck if attached).
-        if (!$data['connection']->isHealthy()) {
+        if ($data['connection']->isConnected() && !$data['connection']->isHealthy()) {
             $this->removeConnection($name, $data['connection']);
 
             // Try next one.
@@ -444,6 +493,22 @@ final class Pool
         $this->healthCursor = ($this->healthCursor + $batchSize) % $total;
     }
 
+    private function reclaimIdleConnection(string $requestedName): bool
+    {
+        foreach ($this->idle as $name => $connections) {
+            if ($name === $requestedName || $connections === []) {
+                continue;
+            }
+
+            $first = reset($connections);
+            $this->removeConnection($name, $first['connection']);
+
+            return true;
+        }
+
+        return false;
+    }
+
     /**
      * Remove stale idle connections.
      */
@@ -455,7 +520,7 @@ final class Pool
             foreach ($connections as $data) {
                 $idleTime = $now - $data['idle_since'];
 
-                if ($idleTime >= $this->poolConfig['idle_timeout']) {
+                if ($this->poolConfig['idle_timeout'] > 0 && $idleTime >= $this->poolConfig['idle_timeout']) {
                     $this->removeConnection($name, $data['connection']);
                 }
             }
@@ -464,6 +529,10 @@ final class Pool
 
     private function shouldRunHealthCheck(float $now): bool
     {
+        if ($this->poolConfig['health_check_interval'] === 0) {
+            return false;
+        }
+
         if ($this->lastHealthCheck === null) {
             return true;
         }

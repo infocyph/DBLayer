@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\CacheLayer\Cache\Cache;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
@@ -54,12 +55,13 @@ it('uses cachelayer file adapter through DB facade', function (string $driver): 
         test()->markTestSkipped('File permission world-writable checks are not supported in this environment.');
     }
 
-    $cache = DB::useFileCache($cacheDir);
+    $cache = Cache::file('dblayer', $cacheDir);
+    DB::setCache($cache);
     $stored = $cache->set('greeting', 'hello', 30);
 
     expect($stored)->toBeTrue();
     expect($cache->get('greeting'))->toBe('hello');
-    expect($cache->count())->toBe(1);
+    expect($cache->has('greeting'))->toBeTrue();
     expect($cache->exportMetrics())->toBeArray();
     expect(is_dir($cacheDir))->toBeTrue();
 
@@ -82,6 +84,7 @@ it('uses cachelayer file adapter through DB facade', function (string $driver): 
     expect($cache->get('db-query-result'))->toBeNull();
 
     $cache->clear();
+    DB::setCache(Cache::memory('dblayer-test'));
     $removeDirectory($cacheDir);
 })->with('dblayer_drivers');
 

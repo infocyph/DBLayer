@@ -35,6 +35,8 @@ final class Logger
 
     private bool $enabled = false;
 
+    private bool $includeExceptionTraces = false;
+
     /**
      * Whether to redact binding values in logs.
      */
@@ -94,7 +96,9 @@ final class Logger
             $context['exception'] = $exception::class;
             $context['file'] = $exception->getFile();
             $context['line'] = $exception->getLine();
-            $context['trace'] = $exception->getTraceAsString();
+            if ($this->includeExceptionTraces) {
+                $context['trace'] = $exception->getTraceAsString();
+            }
         }
 
         $this->write($context);
@@ -151,6 +155,11 @@ final class Logger
         }
 
         $this->write($context);
+    }
+
+    public function setIncludeExceptionTraces(bool $include): void
+    {
+        $this->includeExceptionTraces = $include;
     }
 
     /**
@@ -262,8 +271,20 @@ final class Logger
      */
     private function redactBindingValue(mixed $value): mixed
     {
-        if ($value === null || is_bool($value) || is_int($value) || is_float($value)) {
-            return $value;
+        if ($value === null) {
+            return '[null]';
+        }
+
+        if (is_bool($value)) {
+            return '[redacted:bool]';
+        }
+
+        if (is_int($value)) {
+            return '[redacted:int]';
+        }
+
+        if (is_float($value)) {
+            return '[redacted:float]';
         }
 
         if (is_resource($value)) {

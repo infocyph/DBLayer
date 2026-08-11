@@ -82,7 +82,7 @@ final class QueryBridgeSupport
         ) + ['rows' => $event->rowsAffected];
 
         if ($profilerEnabled) {
-            $profiler->finish($event->sql, $event->bindings);
+            $profiler->record($event->sql, $event->bindings, $event->time);
         }
 
         if ($loggerEnabled) {

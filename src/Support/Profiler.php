@@ -23,10 +23,14 @@ final class Profiler
      */
     private int $maxProfiles = self::DEFAULT_MAX_PROFILES;
 
+    private int $profileCount = 0;
+
     /**
      * @var array<int, array{sql:string,bindings:array<array-key,mixed>,time:float,memory:int}>
      */
     private array $profiles = [];
+
+    private int $profileStart = 0;
 
     private int $startMemory = 0;
 
@@ -38,6 +42,8 @@ final class Profiler
     public function clear(): void
     {
         $this->profiles = [];
+        $this->profileStart = 0;
+        $this->profileCount = 0;
         $this->startTime = 0.0;
         $this->startMemory = 0;
     }
@@ -77,16 +83,7 @@ final class Profiler
         $timeMs = ($endTime - $this->startTime) * 1000;
         $memory = $endMemory - $this->startMemory;
 
-        $this->profiles[] = [
-            'sql' => $sql,
-            'bindings' => $bindings,
-            'time' => round($timeMs, 2),
-            'memory' => $memory,
-        ];
-
-        if (\count($this->profiles) > $this->maxProfiles) {
-            array_splice($this->profiles, 0, \count($this->profiles) - $this->maxProfiles);
-        }
+        $this->record($sql, $bindings, $timeMs, $memory);
 
         // Reset for next measurement.
         $this->startTime = 0.0;
@@ -100,13 +97,14 @@ final class Profiler
      */
     public function getSlowestQuery(): ?array
     {
-        if ($this->profiles === []) {
+        $profiles = $this->profiles();
+        if ($profiles === []) {
             return null;
         }
 
         $slowest = null;
 
-        foreach ($this->profiles as $profile) {
+        foreach ($profiles as $profile) {
             if ($slowest === null || $profile['time'] > $slowest['time']) {
                 $slowest = $profile;
             }
@@ -127,7 +125,8 @@ final class Profiler
      */
     public function getStats(): array
     {
-        $count = count($this->profiles);
+        $profiles = $this->profiles();
+        $count = count($profiles);
 
         if ($count === 0) {
             return [
@@ -141,7 +140,7 @@ final class Profiler
         $totalTime = 0.0;
         $totalMemory = 0;
 
-        foreach ($this->profiles as $profile) {
+        foreach ($profiles as $profile) {
             $totalTime += $profile['time'];
             $totalMemory += $profile['memory'];
         }
@@ -169,7 +168,22 @@ final class Profiler
      */
     public function profiles(): array
     {
-        return $this->profiles;
+        return RingBuffer::ordered($this->profiles, $this->profileStart, $this->profileCount, $this->maxProfiles);
+    }
+
+    /** @param array<array-key,mixed> $bindings */
+    public function record(string $sql, array $bindings, float $timeMs, int $memory = 0): void
+    {
+        if (!$this->enabled) {
+            return;
+        }
+
+        RingBuffer::append($this->profiles, $this->profileStart, $this->profileCount, $this->maxProfiles, [
+            'sql' => $sql,
+            'bindings' => $bindings,
+            'time' => round($timeMs, 2),
+            'memory' => $memory,
+        ]);
     }
 
     /**
@@ -177,11 +191,12 @@ final class Profiler
      */
     public function setMaxProfiles(?int $maxProfiles): void
     {
+        $profiles = $this->profiles();
         $this->maxProfiles = max(1, $maxProfiles ?? self::DEFAULT_MAX_PROFILES);
-
-        if (\count($this->profiles) > $this->maxProfiles) {
-            array_splice($this->profiles, 0, \count($this->profiles) - $this->maxProfiles);
-        }
+        $profiles = array_slice($profiles, -$this->maxProfiles);
+        $this->profiles = $profiles;
+        $this->profileStart = 0;
+        $this->profileCount = count($profiles);
     }
 
     /**

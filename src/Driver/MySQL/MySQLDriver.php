@@ -8,6 +8,7 @@ use Infocyph\DBLayer\Driver\AbstractPdoDriver;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use PDO;
 use Pdo\Mysql;
+use PDOException;
 
 /**
  * MySQL / MariaDB driver.
@@ -34,6 +35,38 @@ final class MySQLDriver extends AbstractPdoDriver
     protected const array NETWORK_REQUIRED_ANY = ['host', 'unix_socket'];
 
     protected const ?string TLS_REQUIREMENT_MESSAGE = 'Driver [{driver}] requires TLS in this environment. Configure ssl_ca/ssl_cert/ssl_key or a Pdo\\Mysql ATTR_SSL_* option.';
+
+    #[\Override]
+    public function applyReadOnlyTransaction(PDO $pdo): void
+    {
+        try {
+            $pdo->exec('set transaction read only');
+        } catch (PDOException) {
+            // Native enforcement is best effort.
+        }
+    }
+
+    #[\Override]
+    public function applyStatementTimeout(PDO $pdo, int $timeoutMs): void
+    {
+        $value = max(0, $timeoutMs);
+
+        try {
+            $pdo->exec('set session max_execution_time = ' . $value);
+
+            return;
+        } catch (PDOException) {
+            // MariaDB uses a seconds-based session variable instead.
+        }
+
+        $seconds = number_format(max(0.0, $value / 1_000.0), 3, '.', '');
+
+        try {
+            $pdo->exec('set session max_statement_time = ' . $seconds);
+        } catch (PDOException) {
+            // Native enforcement is best effort; DBLayer still tracks its budget.
+        }
+    }
 
     #[\Override]
     public function compileExplain(

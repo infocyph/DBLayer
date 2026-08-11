@@ -80,11 +80,7 @@ interface PaginatorInterface extends Countable, IteratorAggregate, JsonSerializa
     /**
      * Array representation, typically for JSON resources.
      *
-     * Recommended shape:
-     *  [
-     *      'data' => [...items...],
-     *      'meta' => [...pagination meta...],
-     *  ]
+     * The conventional shape contains a data list and pagination metadata.
      *
      * @return array<string, mixed>
      */

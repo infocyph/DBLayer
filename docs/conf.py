@@ -56,9 +56,8 @@ napoleon_google_docstring = True
 napoleon_numpy_docstring  = False
 
 # Intersphinx (only inventories that exist)
-intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", None),
-}
+intersphinx_mapping = {}
+autosectionlabel_prefix_document = True
 
 # PHP manual shortcut: :php:`json_encode`
 extlinks = {

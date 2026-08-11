@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Exceptions\QueryException;
+use Infocyph\DBLayer\Pagination\CursorCodec;
 use Infocyph\DBLayer\Query\QueryBuilder;
 
 /**
@@ -135,6 +136,30 @@ it('fails when an ordered cursor value is not selected', function (string $drive
     )->toThrow(QueryException::class, 'must be selected');
 })->with('dblayer_drivers');
 
+it('requires explicit result aliases for colliding qualified cursor columns', function (string $driver): void {
+    ['connection' => $connection, 'table' => $table] = setupKeysetFixture($driver);
+
+    expect(
+        static fn() => DB::table($table, $connection)
+            ->as('event_row')
+            ->joinAs($table, 'same_row', 'event_row.id', '=', 'same_row.id')
+            ->select('event_row.id', 'same_row.id')
+            ->orderBy('event_row.id')
+            ->cursorPaginate(2, null, 'event_row.id'),
+    )->toThrow(QueryException::class, 'ambiguous result key');
+
+    $page = DB::table($table, $connection)
+        ->as('event_row')
+        ->joinAs($table, 'same_row', 'event_row.id', '=', 'same_row.id')
+        ->addSelectAs('event_row.id', 'event_id')
+        ->addSelectAs('same_row.id', 'same_id')
+        ->orderBy('event_row.id')
+        ->cursorPaginate(2, null, 'event_row.id');
+
+    expect($page->items())->toHaveCount(2)
+        ->and($page->items()[0])->toHaveKeys(['event_id', 'same_id']);
+})->with('dblayer_drivers');
+
 it('supports descending resumable chunks and bounded lazy iteration', function (string $driver): void {
     ['connection' => $connection, 'table' => $table] = setupKeysetFixture($driver);
 
@@ -186,3 +211,16 @@ it('uses the explicit driver streaming strategy and releases it on early close',
 
     expect(DB::table($table, $connection)->count())->toBe(6);
 })->with('dblayer_drivers');
+
+it('rejects non-finite cursor positions', function (float $position): void {
+    expect(fn() => CursorCodec::encode(
+        [['column' => 'score', 'direction' => 'asc']],
+        [$position],
+        'next',
+        'query-fingerprint',
+    ))->toThrow(QueryException::class, 'finite');
+})->with([
+    'positive infinity' => INF,
+    'negative infinity' => -INF,
+    'not a number' => NAN,
+]);

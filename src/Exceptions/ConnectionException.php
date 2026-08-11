@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Exceptions;
 
+use Infocyph\DBLayer\Support\SqlFingerprint;
+
 /**
  * Errors related to establishing or maintaining database connections.
  */
@@ -120,8 +122,8 @@ final class ConnectionException extends DBException
      */
     public static function queryFailed(string $sql, string $error): self
     {
-        $statement = strtoupper(substr(ltrim($sql), 0, strcspn(ltrim($sql), " \t\n\r")));
-        $fingerprint = substr(hash('sha256', strtolower(trim(preg_replace('/\s+/', ' ', $sql) ?? $sql))), 0, 16);
+        $statement = SqlFingerprint::statement($sql);
+        $fingerprint = SqlFingerprint::hash($sql);
 
         return new self(
             "Database query failed: {$error}. Statement: {$statement}. Fingerprint: {$fingerprint}.",

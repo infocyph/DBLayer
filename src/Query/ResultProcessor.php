@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Query;
 
-use Infocyph\DBLayer\Support\Collection;
+use Infocyph\ArrayKit\Collection\Collection;
 
 /**
  * Result Processor

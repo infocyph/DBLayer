@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\ArrayKit\Array\DotNotation;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Events\Events;
@@ -397,10 +398,10 @@ it('matches helpers and security example flow', function (string $driver): void 
 
     Events::forgetAll();
 
-    $payload = new stdClass();
-    data_set($payload, 'profile.name', 'Alice');
+    $payload = [];
+    DotNotation::set($payload, 'profile.name', 'Alice');
 
-    expect(data_get($payload, 'profile.name', 'unknown'))->toBe('Alice');
+    expect(DotNotation::get($payload, 'profile.name', 'unknown'))->toBe('Alice');
 
     $dispatched = 0;
     $listener = static function () use (&$dispatched): void {
@@ -434,7 +435,11 @@ it('keeps examples and integration coverage in sync', function (): void {
     $coverageMap = [
         'bootstrap.php' => ['ExamplesParityIntegrationTest.php'],
         'chunking.php' => ['ExamplesParityIntegrationTest.php'],
-        'crud.php' => ['CrudIntegrationTest.php', 'AdvancedQueryFeaturesIntegrationTest.php'],
+        'crud.php' => [
+            'CrudIntegrationTest.php',
+            'AdvancedQueryFeaturesIntegrationTest.php',
+            'PlanV2CriticalRegressionTest.php',
+        ],
         'cross_driver_matrix.php' => ['CrossDriverMatrixIntegrationTest.php'],
         'filtering.php' => ['ExamplesParityIntegrationTest.php'],
         'helpers_and_security.php' => ['ExamplesParityIntegrationTest.php'],
@@ -453,7 +458,10 @@ it('keeps examples and integration coverage in sync', function (): void {
             'RelationLoaderIntegrationTest.php',
             'RelationLoaderEdgeCasesIntegrationTest.php',
         ],
-        'restored_modules.php' => ['RestoredModulesIntegrationTest.php'],
+        'restored_modules.php' => [
+            'RestoredModulesIntegrationTest.php',
+            'ModernizationIntegrationTest.php',
+        ],
         'schema_migrations.php' => [
             'SchemaMigrationIntegrationTest.php',
             'MigrationEdgeCasesIntegrationTest.php',

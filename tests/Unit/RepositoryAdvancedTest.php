@@ -161,6 +161,32 @@ it('supports repository write helpers and convenience create-or-update operation
     expect($repository->count())->toBe(5);
 })->with('dblayer_drivers');
 
+it('runs beforeUpdate exactly once for updateOrCreate', function (string $driver): void {
+    $table = setupRepositoryFixture($driver);
+    DB::table($table)->insert([
+        'tenant_id' => 10,
+        'email' => 'hook@example.test',
+        'name' => 'Before',
+        'active' => 1,
+    ]);
+    $beforeUpdateCalls = 0;
+    $repository = DB::repository($table)
+        ->forTenant(10)
+        ->beforeUpdate(static function (array $values) use (&$beforeUpdateCalls): array {
+            $beforeUpdateCalls++;
+
+            return $values;
+        });
+
+    $row = $repository->updateOrCreate(
+        ['email' => 'hook@example.test'],
+        ['name' => 'After'],
+    );
+
+    expect($row['name'] ?? null)->toBe('After')
+        ->and($beforeUpdateCalls)->toBe(1);
+})->with('dblayer_drivers');
+
 it('supports repository pagination and streaming helpers', function (string $driver): void {
     $table = setupRepositoryFixture($driver);
 

@@ -38,6 +38,7 @@ final readonly class QueryExecuted
      *   bindings:array<int|string,mixed>,
      *   time:float,
      *   connection:string,
+     *   driver:string,
      *   rows_affected:int|null
      * }
      */
@@ -47,7 +48,8 @@ final readonly class QueryExecuted
             'sql' => $this->sql,
             'bindings' => $this->bindings,
             'time' => $this->time,
-            'connection' => $this->connection->getDriverName(),
+            'connection' => $this->connection->getName(),
+            'driver' => $this->connection->getDriverName(),
             'rows_affected' => $this->rowsAffected,
         ];
     }

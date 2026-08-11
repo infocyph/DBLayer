@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Events\DatabaseEvents;
 
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Support\SqlFingerprint;
 use Throwable;
 
 /**
@@ -41,8 +42,8 @@ final readonly class QueryFailed
     ) {
         $this->error = $exception->getMessage();
         $this->exceptionClass = $exception::class;
-        $this->statement = self::statementFromSql($sql);
-        $this->fingerprint = self::fingerprintFromSql($sql);
+        $this->statement = SqlFingerprint::statement($sql);
+        $this->fingerprint = SqlFingerprint::hash($sql);
     }
 
     /**
@@ -53,6 +54,7 @@ final readonly class QueryFailed
      *   bindings:array<int|string,mixed>,
      *   time:float,
      *   connection:string,
+     *   driver:string,
      *   attempts:int,
      *   error:string,
      *   exception:string,
@@ -66,26 +68,13 @@ final readonly class QueryFailed
             'sql' => $this->sql,
             'bindings' => $this->bindings,
             'time' => $this->time,
-            'connection' => $this->connection->getDriverName(),
+            'connection' => $this->connection->getName(),
+            'driver' => $this->connection->getDriverName(),
             'attempts' => $this->attempts,
             'error' => $this->error,
             'exception' => $this->exceptionClass,
             'statement' => $this->statement,
             'fingerprint' => $this->fingerprint,
         ];
-    }
-
-    private static function fingerprintFromSql(string $sql): string
-    {
-        $normalized = strtolower(trim((string) (preg_replace('/\s+/', ' ', $sql) ?? $sql)));
-
-        return substr(hash('sha256', $normalized), 0, 16);
-    }
-
-    private static function statementFromSql(string $sql): string
-    {
-        $trimmed = ltrim($sql);
-
-        return strtoupper(substr($trimmed, 0, strcspn($trimmed, " \t\n\r")));
     }
 }

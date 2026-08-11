@@ -14,9 +14,49 @@ use Infocyph\DBLayer\Driver\AbstractSqlCompiler;
 final class PostgreSQLCompiler extends AbstractSqlCompiler
 {
     #[\Override]
+    protected function compileLock(string $lock): string
+    {
+        return $lock === 'update' ? 'FOR UPDATE' : 'FOR SHARE';
+    }
+
+    #[\Override]
+    protected function compileReturning(string $sql, array $returning): string
+    {
+        return $sql . ' RETURNING ' . implode(', ', array_map(
+            $this->wrapIdentifier(...),
+            $returning,
+        ));
+    }
+
+    #[\Override]
+    protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
+    {
+        if ($uniqueBy === []) {
+            throw new \LogicException('PostgreSQL UPSERT requires a conflict target.');
+        }
+
+        $conflict = implode(', ', array_map(
+            $this->wrapIdentifier(...),
+            $uniqueBy,
+        ));
+        if ($update === []) {
+            return $insertSql . ' ON CONFLICT (' . $conflict . ') DO NOTHING';
+        }
+
+        $assignments = array_map(
+            fn(string $column): string => $this->wrapIdentifier($column)
+                . ' = excluded.' . $this->wrapIdentifier($column),
+            $update,
+        );
+
+        return $insertSql . ' ON CONFLICT (' . $conflict . ') DO UPDATE SET '
+            . implode(', ', $assignments);
+    }
+
+    #[\Override]
     protected function truncateStatementForTable(string $wrappedTable): string
     {
-        return 'TRUNCATE TABLE ' . $wrappedTable . ' RESTART IDENTITY CASCADE';
+        return 'TRUNCATE TABLE ' . $wrappedTable;
     }
 
     #[\Override]

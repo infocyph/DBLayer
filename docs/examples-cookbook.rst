@@ -210,7 +210,7 @@ Repository-Oriented Calls
 
    $one = User::find(1);                      // repository dispatch
    $rows = User::query()->limit(20)->get();   // query dispatch
-   $stats = User::stats();                    // DB facade dispatch
+   $stats = DB::stats('main');                 // explicit infrastructure call
 
 Per-Call Connection Override
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -268,11 +268,15 @@ Caching Recipe
 
 .. code-block:: php
 
-   $cache = DB::cache();
+   use Infocyph\CacheLayer\Cache\Cache;
 
-   $activeUsers = $cache->remember('users.active', function (): array {
-       return DB::table('users')->where('active', '=', 1)->get();
-   }, 120);
+   DB::setCache(Cache::memory('application'));
+
+   $activeUsers = DB::table('users')
+       ->where('active', '=', 1)
+       ->cacheFor(120)
+       ->cacheTags('users')
+       ->get();
 
 Connection + Replica Recipe
 ---------------------------

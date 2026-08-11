@@ -75,6 +75,16 @@ final class TransactionException extends DBException
         return new self('Transaction attempted write in read-only mode.');
     }
 
+    public static function rollbackAlsoFailed(\Throwable $primary, \Throwable $rollback): self
+    {
+        return new self(
+            'Transaction failed and rollback also failed: primary=[' . $primary->getMessage()
+            . '], rollback=[' . $rollback->getMessage() . '].',
+            0,
+            $primary,
+        );
+    }
+
     public static function rollBackFailed(string $message): self
     {
         return new self('Failed to roll back transaction: ' . $message);

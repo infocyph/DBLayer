@@ -134,7 +134,7 @@ it('applies scopes once per batch and makes one-relation ordering deterministic'
         ->and($loaded[2]['post'])->toBeNull();
 });
 
-it('preserves duplicate pivot order skips missing rows and selects mapping keys', function (): void {
+it('preserves duplicate pivot projections skips missing rows and selects mapping keys', function (): void {
     $loader = relationEdgeLoader(2);
     $connection = DB::connection();
     $connection->table('edge_role_user')->insert([

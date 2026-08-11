@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use Infocyph\ArrayKit\Array\DotNotation;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Connection\SqlStatementInspector;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
@@ -174,13 +176,19 @@ it('supports associative read replica configuration', function (): void {
         'driver' => 'sqlite',
         'database' => ':memory:',
         'read' => ['database' => ':memory:'],
-        'read_strategy' => 'round-robin',
+        'read_strategy' => 'round_robin',
     ]);
 
     expect($config->hasReadConfig())->toBeTrue();
     expect($config->getReadConfigs())->toBe([['database' => ':memory:']]);
     expect($config->getReadConfig())->toBe(['database' => ':memory:']);
     expect($config->getReadStrategy())->toBe('round_robin');
+
+    expect(fn() => ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'read_strategy' => 'round-robin',
+    ]))->toThrow(ConnectionException::class);
 });
 
 it('keeps statement cache disabled by default with conservative size', function (): void {
@@ -235,36 +243,26 @@ it('recursively redacts sensitive values in safe config export', function (): vo
 
     $safe = $config->toSafeArray();
 
-    expect(data_get($safe, 'password'))->toBe('[redacted]');
-    expect(data_get($safe, 'PASSWORD'))->toBe('[redacted]');
-    expect(data_get($safe, 'token'))->toBe('[redacted]');
-    expect(data_get($safe, 'read.0.password'))->toBe('[redacted]');
-    expect(data_get($safe, 'read.0.options.ssl_key'))->toBe('[redacted]');
-    expect(data_get($safe, 'read.0.options.SSL_CERT'))->toBe('[redacted]');
-    expect(data_get($safe, 'write.0.private_key'))->toBe('[redacted]');
-    expect(data_get($safe, 'write.0.Secret'))->toBe('[redacted]');
-    expect(data_get($safe, 'options.ssl_ca'))->toBe('[redacted]');
-    expect(data_get($safe, 'options.TLS_KEY'))->toBe('[redacted]');
-    expect(data_get($safe, 'options.nested.passphrase'))->toBe('[redacted]');
-    expect(data_get($safe, 'options.nested.TOKEN'))->toBe('[redacted]');
-    expect(data_get($safe, 'security.rate_limit_key'))->toBe('safe-visible');
-    expect(data_get($safe, 'security.cursor_signing_key'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'password'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'PASSWORD'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'token'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'read.0.password'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'read.0.options.ssl_key'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'read.0.options.SSL_CERT'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'write.0.private_key'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'write.0.Secret'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'options.ssl_ca'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'options.TLS_KEY'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'options.nested.passphrase'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'options.nested.TOKEN'))->toBe('[redacted]');
+    expect(DotNotation::get($safe, 'security.rate_limit_key'))->toBe('safe-visible');
+    expect(DotNotation::get($safe, 'security.cursor_signing_key'))->toBe('[redacted]');
 });
 
-it('preserves null values for ArrayAccess lookups in data_get', function (): void {
-    $payload = new \ArrayObject(['key' => null]);
-
-    expect(data_get($payload, 'key', 'fallback'))->toBeNull();
-});
-
-it('preserves object shape when setting nested paths via data_set', function (): void {
-    $target = new \stdClass();
-
-    data_set($target, 'profile.name', 'Alice');
-
-    expect($target)->toBeObject();
-    expect($target->profile)->toBeArray();
-    expect($target->profile['name'])->toBe('Alice');
+it('does not autoload DBLayer global compatibility helpers', function (): void {
+    expect(function_exists('data_get'))->toBeFalse();
+    expect(function_exists('data_set'))->toBeFalse();
+    expect(function_exists('collect'))->toBeFalse();
 });
 
 it('removes empty event buckets when forgetting listeners', function (): void {
@@ -423,25 +421,28 @@ it('evicts failed cached least-latency replica and marks cooldown', function ():
     $connection->select('select 1');
 
     $reflection = new \ReflectionClass($connection);
-    $markFailure = $reflection->getMethod('markReadReplicaFailure');
-    $cachedIndex = $reflection->getProperty('leastLatencyReplicaIndex');
-    $cachedAt = $reflection->getProperty('leastLatencyResolvedAt');
-    $unavailableUntil = $reflection->getProperty('readReplicaUnavailableUntil');
+    /** @var \Infocyph\DBLayer\Connection\ReplicaSelector $selector */
+    $selector = $reflection->getProperty('replicaSelector')->getValue($connection);
+    $selectorReflection = new \ReflectionClass($selector);
+    $markFailure = $selectorReflection->getMethod('markFailure');
+    $cachedIndex = $selectorReflection->getProperty('leastLatencyIndex');
+    $cachedAt = $selectorReflection->getProperty('leastLatencyResolvedAt');
+    $unavailableUntil = $selectorReflection->getProperty('unavailableUntil');
 
     // Simulate a cached winner that subsequently failed and is now suppressed.
-    $cachedIndex->setValue($connection, 1);
-    $cachedAt->setValue($connection, time());
-    $markFailure->invoke($connection, 1);
+    $cachedIndex->setValue($selector, 1);
+    $cachedAt->setValue($selector, time());
+    $markFailure->invoke($selector, 1);
     $connection->reconnect(false);
 
     $connection->select('select 1');
     $info = $connection->getReadReplicaInfo();
 
     /** @var array<int,int> $suppressed */
-    $suppressed = $unavailableUntil->getValue($connection);
+    $suppressed = $unavailableUntil->getValue($selector);
     expect($info['selected_index'])->toBe(0);
     expect($suppressed)->toHaveKey(1);
-    expect($cachedIndex->getValue($connection))->toBe(0);
+    expect($cachedIndex->getValue($selector))->toBe(0);
 });
 
 it('suppresses failed replicas during health cooldown windows', function (): void {
@@ -458,20 +459,23 @@ it('suppresses failed replicas during health cooldown windows', function (): voi
 
     $connection = DB::connection('regression_least_latency_cooldown');
     $reflection = new \ReflectionClass($connection);
-    $markFailure = $reflection->getMethod('markReadReplicaFailure');
-    $available = $reflection->getMethod('availableReadReplicaIndexes');
-    $unavailableUntil = $reflection->getProperty('readReplicaUnavailableUntil');
+    /** @var \Infocyph\DBLayer\Connection\ReplicaSelector $selector */
+    $selector = $reflection->getProperty('replicaSelector')->getValue($connection);
+    $selectorReflection = new \ReflectionClass($selector);
+    $markFailure = $selectorReflection->getMethod('markFailure');
+    $available = $selectorReflection->getMethod('availableIndexes');
+    $unavailableUntil = $selectorReflection->getProperty('unavailableUntil');
 
-    $markFailure->invoke($connection, 1);
+    $markFailure->invoke($selector, 1);
 
     /** @var list<int> $duringCooldown */
-    $duringCooldown = $available->invoke($connection, 2);
+    $duringCooldown = $available->invoke($selector, 2);
     expect($duringCooldown)->toBe([0]);
 
-    $unavailableUntil->setValue($connection, [1 => time() - 1]);
+    $unavailableUntil->setValue($selector, [1 => time() - 1]);
 
     /** @var list<int> $afterCooldown */
-    $afterCooldown = $available->invoke($connection, 2);
+    $afterCooldown = $available->invoke($selector, 2);
     expect($afterCooldown)->toBe([0, 1]);
 });
 
@@ -688,7 +692,7 @@ it('keeps reads on read pdo when sticky mode is disabled', function (string $dri
     expect(spl_object_id($readPdoAfter))->not->toBe(spl_object_id($connection->getPdo()));
 })->with('dblayer_drivers');
 
-it('routes expanded write and control keywords away from read classification', function (): void {
+it('classifies expanded write and control keywords without mutating pretend statistics', function (): void {
     DB::addConnection([
         'driver' => 'sqlite',
         'database' => ':memory:',
@@ -721,8 +725,12 @@ it('routes expanded write and control keywords away from read classification', f
 
     $stats = $connection->getStats();
 
-    expect($stats['writes'])->toBe(count($sqlStatements));
-    expect($stats['reads'])->toBe(1);
+    foreach ($sqlStatements as $sql) {
+        expect(SqlStatementInspector::leadingStatementKeyword($sql))->not->toBe('SELECT');
+    }
+    expect(SqlStatementInspector::leadingStatementKeyword('select 1'))->toBe('SELECT');
+    expect($stats['writes'])->toBe(0);
+    expect($stats['reads'])->toBe(0);
 });
 
 it('adds sanitized query comments when configured', function (string $driver): void {
@@ -1104,7 +1112,7 @@ it('does not execute queries while in pretend mode', function (string $driver): 
     expect((int) DB::scalar(sprintf('select count(*) from %s', $table), [], $connectionName))->toBe(0);
 })->with('dblayer_drivers');
 
-it('emits success lifecycle events in pretend mode without mutating data', function (): void {
+it('keeps pretend mode side-effect free including lifecycle observers', function (): void {
     DB::addConnection([
         'driver' => 'sqlite',
         'database' => ':memory:',
@@ -1134,7 +1142,7 @@ it('emits success lifecycle events in pretend mode without mutating data', funct
     });
 
     expect($logged)->toHaveCount(1);
-    expect($sequence)->toBe(['executing', 'executed']);
+    expect($sequence)->toBe([]);
     expect((int) DB::scalar('select count(*) from pretend_lifecycle_items', [], 'regression_pretend_lifecycle'))->toBe(0);
 
     Events::forget('db.query.executing', $onExecuting);

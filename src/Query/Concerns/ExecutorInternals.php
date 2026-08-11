@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Query\Concerns;
 
 use Infocyph\DBLayer\Events\Events;
+use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\QueryException;
-use Infocyph\DBLayer\Query\JoinClause;
+use Infocyph\DBLayer\Query\Core\CompiledQuery;
+use Infocyph\DBLayer\Query\Core\DriverResult;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Support\RingBuffer;
 
@@ -32,74 +34,6 @@ trait ExecutorInternals
             $max,
             $entry,
         );
-    }
-
-    /**
-     * Determine whether a where clause shape is supported by AbstractSqlCompiler.
-     *
-     * @param array<string,mixed> $where
-     */
-    private function canCompileWhereClause(array $where): bool
-    {
-        $type = $where['type'] ?? 'basic';
-
-        if (!\is_string($type)) {
-            return false;
-        }
-
-        return \in_array($type, ['basic', 'in', 'between', 'null', 'raw'], true);
-    }
-
-    /**
-     * Decide whether the driver compiler path can safely compile this query.
-     */
-    private function canUseDriverCompiler(QueryBuilder $query): bool
-    {
-        $components = $query->getComponents();
-
-        // Keep grammar as the canonical path for currently unsupported components.
-        if (
-            $components['ctes'] !== []
-            || $components['distinct']
-            || $components['unions'] !== []
-            || $components['lock'] !== null
-        ) {
-            return false;
-        }
-
-        foreach ($components['joins'] as $join) {
-            if ($join instanceof JoinClause) {
-                return false;
-            }
-
-            if (($join['subquery'] ?? false) === true) {
-                return false;
-            }
-        }
-
-        foreach ($components['wheres'] as $where) {
-            if (!$this->canCompileWhereClause($where)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Decide whether mutation WHERE clauses can safely use the driver compiler path.
-     */
-    private function canUseDriverCompilerForMutation(QueryBuilder $query): bool
-    {
-        $components = $query->getComponents();
-
-        foreach ($components['wheres'] as $where) {
-            if (!$this->canCompileWhereClause($where)) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /**
@@ -296,7 +230,7 @@ trait ExecutorInternals
         array $uniqueBy,
         array $returning,
     ): array {
-        $fetch = new QueryBuilder($this->connection, $this->grammar, $this);
+        $fetch = new QueryBuilder($this->connection, $this);
         $fetch->from($table)->select(...$returning);
 
         $hasAnyFilter = false;
@@ -328,25 +262,6 @@ trait ExecutorInternals
     }
 
     /**
-     * Get bindings for INSERT-like queries.
-     *
-     * @param array<int,array<string,mixed>> $values
-     * @return list<mixed>
-     */
-    private function getInsertBindings(array $values): array
-    {
-        $bindings = [];
-
-        foreach ($values as $row) {
-            foreach ($row as $value) {
-                $bindings[] = $value;
-            }
-        }
-
-        return $bindings;
-    }
-
-    /**
      * Log a query.
      *
      * @param list<mixed> $bindings
@@ -371,6 +286,17 @@ trait ExecutorInternals
         }
 
         $this->appendQueryLogEntry($entry);
+    }
+
+    /**
+     * Calculate a safe number of rows for one parameterized mutation.
+     *
+     * @param array<string,mixed> $row
+     * @return positive-int
+     */
+    private function maxRowsPerBatch(array $row, int $additionalBindings = 0): int
+    {
+        return $this->connection->safeBatchSize(max(1, count($row)), $additionalBindings);
     }
 
     /**
@@ -410,6 +336,39 @@ trait ExecutorInternals
         return $values;
     }
 
+    /** @return list<array<string,mixed>> */
+    private function normalizeReturnedRows(mixed $result): array
+    {
+        if (!is_array($result) || !array_is_list($result)) {
+            throw QueryException::invalidParameter('upsertReturning', 'Transaction must return a row list.');
+        }
+
+        $rows = [];
+
+        foreach ($result as $row) {
+            if (!is_array($row)) {
+                throw QueryException::invalidParameter('upsertReturning', 'Returned rows must be arrays.');
+            }
+
+            $normalized = [];
+
+            foreach ($row as $key => $value) {
+                if (!is_string($key)) {
+                    throw QueryException::invalidParameter(
+                        'upsertReturning',
+                        'Returned row keys must be strings.',
+                    );
+                }
+
+                $normalized[$key] = $value;
+            }
+
+            $rows[] = $normalized;
+        }
+
+        return $rows;
+    }
+
     /**
      * @param array<int,array<string,mixed>> $rows
      * @return list<array<string,mixed>>
@@ -423,19 +382,6 @@ trait ExecutorInternals
         }
 
         return $normalized;
-    }
-
-    private function normalizeSql(mixed $sql): string
-    {
-        if (\is_string($sql)) {
-            return $sql;
-        }
-
-        if (\is_int($sql) || \is_float($sql) || \is_bool($sql)) {
-            return (string) $sql;
-        }
-
-        return '';
     }
 
     /**
@@ -506,8 +452,17 @@ trait ExecutorInternals
         return $updateAssoc;
     }
 
+    private function runCompiledObserved(CompiledQuery $compiled): DriverResult
+    {
+        try {
+            return $this->connection->runCompiled($compiled);
+        } catch (ConnectionException $exception) {
+            throw QueryException::executionFailed($compiled->sql, $exception->getMessage());
+        }
+    }
+
     /**
-     * Try native UPSERT ... RETURNING when supported by grammar.
+     * Try native UPSERT ... RETURNING when supported by driver capabilities.
      *
      * @param list<array<string,mixed>> $rows
      * @param list<string> $uniqueBy
@@ -522,18 +477,22 @@ trait ExecutorInternals
         array $updateAssoc,
         array $returning,
     ): ?array {
-        if (!\method_exists($this->grammar, 'compileUpsertReturning')) {
+        $capabilities = $this->connection->capabilities();
+        if (!$capabilities->supportsUpsert || !$capabilities->supportsReturning) {
             return null;
         }
 
-        $sql = $this->normalizeSql(
-            $this->grammar->compileUpsertReturning($query, $rows, $uniqueBy, $updateAssoc, $returning),
+        $compiled = $this->connection->getCompiler()->compile(
+            $query->toInsertPayload(
+                $rows,
+                mode: 'upsert',
+                uniqueBy: $uniqueBy,
+                upsertUpdate: array_keys($updateAssoc),
+                returning: $returning,
+            ),
         );
-        $bindings = $this->getInsertBindings($rows);
 
-        $this->validateBindingCount($sql, $bindings);
-
-        return $this->raw($sql, $bindings);
+        return $this->normalizeRows($this->runCompiledObserved($compiled)->rows ?? []);
     }
 
     /**

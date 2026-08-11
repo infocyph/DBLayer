@@ -12,9 +12,10 @@ For API selection guidance, see ``choosing-api`` and ``api-table-repository``.
 Select/Read
 -----------
 
-- ``table()``, ``from()``, ``fromSub()``
-- ``select()``, ``addSelect()``, ``selectRaw()``, ``selectWindow()``
+- ``table()``, ``from()``, ``fromSub()``, ``as()``
+- ``select()``, ``addSelect()``, ``addSelectAs()``, ``selectRaw()``, ``selectWindow()``
 - ``get()``, ``first()``, ``find()``, ``firstWhere()``, ``exists()``
+- ``collect()``, ``lazyCollection()``
 - ``value()``, ``pluck()``, ``count()``, ``min()``, ``max()``, ``avg()``, ``sum()``, ``aggregate()``
 - ``explain()``
 
@@ -31,6 +32,7 @@ Join and Set Operations
 -----------------------
 
 - ``join()``, ``leftJoin()``, ``rightJoin()``, ``crossJoin()``, ``joinComplex()``
+- ``joinAs()``, ``leftJoinAs()``, ``rightJoinAs()``, ``crossJoinAs()``, ``joinComplexAs()``
 - ``joinSub()``, ``leftJoinSub()``, ``rightJoinSub()``
 - ``union()``, ``unionAll()``
 
@@ -47,6 +49,9 @@ Writes
 - ``update()``, ``delete()``, ``truncate()``
 - ``upsert()``, ``upsertReturning()``
 
+``truncate()`` preserves identity state and never cascades. Cache invalidation
+is deferred until the outer transaction commits.
+
 Pagination/Streaming
 --------------------
 
@@ -56,7 +61,17 @@ Pagination/Streaming
 
 ``cursorPaginate()`` retains existing ordering and appends the supplied unique
 column as its final tie-breaker. Returned ``next_cursor`` and
-``previous_cursor`` tokens are opaque and query-bound.
+``previous_cursor`` tokens are opaque and query-bound. It supports at most eight
+order columns. In joined queries, colliding qualified result columns must use
+``addSelectAs()`` so every cursor value maps to one output key.
+
+Caching
+-------
+
+- ``cacheFor()``, ``cacheTags()``, ``cacheKey()``, ``withoutCache()``
+
+Caching is opt-in. ``cacheKey()`` adds caller identity but never replaces the
+compiled SQL and binding identity.
 
 Other
 -----

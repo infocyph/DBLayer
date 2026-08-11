@@ -7,10 +7,10 @@ namespace Infocyph\DBLayer\Connection\Concerns;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\Connection\ReadReplicaSessionPolicy;
 use Infocyph\DBLayer\Connection\SqlStatementInspector;
-use Infocyph\DBLayer\Driver\Support\DriverProfile;
+use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\SecurityException;
-use Infocyph\DBLayer\Grammar\Grammar;
+use Infocyph\DBLayer\Query\Core\SqlOrigin;
 use Infocyph\DBLayer\Query\Executor;
 use Infocyph\DBLayer\Security\Security;
 use Infocyph\DBLayer\Transaction\TransactionManager;
@@ -22,42 +22,25 @@ use Throwable;
 trait ConnectionInternals
 {
     /**
-     * Apply MySQL/MariaDB statement timeout (best effort, version-dependent).
+     * Disconnect write and read handles and reset request-scoped state.
      */
-    private function applyMySqlStatementTimeout(PDO $pdo, int $timeoutMs): void
+    public function disconnect(): void
     {
-        $value = max(0, $timeoutMs);
-
-        try {
-            $pdo->exec('set session max_execution_time = ' . $value);
-
-            return;
-        } catch (PDOException) {
-            // MariaDB fallback.
+        if ($this->pdo?->inTransaction() === true) {
+            try {
+                $this->pdo->rollBack();
+            } catch (Throwable) {
+                // The handle is discarded below; transaction outcome is uncertain.
+            }
         }
 
-        $seconds = max(0.0, $value / 1_000.0);
-        $secondsLiteral = number_format($seconds, 3, '.', '');
-
-        try {
-            $pdo->exec('set session max_statement_time = ' . $secondsLiteral);
-        } catch (PDOException) {
-            // Ignore unsupported server variables.
-        }
-    }
-
-    /**
-     * Apply PostgreSQL statement timeout (milliseconds).
-     */
-    private function applyPgSqlStatementTimeout(PDO $pdo, int $timeoutMs): void
-    {
-        $value = max(0, $timeoutMs);
-
-        try {
-            $pdo->exec('set statement_timeout = ' . $value);
-        } catch (PDOException) {
-            // Ignore when not supported by server role/config.
-        }
+        $this->pdo = null;
+        $this->readPdo = null;
+        $this->clearStatementCache();
+        $this->replicaSelector->reset();
+        $this->recordsModified = false;
+        $this->transactionManager = null;
+        $this->resetRequestRuntimeState();
     }
 
     /**
@@ -93,12 +76,14 @@ trait ConnectionInternals
 
         $payload = implode(' ', $parts);
         $maxLength = $this->config->getQueryCommentMaxLength();
+        $marker = 'dblayer ';
+        $payloadBudget = max(0, $maxLength - strlen($marker));
 
-        if (strlen($payload) > $maxLength) {
-            $payload = substr($payload, 0, $maxLength);
+        if (strlen($payload) > $payloadBudget) {
+            $payload = substr($payload, 0, $payloadBudget);
         }
 
-        return '/* ' . $payload . ' */ ' . $sql;
+        return '/* ' . $marker . $payload . ' */ ' . $sql;
     }
 
     /**
@@ -106,31 +91,7 @@ trait ConnectionInternals
      */
     private function applyReadOnlyTransactionMode(): void
     {
-        $driver = strtolower($this->config->getDriver());
-
-        if ($driver === 'sqlite') {
-            // SQLite has no transaction-scoped read-only switch; best effort is no-op.
-            return;
-        }
-
-        $pdo = $this->getPdo();
-
-        try {
-            if ($driver === 'pgsql') {
-                $pdo->exec('set transaction read only');
-
-                return;
-            }
-
-            if ($driver === 'mysql' || $driver === 'mariadb') {
-                $pdo->exec('set transaction read only');
-
-                return;
-            }
-
-        } catch (PDOException) {
-            // Best effort only.
-        }
+        $this->driver->applyReadOnlyTransaction($this->getPdo());
     }
 
     /**
@@ -142,38 +103,7 @@ trait ConnectionInternals
             return;
         }
 
-        $timeoutMs = $this->queryTimeoutMs;
-        $driver = $this->config->getDriver();
-
-        if ($driver === 'mysql') {
-            $this->applyMySqlStatementTimeout($pdo, $timeoutMs ?? 0);
-
-            return;
-        }
-
-        if ($driver === 'pgsql') {
-            $this->applyPgSqlStatementTimeout($pdo, $timeoutMs ?? 0);
-
-            return;
-        }
-
-        if ($driver === 'sqlite') {
-            $this->applySqliteBusyTimeout($pdo, $timeoutMs ?? 0);
-        }
-    }
-
-    /**
-     * Apply SQLite busy timeout (lock-wait timeout, best effort).
-     */
-    private function applySqliteBusyTimeout(PDO $pdo, int $timeoutMs): void
-    {
-        $value = max(0, $timeoutMs);
-
-        try {
-            $pdo->exec('pragma busy_timeout = ' . $value);
-        } catch (PDOException) {
-            // Ignore.
-        }
+        $this->driver->applyStatementTimeout($pdo, $this->queryTimeoutMs ?? 0);
     }
 
     /**
@@ -206,68 +136,6 @@ trait ConnectionInternals
         }
 
         throw ConnectionException::queryTimeout(microtime(true) - $startedAt);
-    }
-
-    /**
-     * Return healthy read-replica indexes based on cooldown windows.
-     *
-     * @return list<int>
-     */
-    private function availableReadReplicaIndexes(int $count): array
-    {
-        $now = \time();
-        $available = [];
-
-        for ($index = 0; $index < $count; $index++) {
-            $retryAt = $this->readReplicaUnavailableUntil[$index] ?? null;
-
-            if ($retryAt === null || $retryAt <= $now) {
-                unset($this->readReplicaUnavailableUntil[$index]);
-                $available[] = $index;
-            }
-        }
-
-        return $available;
-    }
-
-    /**
-     * Build probe order for read replicas respecting strategy and health suppression.
-     *
-     * @param list<array<string,mixed>> $readConfigs
-     * @return list<int>
-     */
-    private function buildReadReplicaProbeOrder(array $readConfigs, string $strategy): array
-    {
-        $count = \count($readConfigs);
-        if ($count <= 1) {
-            return [0];
-        }
-
-        $available = $this->availableReadReplicaIndexes($count);
-        $fallback = \array_values(\array_diff(\range(0, $count - 1), $available));
-        $pool = $available !== [] ? $available : \range(0, $count - 1);
-
-        $primary = match ($strategy) {
-            'round_robin' => $this->nextRoundRobinIndexFrom($pool),
-            'weighted' => $this->selectWeightedReadReplicaIndex($pool, $readConfigs),
-            default => $pool[random_int(0, \count($pool) - 1)],
-        };
-
-        $rest = \array_values(\array_diff($pool, [$primary]));
-
-        if (\count($rest) > 1) {
-            \shuffle($rest);
-        }
-
-        if ($fallback !== []) {
-            if (\count($fallback) > 1) {
-                \shuffle($fallback);
-            }
-
-            $rest = \array_merge($rest, $fallback);
-        }
-
-        return \array_values(\array_unique(\array_merge([$primary], $rest)));
     }
 
     /**
@@ -332,8 +200,7 @@ trait ConnectionInternals
         if ($readConfigs === []) {
             $this->readPdo = null;
             $this->clearStatementCacheBucket(false);
-            $this->readReplicaIndex = null;
-            $this->readReplicaLatenciesMs = [];
+            $this->replicaSelector->reset();
 
             return;
         }
@@ -341,8 +208,10 @@ trait ConnectionInternals
         $this->dispatchBeforeConnect(false);
 
         try {
-            [$index, $pdo] = $this->resolveReadReplicaPdo($readConfigs);
-            $this->readReplicaIndex = $index;
+            [, $pdo] = $this->replicaSelector->resolve(
+                $readConfigs,
+                fn(array $readConfig): PDO => $this->createReadReplicaPdo($readConfig),
+            );
             $this->readPdo = $pdo;
             $this->applyServerSideTimeoutToPdo($pdo);
             $this->syncStatementCachePdoBucket(false, $pdo);
@@ -357,7 +226,6 @@ trait ConnectionInternals
             $this->dispatchConnectionFailure(false, 1, $e);
             $this->readPdo = null;
             $this->clearStatementCacheBucket(false);
-            $this->readReplicaIndex = null;
         }
     }
 
@@ -395,8 +263,8 @@ trait ConnectionInternals
         foreach ($this->lifecycleHooks['afterConnect'] as $hook) {
             try {
                 $hook($this, $isWrite);
-            } catch (Throwable) {
-                // Hooks should never interrupt connection lifecycle.
+            } catch (Throwable $error) {
+                Events::reportDiagnostic('db.connection.after_connect', $error);
             }
         }
     }
@@ -409,8 +277,8 @@ trait ConnectionInternals
         foreach ($this->lifecycleHooks['afterReconnect'] as $hook) {
             try {
                 $hook($this, $isWrite, $attempt);
-            } catch (Throwable) {
-                // Hooks should never interrupt connection lifecycle.
+            } catch (Throwable $error) {
+                Events::reportDiagnostic('db.connection.after_reconnect', $error);
             }
         }
     }
@@ -423,8 +291,8 @@ trait ConnectionInternals
         foreach ($this->lifecycleHooks['beforeConnect'] as $hook) {
             try {
                 $hook($this, $isWrite);
-            } catch (Throwable) {
-                // Hooks should never interrupt connection lifecycle.
+            } catch (Throwable $error) {
+                Events::reportDiagnostic('db.connection.before_connect', $error);
             }
         }
     }
@@ -437,8 +305,8 @@ trait ConnectionInternals
         foreach ($this->lifecycleHooks['beforeReconnect'] as $hook) {
             try {
                 $hook($this, $isWrite, $attempt);
-            } catch (Throwable) {
-                // Hooks should never interrupt connection lifecycle.
+            } catch (Throwable $error) {
+                Events::reportDiagnostic('db.connection.before_reconnect', $error);
             }
         }
     }
@@ -451,8 +319,8 @@ trait ConnectionInternals
         foreach ($this->lifecycleHooks['onConnectionFailure'] as $hook) {
             try {
                 $hook($this, $isWrite, $attempt, $error);
-            } catch (Throwable) {
-                // Hooks should never interrupt connection lifecycle.
+            } catch (Throwable $hookError) {
+                Events::reportDiagnostic('db.connection.failure_hook', $hookError);
             }
         }
     }
@@ -562,36 +430,15 @@ trait ConnectionInternals
     }
 
     /**
-     * Get the query executor for this connection (legacy).
+     * Get the query executor for this connection.
      */
     private function getExecutor(): Executor
     {
         if ($this->executor === null) {
-            $this->executor = new Executor($this, $this->getGrammar());
+            $this->executor = new Executor($this);
         }
 
         return $this->executor;
-    }
-
-    /**
-     * Get the grammar instance for this connection (legacy).
-     */
-    private function getGrammar(): Grammar
-    {
-        if ($this->grammar !== null) {
-            return $this->grammar;
-        }
-
-        $driverName = $this->config->getDriver();
-        $grammar = DriverProfile::createGrammar($driverName);
-
-        if ($this->tablePrefix !== '') {
-            $grammar->setTablePrefix($this->tablePrefix);
-        }
-
-        $this->grammar = $grammar;
-
-        return $this->grammar;
     }
 
     /**
@@ -708,43 +555,6 @@ trait ConnectionInternals
     }
 
     /**
-     * Mark a read replica as unavailable for a cooldown period.
-     */
-    private function markReadReplicaFailure(int $index): void
-    {
-        $cooldownSeconds = $this->config->getReadHealthCooldown();
-
-        if ($this->leastLatencyReplicaIndex === $index) {
-            $this->leastLatencyReplicaIndex = null;
-            $this->leastLatencyResolvedAt = null;
-        }
-
-        if ($cooldownSeconds <= 0) {
-            return;
-        }
-
-        $this->readReplicaUnavailableUntil[$index] = \time() + $cooldownSeconds;
-    }
-
-    /**
-     * Pick next round-robin replica from an explicit index pool.
-     *
-     * @param list<int> $indexes
-     */
-    private function nextRoundRobinIndexFrom(array $indexes): int
-    {
-        $count = \count($indexes);
-        if ($count === 0) {
-            return 0;
-        }
-
-        $slot = $this->readReplicaCursor % $count;
-        $this->readReplicaCursor = ($slot + 1) % $count;
-
-        return $indexes[$slot];
-    }
-
-    /**
      * Normalize query comment context values to safe key/value pairs.
      *
      * @param array<string,mixed> $context
@@ -800,12 +610,19 @@ trait ConnectionInternals
      *
      * @param array<int|string,mixed> $bindings
      */
-    private function prepareSqlForExecution(string $sql, array $bindings): string
-    {
+    private function prepareSqlForExecution(
+        string $sql,
+        array $bindings,
+        SqlOrigin $origin = SqlOrigin::RAW,
+    ): string {
         $securityConfig = $this->config->securityConfig();
 
         if ($this->securityChecks) {
-            Security::validateQuery($sql, $bindings, $securityConfig);
+            if ($origin === SqlOrigin::RAW) {
+                Security::validateQuery($sql, $bindings, $securityConfig);
+            } else {
+                Security::validateGeneratedQuery($sql, $bindings, $securityConfig);
+            }
         }
 
         $this->enforceRateLimitIfConfigured($securityConfig);
@@ -855,62 +672,6 @@ trait ConnectionInternals
         $this->evictStatementCacheIfNeeded($isWrite, $maxSize);
 
         return $statement;
-    }
-
-    /**
-     * Probe a single replica and capture latency for health-based selection.
-     *
-     * @param array<string,mixed> $readConfig
-     * @return array{latency_ms:float,pdo:PDO}|null
-     */
-    private function probeLeastLatencyReplica(int $index, array $readConfig): ?array
-    {
-        try {
-            $probeStart = microtime(true);
-            $pdo = $this->createReadReplicaPdo($readConfig);
-            $pdo->query('SELECT 1');
-            $latencyMs = (microtime(true) - $probeStart) * 1_000.0;
-
-            unset($this->readReplicaUnavailableUntil[$index]);
-
-            return ['latency_ms' => $latencyMs, 'pdo' => $pdo];
-        } catch (PDOException|ConnectionException) {
-            $this->markReadReplicaFailure($index);
-
-            return null;
-        }
-    }
-
-    /**
-     * Probe replica indexes and return the fastest healthy PDO.
-     *
-     * @param list<int> $indexes
-     * @param list<array<string,mixed>> $readConfigs
-     * @param array<int,float> $latencies
-     * @return array{0:int|null,1:PDO|null}
-     */
-    private function probeLeastLatencyReplicaIndexes(array $indexes, array $readConfigs, array &$latencies): array
-    {
-        $bestIndex = null;
-        $bestPdo = null;
-        $bestLatency = \INF;
-
-        foreach ($indexes as $index) {
-            $probe = $this->probeLeastLatencyReplica($index, $readConfigs[$index]);
-            if ($probe === null) {
-                continue;
-            }
-
-            $latencies[$index] = round($probe['latency_ms'], 4);
-
-            if ($probe['latency_ms'] < $bestLatency) {
-                $bestLatency = $probe['latency_ms'];
-                $bestIndex = $index;
-                $bestPdo = $probe['pdo'];
-            }
-        }
-
-        return [$bestIndex, $bestPdo];
     }
 
     /**
@@ -983,88 +744,6 @@ trait ConnectionInternals
     }
 
     /**
-     * Resolve least-latency replica from cached winner within TTL.
-     *
-     * @param list<array<string,mixed>> $readConfigs
-     * @param list<int> $availableIndexes
-     * @return array{0:int,1:PDO}|null
-     */
-    private function resolveLeastLatencyFromCachedReplica(array $readConfigs, array $availableIndexes): ?array
-    {
-        $cachedIndex = $this->leastLatencyReplicaIndex;
-        $cachedAt = $this->leastLatencyResolvedAt;
-
-        if ($cachedIndex === null || $cachedAt === null) {
-            return null;
-        }
-
-        $ttl = $this->config->getLeastLatencyCacheTtl();
-        if ($ttl <= 0 || (\time() - $cachedAt) > $ttl) {
-            return null;
-        }
-
-        if (!\in_array($cachedIndex, $availableIndexes, true) || !isset($readConfigs[$cachedIndex])) {
-            return null;
-        }
-
-        try {
-            $pdo = $this->createReadReplicaPdo($readConfigs[$cachedIndex]);
-            unset($this->readReplicaUnavailableUntil[$cachedIndex]);
-            $this->readReplicaLatenciesMs = [];
-
-            return [$cachedIndex, $pdo];
-        } catch (PDOException|ConnectionException) {
-            $this->markReadReplicaFailure($cachedIndex);
-
-            return null;
-        }
-    }
-
-    /**
-     * Resolve the fastest healthy read replica by probing each replica.
-     *
-     * @param list<array<string,mixed>> $readConfigs
-     * @return array{0:int,1:PDO}
-     */
-    private function resolveLeastLatencyReadReplica(array $readConfigs): array
-    {
-        $latencies = [];
-        $indexes = $this->availableReadReplicaIndexes(\count($readConfigs));
-
-        if ($indexes === []) {
-            $indexes = \range(0, \count($readConfigs) - 1);
-        }
-
-        $cached = $this->resolveLeastLatencyFromCachedReplica($readConfigs, $indexes);
-        if ($cached !== null) {
-            return $cached;
-        }
-
-        $probeIndexes = $this->sampleLeastLatencyProbeIndexes($indexes);
-        $fallbackProbeIndexes = \array_values(\array_diff($indexes, $probeIndexes));
-        [$bestIndex, $bestPdo] = $this->probeLeastLatencyReplicaIndexes($probeIndexes, $readConfigs, $latencies);
-
-        // If sampled probes all failed, try remaining replicas.
-        if ($bestIndex === null || !$bestPdo instanceof PDO) {
-            [$bestIndex, $bestPdo] = $this->probeLeastLatencyReplicaIndexes($fallbackProbeIndexes, $readConfigs, $latencies);
-        }
-
-        $this->readReplicaLatenciesMs = $latencies;
-
-        if ($bestIndex === null || !$bestPdo instanceof PDO) {
-            throw ConnectionException::connectionFailed(
-                $this->config->getDriver(),
-                'No healthy read replica available for least_latency strategy.',
-            );
-        }
-
-        $this->leastLatencyReplicaIndex = $bestIndex;
-        $this->leastLatencyResolvedAt = \time();
-
-        return [$bestIndex, $bestPdo];
-    }
-
-    /**
      * Resolve logical rate-limit identifier for this connection.
      *
      * @param array<string,mixed> $securityConfig
@@ -1095,42 +774,6 @@ trait ConnectionInternals
     private function resolveRateLimitValue(mixed $value): int
     {
         return is_numeric($value) ? (int) $value : 0;
-    }
-
-    /**
-     * Resolve one read-replica PDO using configured read strategy.
-     *
-     * @param list<array<string,mixed>> $readConfigs
-     * @return array{0:int,1:PDO}
-     */
-    private function resolveReadReplicaPdo(array $readConfigs): array
-    {
-        $strategy = $this->config->getReadStrategy();
-
-        if ($strategy === 'least_latency') {
-            return $this->resolveLeastLatencyReadReplica($readConfigs);
-        }
-
-        $this->readReplicaLatenciesMs = [];
-        $probeOrder = $this->buildReadReplicaProbeOrder($readConfigs, $strategy);
-
-        foreach ($probeOrder as $index) {
-            try {
-                $pdo = $this->createReadReplicaPdo($readConfigs[$index]);
-                unset($this->readReplicaUnavailableUntil[$index]);
-
-                return [$index, $pdo];
-            } catch (PDOException|ConnectionException) {
-                $this->markReadReplicaFailure($index);
-
-                continue;
-            }
-        }
-
-        throw ConnectionException::connectionFailed(
-            $this->config->getDriver(),
-            'No healthy read replica available.',
-        );
     }
 
     /**
@@ -1175,74 +818,22 @@ trait ConnectionInternals
     }
 
     /**
-     * @param list<int> $indexes
-     * @return list<int>
-     */
-    private function sampleLeastLatencyProbeIndexes(array $indexes): array
-    {
-        $sampleSize = $this->config->getReadProbeSampleSize();
-        $count = \count($indexes);
-
-        if ($sampleSize <= 0 || $sampleSize >= $count) {
-            return $indexes;
-        }
-
-        \shuffle($indexes);
-
-        return \array_slice($indexes, 0, $sampleSize);
-    }
-
-    /**
-     * Pick a replica index based on configured weights.
-     *
-     * @param list<int> $indexes
-     * @param list<array<string,mixed>>|null $readConfigs
-     */
-    private function selectWeightedReadReplicaIndex(array $indexes, ?array $readConfigs = null): int
-    {
-        if ($indexes === []) {
-            return 0;
-        }
-
-        $weights = [];
-        $totalWeight = 0;
-
-        foreach ($indexes as $index) {
-            $weight = 1;
-
-            if ($readConfigs !== null && isset($readConfigs[$index]['weight'])) {
-                $rawWeight = $readConfigs[$index]['weight'];
-
-                if (\is_numeric($rawWeight)) {
-                    $weight = max(1, (int) $rawWeight);
-                }
-            }
-
-            $weights[$index] = $weight;
-            $totalWeight += $weight;
-        }
-
-        $ticket = random_int(1, $totalWeight);
-
-        foreach ($weights as $index => $weight) {
-            $ticket -= $weight;
-
-            if ($ticket <= 0) {
-                return (int) $index;
-            }
-        }
-
-        return $indexes[\count($indexes) - 1];
-    }
-
-    /**
      * Decide whether a failed query attempt should be retried.
      *
      * @param array<int|string,mixed> $bindings
      */
-    private function shouldRetryQuery(PDOException $e, int $attempt, string $sql, array $bindings): bool
-    {
+    private function shouldRetryQuery(
+        PDOException $e,
+        int $attempt,
+        string $sql,
+        array $bindings,
+        bool $isWrite = false,
+    ): bool {
         if ($attempt >= self::MAX_QUERY_RETRY_ATTEMPTS) {
+            return false;
+        }
+
+        if ($this->managedTransactionLevel() > 0 || ($this->pdo?->inTransaction() ?? false)) {
             return false;
         }
 
@@ -1250,12 +841,16 @@ trait ConnectionInternals
             return (bool) ($this->queryRetryPolicy)($e, $attempt, $sql, $bindings);
         }
 
+        if ($isWrite) {
+            return false;
+        }
+
         if ($this->isConnectionError($e)) {
             // Backward-compatible default: a single reconnect retry.
             return $attempt < 2;
         }
 
-        return DriverProfile::causedByRetryableTransactionError($this->config->getDriver(), $e);
+        return false;
     }
 
     /**

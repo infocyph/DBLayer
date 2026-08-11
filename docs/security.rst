@@ -107,7 +107,8 @@ exports redact the signing key.
 Transport / TLS Policy
 ----------------------
 
-- ``security.require_tls = true`` enforces TLS for MySQL/PostgreSQL.
+- ``security.require_tls = true`` enforces encrypted transport for
+  MySQL/PostgreSQL. It does not alone guarantee verified server identity.
 - ``security.require_tls = false`` requires ``security.allow_insecure = true``.
 - ``DB::hardenProduction()`` sets ``require_tls = true`` for MySQL/PostgreSQL
   connections. SQLite receives the remaining hardening defaults without a TLS
@@ -115,9 +116,11 @@ Transport / TLS Policy
 
 Driver requirements:
 
-- MySQL: provide secure transport via ``ssl_ca`` / ``ssl_cert`` / ``ssl_key``
-  or the matching numeric ``Pdo\Mysql::ATTR_SSL_*`` entries in ``options``.
-- PostgreSQL: set ``sslmode`` to ``require``, ``verify-ca``, or ``verify-full``.
+- MySQL: provide a trusted ``ssl_ca`` and enable server-certificate verification
+  when identity verification is required; client ``ssl_cert`` / ``ssl_key``
+  configure mutual TLS when applicable.
+- PostgreSQL: use ``sslmode=verify-full`` with a trusted CA for hostname and
+  certificate verification. ``require`` encrypts without that identity claim.
 - SQLite: ``security.require_tls`` is rejected because SQLite has no network
   transport.
 

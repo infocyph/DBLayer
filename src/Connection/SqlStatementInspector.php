@@ -136,6 +136,29 @@ final class SqlStatementInspector
         }
     }
 
+    private static function skipDollarQuoted(string $sql, int &$index, int $length): bool
+    {
+        if ($sql[$index] !== '$' || preg_match('/\G(?:\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/', $sql, $match, 0, $index) !== 1) {
+            return false;
+        }
+
+        $delimiter = $match[0];
+        $index += strlen($delimiter);
+        $closing = strpos($sql, $delimiter, $index);
+        $index = $closing === false ? $length : $closing + strlen($delimiter);
+
+        return true;
+    }
+
+    private static function skipHashComment(string $sql, int &$index, int $length): void
+    {
+        $index++;
+
+        while ($index < $length && $sql[$index] !== "\n") {
+            $index++;
+        }
+    }
+
     /**
      * Skip one SQL identifier token (quoted or plain).
      */
@@ -180,6 +203,12 @@ final class SqlStatementInspector
 
             if ($char === '/' && ($index + 1) < $length && $sql[$index + 1] === '*') {
                 self::skipBlockComment($sql, $index, $length);
+
+                continue;
+            }
+
+            if ($char === '#') {
+                self::skipHashComment($sql, $index, $length);
 
                 continue;
             }
@@ -277,6 +306,10 @@ final class SqlStatementInspector
 
     private static function skipQuotedOrComment(string $sql, int &$index, int $length, string $char): bool
     {
+        if ($char === '$' && self::skipDollarQuoted($sql, $index, $length)) {
+            return true;
+        }
+
         if ($char === "'" || $char === '"' || $char === '`') {
             self::skipQuoted($sql, $index, $length, $char);
 
@@ -291,6 +324,12 @@ final class SqlStatementInspector
 
         if ($char === '/' && ($index + 1) < $length && $sql[$index + 1] === '*') {
             self::skipBlockComment($sql, $index, $length);
+
+            return true;
+        }
+
+        if ($char === '#') {
+            self::skipHashComment($sql, $index, $length);
 
             return true;
         }

@@ -51,6 +51,21 @@ final class JoinClause
     ];
 
     /**
+     * Optional structured table alias.
+     */
+    private readonly ?string $alias;
+
+    /**
+     * The table being joined.
+     */
+    private readonly string $table;
+
+    /**
+     * The normalized join type.
+     */
+    private readonly string $type;
+
+    /**
      * Bound values for where/whereIn conditions.
      *
      * @var list<mixed>
@@ -67,17 +82,29 @@ final class JoinClause
     /**
      * Create a new join clause instance.
      */
-    public function __construct(
-        /**
-         * The table being joined.
-         */
-        private readonly string $table,
-        /**
-         * The type of join.
-         */
-        private readonly string $type = 'inner',
-    ) {
+    public function __construct(string $table, string $type = 'inner', ?string $alias = null)
+    {
         $this->validateTableIdentifier($table);
+        if ($alias !== null) {
+            $this->validateColumnIdentifier($alias);
+        }
+        $type = strtolower(trim($type));
+
+        if (!in_array($type, ['inner', 'left', 'right', 'cross'], true)) {
+            throw QueryException::invalidParameter('type', 'Unsupported JOIN type.');
+        }
+
+        $this->table = $table;
+        $this->type = $type;
+        $this->alias = $alias;
+    }
+
+    /**
+     * Get the structured table alias.
+     */
+    public function getAlias(): ?string
+    {
+        return $this->alias;
     }
 
     /**
@@ -129,6 +156,7 @@ final class JoinClause
      */
     public function on(string $first, string $operator, string $second, string $boolean = 'and'): self
     {
+        $boolean = $this->normalizeBoolean($boolean);
         $this->validateColumnIdentifier($first);
         $this->validateColumnIdentifier($second);
         $operator = $this->assertValidOperator($operator);
@@ -165,6 +193,7 @@ final class JoinClause
      */
     public function where(string $column, string $operator, mixed $value, string $boolean = 'and'): self
     {
+        $boolean = $this->normalizeBoolean($boolean);
         $this->validateColumnIdentifier($column);
         $operator = $this->assertValidOperator($operator);
 
@@ -188,6 +217,7 @@ final class JoinClause
      */
     public function whereIn(string $column, array $values, string $boolean = 'and'): self
     {
+        $boolean = $this->normalizeBoolean($boolean);
         $this->validateColumnIdentifier($column);
 
         $this->conditions[] = [
@@ -209,6 +239,7 @@ final class JoinClause
      */
     public function whereNotNull(string $column, string $boolean = 'and'): self
     {
+        $boolean = $this->normalizeBoolean($boolean);
         $this->validateColumnIdentifier($column);
 
         $this->conditions[] = [
@@ -225,6 +256,7 @@ final class JoinClause
      */
     public function whereNull(string $column, string $boolean = 'and'): self
     {
+        $boolean = $this->normalizeBoolean($boolean);
         $this->validateColumnIdentifier($column);
 
         $this->conditions[] = [
@@ -249,6 +281,17 @@ final class JoinClause
         }
 
         return $normalized;
+    }
+
+    private function normalizeBoolean(string $boolean): string
+    {
+        $boolean = strtolower(trim($boolean));
+
+        if (!in_array($boolean, ['and', 'or'], true)) {
+            throw QueryException::invalidParameter('boolean', 'Boolean combinator must be AND or OR.');
+        }
+
+        return $boolean;
     }
 
     /**

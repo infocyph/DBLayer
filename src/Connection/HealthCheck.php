@@ -97,6 +97,18 @@ final class HealthCheck
             'max_error_rate' => Numeric::arrayFloat($merged, 'max_error_rate', self::DEFAULTS['max_error_rate']),
             'sample_size' => Numeric::arrayInt($merged, 'sample_size', self::DEFAULTS['sample_size']),
         ];
+
+        if ($this->config['check_interval'] < 0 || $this->config['max_latency_ms'] <= 0) {
+            throw new \InvalidArgumentException('Health check durations must be non-negative and max latency must be positive.');
+        }
+
+        if ($this->config['sample_size'] <= 0) {
+            throw new \InvalidArgumentException('Health check sample_size must be greater than zero.');
+        }
+
+        if ($this->config['max_error_rate'] < 0.0 || $this->config['max_error_rate'] > 1.0) {
+            throw new \InvalidArgumentException('Health check max_error_rate must be between zero and one.');
+        }
     }
 
     /**
@@ -124,9 +136,17 @@ final class HealthCheck
             }
 
             // Check error rate.
-            $stats = $this->connection->getStats();
-            if ($stats['queries'] > 0) {
-                $errorRate = $stats['errors'] / $stats['queries'];
+            $samples = $this->orderedSamples();
+            if ($samples !== []) {
+                $failures = 0;
+
+                foreach ($samples as $sample) {
+                    if (!$sample['success']) {
+                        $failures++;
+                    }
+                }
+
+                $errorRate = $failures / count($samples);
                 $this->metrics['error_rate'] = round($errorRate, 4);
 
                 if ($errorRate > $this->config['max_error_rate']) {

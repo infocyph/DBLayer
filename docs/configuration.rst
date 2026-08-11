@@ -153,6 +153,10 @@ Config-Driven Hardening
 
 - ``security.require_tls=true`` forces TLS for MySQL/PostgreSQL and is not a
   valid SQLite connection setting.
+- ``require_tls`` means encrypted transport is required; it does not by itself
+  claim verified server identity. Configure a trusted CA and hostname
+  verification (for PostgreSQL, normally ``sslmode=verify-full``) when identity
+  verification is required.
 - ``security.require_tls=false`` requires ``security.allow_insecure=true``.
 - ``security.enabled=false`` requires ``security.allow_insecure=true``.
 - ``security.cursor_signing_key`` signs opaque pagination cursors with HMAC-SHA256.

@@ -18,5 +18,7 @@ final readonly class CompiledQuery
         public string $sql,
         public array $bindings,
         public QueryType $type,
+        public SqlOrigin $origin = SqlOrigin::BUILDER,
+        public bool $containsRawFragments = false,
     ) {}
 }

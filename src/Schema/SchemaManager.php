@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Schema;
 
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\DB;
+use Infocyph\DBLayer\Exceptions\MigrationException;
+use Throwable;
 
 /**
  * Opt-in schema entry point for one resolved connection.
@@ -30,11 +33,13 @@ final readonly class SchemaManager
     public function create(string $table, callable $definition): void
     {
         $this->execute($this->build($table, true, $definition));
+        $this->invalidateTables([$table]);
     }
 
     public function drop(string $table): void
     {
         $this->connection->statement($this->grammar->compileDrop($table));
+        $this->invalidateTables([$table]);
     }
 
     /**
@@ -67,29 +72,40 @@ final readonly class SchemaManager
 
                 $this->connection->statement($sql);
             }
-        } finally {
-            if ($this->grammar->driver() === 'mysql') {
-                $this->connection->statement('SET FOREIGN_KEY_CHECKS = 1');
-            } elseif ($this->grammar->driver() === 'sqlite') {
-                $this->connection->statement('PRAGMA foreign_keys = ON');
+        } catch (Throwable $primary) {
+            try {
+                $this->restoreForeignKeyChecks();
+            } catch (Throwable $cleanup) {
+                throw MigrationException::cleanupAlsoFailed($primary, $cleanup);
             }
+
+            throw $primary;
         }
+
+        $this->restoreForeignKeyChecks();
+        $this->invalidateTables($tables);
     }
 
     public function dropIfExists(string $table): void
     {
         $this->connection->statement($this->grammar->compileDrop($table, true));
+        $this->invalidateTables([$table]);
     }
 
     public function hasColumn(string $table, string $column): bool
     {
         Blueprint::assertIdentifier($table);
         Blueprint::assertIdentifier($column);
-        $table = $this->physicalTable($table);
+        [$namespace, $table] = $this->splitQualifiedTable($this->physicalTable($table));
 
         if ($this->grammar->driver() === 'sqlite') {
             $quote = '"' . str_replace('"', '""', $table) . '"';
-            $rows = $this->connection->select(sprintf('PRAGMA table_info(%s)', $quote));
+            $pragma = $namespace === null
+                ? sprintf('PRAGMA table_info(%s)', $quote)
+                : sprintf('PRAGMA "%s".table_info(%s)', str_replace('"', '""', $namespace), $quote);
+            $statement = $this->connection->execute($pragma);
+            /** @var list<array<string,mixed>> $rows */
+            $rows = $statement->fetchAll(\PDO::FETCH_ASSOC);
 
             return array_any($rows, fn($row) => ($row['name'] ?? null) === $column);
         }
@@ -97,11 +113,11 @@ final readonly class SchemaManager
         [$sql, $bindings] = $this->grammar->driver() === 'mysql'
             ? [
                 'SELECT 1 FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND column_name = ? LIMIT 1',
-                [$this->connection->getDatabaseName(), $table, $column],
+                [$namespace ?? $this->connection->getDatabaseName(), $table, $column],
             ]
             : [
-                'SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ? AND column_name = ? LIMIT 1',
-                [$table, $column],
+                'SELECT 1 FROM information_schema.columns WHERE table_schema = COALESCE(?, current_schema()) AND table_name = ? AND column_name = ? LIMIT 1',
+                [$namespace, $table, $column],
             ];
 
         return $this->connection->select($sql, $bindings) !== [];
@@ -110,19 +126,19 @@ final readonly class SchemaManager
     public function hasTable(string $table): bool
     {
         Blueprint::assertIdentifier($table);
-        $table = $this->physicalTable($table);
+        [$namespace, $table] = $this->splitQualifiedTable($this->physicalTable($table));
 
         [$sql, $bindings] = match ($this->grammar->driver()) {
             'mysql' => [
                 'SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ? LIMIT 1',
-                [$this->connection->getDatabaseName(), $table],
+                [$namespace ?? $this->connection->getDatabaseName(), $table],
             ],
             'pgsql' => [
-                'SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ? LIMIT 1',
-                [$table],
+                'SELECT 1 FROM information_schema.tables WHERE table_schema = COALESCE(?, current_schema()) AND table_name = ? LIMIT 1',
+                [$namespace, $table],
             ],
             default => [
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+                'SELECT 1 FROM ' . ($namespace === null ? '' : '"' . str_replace('"', '""', $namespace) . '".') . "sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
                 [$table],
             ],
         };
@@ -133,6 +149,7 @@ final readonly class SchemaManager
     public function rename(string $from, string $to): void
     {
         $this->connection->statement($this->grammar->compileRename($from, $to));
+        $this->invalidateTables([$from, $to]);
     }
 
     public function supportsTransactionalDdl(): bool
@@ -144,6 +161,7 @@ final readonly class SchemaManager
     public function table(string $table, callable $definition): void
     {
         $this->execute($this->build($table, false, $definition));
+        $this->invalidateTables([$table]);
     }
 
     /**
@@ -218,6 +236,16 @@ final readonly class SchemaManager
         }
     }
 
+    /** @param list<string> $tables */
+    private function invalidateTables(array $tables): void
+    {
+        $tags = array_map(
+            fn(string $table): string => $this->connection->cacheTableTag($table),
+            array_values(array_unique($tables)),
+        );
+        DB::invalidateCacheTagsAfterCommit($tags, $this->connection->getName());
+    }
+
     private function physicalTable(string $table): string
     {
         $prefix = $this->connection->getTablePrefix();
@@ -227,5 +255,27 @@ final readonly class SchemaManager
         }
 
         return str_starts_with($table, $prefix) ? $table : $prefix . $table;
+    }
+
+    private function restoreForeignKeyChecks(): void
+    {
+        if ($this->grammar->driver() === 'mysql') {
+            $this->connection->statement('SET FOREIGN_KEY_CHECKS = 1');
+        } elseif ($this->grammar->driver() === 'sqlite') {
+            $this->connection->statement('PRAGMA foreign_keys = ON');
+        }
+    }
+
+    /** @return array{0:string|null,1:string} */
+    private function splitQualifiedTable(string $table): array
+    {
+        $parts = explode('.', $table);
+        if (count($parts) === 1) {
+            return [null, $parts[0]];
+        }
+
+        $name = array_pop($parts);
+
+        return [implode('.', $parts), $name];
     }
 }

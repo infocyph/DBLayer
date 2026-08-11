@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\DBLayer\DB;
+use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\TransactionException;
 
 it('commits successful transactions and rolls back failed ones', function (string $driver): void {
@@ -253,3 +254,62 @@ it('keeps committed data when an after-commit callback fails', function (string 
 
     expect((int) DB::table($table)->count())->toBe(1);
 })->with('dblayer_drivers');
+
+it('preserves managed state when native commit or rollback fails', function (string $operation): void {
+    dblayerAddConnectionForDriver('sqlite');
+    DB::beginTransaction();
+    $connection = DB::connection();
+
+    try {
+        if ($operation === 'commit') {
+            $connection->getPdo()->rollBack();
+            expect(fn() => DB::commit())->toThrow(PDOException::class);
+        } else {
+            $connection->getPdo()->commit();
+            expect(fn() => DB::rollBack())->toThrow(PDOException::class);
+        }
+
+        $stats = DB::transactionStats();
+        expect(DB::transactionLevel())->toBe(1)
+            ->and($stats['current_level'])->toBe(1)
+            ->and($stats['in_transaction'])->toBeTrue();
+    } finally {
+        $connection->disconnect();
+    }
+})->with(['commit', 'rollback']);
+
+it('preserves nesting when releasing a savepoint fails', function (): void {
+    dblayerAddConnectionForDriver('sqlite');
+    DB::beginTransaction();
+    DB::beginTransaction();
+    $connection = DB::connection();
+
+    try {
+        DB::statement('RELEASE SAVEPOINT trans_1');
+        expect(fn() => DB::commit())->toThrow(ConnectionException::class)
+            ->and(DB::transactionLevel())->toBe(2)
+            ->and(DB::transactionStats()['current_level'])->toBe(2);
+    } finally {
+        $connection->disconnect();
+    }
+});
+
+it('keeps transaction counters non-negative across no-op and completed operations', function (): void {
+    dblayerAddConnectionForDriver('sqlite');
+    DB::commit();
+    DB::rollBack();
+    DB::beginTransaction();
+    DB::commit();
+    DB::beginTransaction();
+    DB::rollBack();
+
+    $stats = DB::transactionStats();
+    foreach (['total', 'committed', 'rolled_back', 'deadlocks', 'current_level', 'savepoints'] as $key) {
+        expect($stats[$key])->toBeGreaterThanOrEqual(0);
+    }
+
+    expect($stats['total'])->toBe(2)
+        ->and($stats['committed'])->toBe(1)
+        ->and($stats['rolled_back'])->toBe(1)
+        ->and($stats['current_level'])->toBe(0);
+});

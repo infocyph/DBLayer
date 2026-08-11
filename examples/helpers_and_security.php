@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\ArrayKit\Array\DotNotation;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\SecurityException;
 use Infocyph\DBLayer\Security\QueryValidator;
@@ -12,11 +13,11 @@ $writeLine = static function (string $message): void {
     fwrite(STDOUT, $message . PHP_EOL);
 };
 
-// data_get / data_set helper usage
-$payload = new stdClass();
-data_set($payload, 'profile.name', 'Alice');
+// Generic dot notation is owned by ArrayKit.
+$payload = [];
+DotNotation::set($payload, 'profile.name', 'Alice');
 
-$writeLine('Name: ' . (string) data_get($payload, 'profile.name', 'unknown'));
+$writeLine('Name: ' . (string) DotNotation::get($payload, 'profile.name', 'unknown'));
 
 // Event listener registration/removal
 $listener = static function (): void {

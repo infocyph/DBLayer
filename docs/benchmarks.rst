@@ -19,7 +19,8 @@ Commands
    composer ic:bench:quick
    composer ic:bench:chart
 
-Current benchmark subjects are defined in ``benchmarks/DBLayerBench.php``:
+Current benchmark subjects are defined in ``benchmarks/DBLayerBench.php`` and
+``benchmarks/DBLayerCompilerBench.php``:
 
 - ``benchBuildSelectSql``
 - ``benchSelectByPrimaryKey``
@@ -34,6 +35,14 @@ Current benchmark subjects are defined in ``benchmarks/DBLayerBench.php``:
 - ``benchWithLeastLatencyCachedReplica`` / ``benchWithLeastLatencyUncachedReplica``
 - ``benchRelationLoadTwentyParents``
 - ``benchSchemaCompileCreate``
+- ``benchArrayResultFiftyRows`` / ``benchCollectFiftyRows``
+- ``benchLazyByIdRows`` / ``benchLazyCollectionRows``
+- ``benchQueryCacheDisabled`` / ``benchQueryCacheMiss``
+- memory-cache hits for 1, 50, 500, and 5000 rows
+- ``benchRepositoryCachedFind``
+- ``benchBulkInsertCompileHundredRows`` / ``benchBulkInsertCompileThousandRows``
+- ``benchUpsertChunkingHundredRows`` / ``benchFindManyHundredIds``
+- ``benchAfterCommitCacheInvalidation``
 
 Report Interpretation
 ---------------------
@@ -64,6 +73,9 @@ throughput. Compare paired benchmark subjects on the same machine/run:
 - ``benchStatementCacheOff`` vs ``benchStatementCacheOn``
 - ``benchWithQueryCommentDisabled`` vs ``benchWithQueryCommentEnabled``
 - ``benchEventDispatchOff`` vs ``benchEventDispatchOn``
+- ``benchArrayResultFiftyRows`` vs ``benchCollectFiftyRows``
+- ``benchLazyByIdRows`` vs ``benchLazyCollectionRows``
+- ``benchQueryCacheDisabled`` vs cache hit/miss subjects
 
 Treat these as measured tradeoffs, not guaranteed improvements.
 
@@ -71,6 +83,16 @@ The schema subject measures compilation only because migrations are a
 deploy/console path. The relation subject measures a 20-parent select plus one
 bounded relation query. Keep these separate from ordinary query hot-path
 subjects so opt-in features do not conceal regressions in common operations.
+
+Use memory CacheLayer for query-cache microbenchmarks. Network adapters belong
+in integration/load tests where serialization, server, and transport behavior
+can be measured honestly. Record peak memory alongside latency for collection,
+bulk compilation, and cached-result comparisons.
+
+Execution subjects are conditionally skipped when PDO SQLite is unavailable;
+they are never replaced with compile-only work under an execution-oriented
+name. Compiler subjects remain available without PDO SQLite and are explicitly
+named as compilation measurements.
 
 Chart Output
 ------------

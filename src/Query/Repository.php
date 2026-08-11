@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Query;
 
+use DateInterval;
 use Generator;
+use Infocyph\ArrayKit\Collection\Collection;
 use Infocyph\DBLayer\Connection\Connection;
-use Infocyph\DBLayer\Grammar\Grammar;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
 use Infocyph\DBLayer\Query\Concerns\RepositoryInternals;
-use Infocyph\DBLayer\Support\Collection;
 use InvalidArgumentException;
 
 /**
@@ -27,6 +27,16 @@ use InvalidArgumentException;
 abstract class Repository
 {
     use RepositoryInternals;
+
+    /**
+     * Whether repository reads opt in to query-result caching.
+     */
+    protected bool $cacheEnabled = false;
+
+    /**
+     * Optional repository-wide query-cache TTL.
+     */
+    protected DateInterval|int|null $cacheTtl = null;
 
     /**
      * Attribute casts.
@@ -113,10 +123,6 @@ abstract class Repository
          * Database connection.
          */
         protected Connection $connection,
-        /**
-         * SQL grammar compiler.
-         */
-        protected Grammar $grammar,
         /**
          * Query executor.
          */
@@ -264,6 +270,21 @@ abstract class Repository
         }
 
         return $inserted;
+    }
+
+    /**
+     * Opt repository reads into CacheLayer-backed result caching.
+     */
+    public function cacheFor(DateInterval|int|null $ttl): static
+    {
+        if (is_int($ttl) && $ttl < 1) {
+            throw new InvalidArgumentException('Repository cache TTL must be positive or null.');
+        }
+
+        $this->cacheEnabled = true;
+        $this->cacheTtl = $ttl;
+
+        return $this;
     }
 
     /**
@@ -504,12 +525,19 @@ abstract class Repository
     public function find(mixed $id, array $columns = ['*']): ?array
     {
         $key = $this->normalizeColumnName($this->primaryKey(), 'id');
-        $row = $this->applySelectedColumns(
+        $query = $this->applySelectedColumns(
             $this->query(),
             $columns,
-        )
-          ->where($key, '=', $id)
-          ->first();
+        )->where($key, '=', $id);
+
+        if ($this->cacheEnabled && (is_int($id) || is_string($id))) {
+            $query->cacheTags($this->connection->cacheTableTag(
+                $this->table(),
+                $key . '.' . $this->typedCacheKey($id),
+            ));
+        }
+
+        $row = $query->first();
 
         return $this->applyReadCastsToRow($row);
     }
@@ -529,13 +557,25 @@ abstract class Repository
 
         $key = $this->normalizeColumnName($this->primaryKey(), 'id');
 
-        $rows = $this->applySelectedColumns(
-            $this->query(),
-            $columns,
-        )
-          ->whereIn($key, $this->toList($ids))
-          ->get();
+        $requestedIds = $this->toList($ids);
+        $uniqueIds = $this->uniqueFindManyIds($requestedIds);
+        $rows = [];
+
+        foreach (array_chunk($uniqueIds, $this->findManyBatchSize()) as $batch) {
+            $batchRows = $this->applySelectedColumns(
+                $this->query(),
+                $columns,
+            )
+              ->whereIn($key, $batch)
+              ->get();
+            array_push($rows, ...$batchRows);
+        }
+
         $rows = $this->applyReadCastsToRows($rows);
+
+        $rows = $this->canOrderFindManyRows($columns, $key)
+            ? $this->orderFindManyRows($rows, $requestedIds, $key)
+            : $rows;
 
         return $this->results->process($rows);
     }
@@ -609,7 +649,17 @@ abstract class Repository
         }
 
         $payload = array_merge($attributes, $values);
-        $this->create($payload);
+
+        try {
+            $this->create($payload);
+        } catch (\Infocyph\DBLayer\Exceptions\QueryException $error) {
+            $raced = $this->firstByAttributes($attributes);
+            if ($raced !== null) {
+                return $raced;
+            }
+
+            throw $error;
+        }
 
         $created = $this->firstByAttributes($attributes);
         if ($created !== null) {
@@ -741,7 +791,7 @@ abstract class Repository
     {
         $rows = $this->get($scope, $columns);
 
-        return $rows->map(
+        return new Collection(array_map(
             static function (mixed $row) use ($mapper): mixed {
                 if (is_array($row)) {
                     return $mapper(self::normalizeAttributeArray($row));
@@ -753,7 +803,8 @@ abstract class Repository
 
                 return $mapper([]);
             },
-        );
+            $rows->all(),
+        ));
     }
 
     /**
@@ -954,13 +1005,7 @@ abstract class Repository
         $payload = $this->applyWriteCastsToAttributes($values);
         $payload = $this->runPayloadHooks('beforeUpdate', $payload);
 
-        $affected = $this->queryWithoutSoftDeletes()
-          ->where($this->normalizeColumnName($this->primaryKey(), 'id'), '=', $id)
-          ->update($payload);
-
-        $this->runVoidHooks('afterUpdate', ['id' => $id, 'payload' => $payload, 'affected' => $affected]);
-
-        return $affected;
+        return $this->updatePreparedById($id, $payload);
     }
 
     /**
@@ -1020,7 +1065,7 @@ abstract class Repository
 
         $primaryKey = $this->primaryKey();
         if (array_key_exists($primaryKey, $existing)) {
-            $this->updateById($existing[$primaryKey], $payload);
+            $this->updatePreparedById($existing[$primaryKey], $payload);
 
             $updated = $this->find($existing[$primaryKey]);
 
@@ -1175,7 +1220,7 @@ abstract class Repository
      */
     protected function newQuery(): QueryBuilder
     {
-        return new QueryBuilder($this->connection, $this->grammar, $this->executor);
+        return new QueryBuilder($this->connection, $this->executor);
     }
 
     /**
@@ -1193,8 +1238,129 @@ abstract class Repository
      */
     protected function query(): QueryBuilder
     {
-        return $this->applyRepositoryConstraints(
+        $query = $this->applyRepositoryConstraints(
             $this->newQuery()->from($this->table()),
         );
+
+        if (!$this->cacheEnabled) {
+            return $query;
+        }
+
+        $tags = [$this->connection->cacheTableTag($this->table())];
+
+        if ($this->tenantId !== null) {
+            $tags[] = $this->connection->cacheTableTag(
+                $this->table(),
+                'tenant.' . $this->typedCacheKey($this->tenantId),
+            );
+        }
+
+        return $query
+          ->cacheFor($this->cacheTtl)
+          ->cacheTags($tags);
+    }
+
+    /**
+     * @param list<Expression|string> $columns
+     */
+    private function canOrderFindManyRows(array $columns, string $key): bool
+    {
+        return in_array('*', $columns, true) || in_array($key, $columns, true);
+    }
+
+    /**
+     * Some databases coerce numeric string keys to integer result values.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array<string,mixed>|null
+     */
+    private function findDatabaseEquivalentRow(array $rows, int|string $id, string $key): ?array
+    {
+        foreach ($rows as $row) {
+            if (array_key_exists($key, $row) && $row[$key] == $id) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    /** @return positive-int */
+    private function findManyBatchSize(): int
+    {
+        return $this->connection->safeBatchSize();
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @param list<mixed> $requestedIds
+     * @return list<array<string,mixed>>
+     */
+    private function orderFindManyRows(array $rows, array $requestedIds, string $key): array
+    {
+        $indexed = [];
+
+        foreach ($rows as $row) {
+            $value = $row[$key] ?? null;
+
+            if (is_int($value) || is_string($value)) {
+                $indexed[$this->typedCacheKey($value)] = $row;
+            }
+        }
+
+        $ordered = [];
+
+        foreach ($requestedIds as $id) {
+            if (!is_int($id) && !is_string($id)) {
+                continue;
+            }
+
+            $row = $indexed[$this->typedCacheKey($id)] ?? $this->findDatabaseEquivalentRow($rows, $id, $key);
+            if ($row !== null) {
+                $ordered[] = $row;
+            }
+        }
+
+        return $ordered;
+    }
+
+    private function typedCacheKey(int|string $value): string
+    {
+        return (is_int($value) ? 'i.' : 's.') . hash('xxh3', (string) $value);
+    }
+
+    /**
+     * Preserve PHP type identity while removing exact duplicate lookup values.
+     *
+     * @param list<mixed> $ids
+     * @return list<mixed>
+     */
+    private function uniqueFindManyIds(array $ids): array
+    {
+        $unique = [];
+        $seen = [];
+
+        foreach ($ids as $id) {
+            $identity = get_debug_type($id) . ':' . serialize($id);
+            if (isset($seen[$identity])) {
+                continue;
+            }
+            $seen[$identity] = true;
+            $unique[] = $id;
+        }
+
+        return $unique;
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function updatePreparedById(mixed $id, array $payload): int
+    {
+        $affected = $this->queryWithoutSoftDeletes()
+          ->where($this->normalizeColumnName($this->primaryKey(), 'id'), '=', $id)
+          ->update($payload);
+
+        $this->runVoidHooks('afterUpdate', ['id' => $id, 'payload' => $payload, 'affected' => $affected]);
+
+        return $affected;
     }
 }

@@ -19,28 +19,6 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
 final class SecurityValidator
 {
     /**
-     * Sanitize input value (basic guard).
-     */
-    public static function sanitizeInput(mixed $value): mixed
-    {
-        if (!is_string($value)) {
-            return $value;
-        }
-
-        // Remove null bytes.
-        $value = str_replace("\0", '', $value);
-
-        // Remove control chars except \n and \t.
-        $value = (string) preg_replace(
-            '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/',
-            '',
-            $value,
-        );
-
-        return $value;
-    }
-
-    /**
      * Sanitize LIKE pattern (escape %, _ and backslash).
      */
     public static function sanitizeLikePattern(string $pattern): string
@@ -68,11 +46,7 @@ final class SecurityValidator
             );
         }
 
-        if (strlen($column) > 64) {
-            throw SecurityException::invalidConfiguration(
-                "Column name [{$column}] is too long (max 64 characters).",
-            );
-        }
+        self::validateIdentifierSegmentLengths($column, 'Column');
     }
 
     /**
@@ -124,10 +98,17 @@ final class SecurityValidator
             );
         }
 
-        if (strlen($table) > 64) {
-            throw SecurityException::invalidConfiguration(
-                "Table name [{$table}] is too long (max 64 characters).",
-            );
+        self::validateIdentifierSegmentLengths($table, 'Table');
+    }
+
+    private static function validateIdentifierSegmentLengths(string $identifier, string $kind): void
+    {
+        foreach (explode('.', $identifier) as $segment) {
+            if (strlen($segment) > 64) {
+                throw SecurityException::invalidConfiguration(
+                    "{$kind} identifier segment [{$segment}] is too long (max 64 bytes).",
+                );
+            }
         }
     }
 }

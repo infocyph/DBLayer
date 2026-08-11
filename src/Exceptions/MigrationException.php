@@ -9,6 +9,15 @@ use Throwable;
 
 final class MigrationException extends RuntimeException
 {
+    public static function cleanupAlsoFailed(Throwable $primary, Throwable $cleanup): self
+    {
+        return new self(
+            sprintf('%s Cleanup also failed: %s', $primary->getMessage(), $cleanup->getMessage()),
+            (int) $primary->getCode(),
+            $primary,
+        );
+    }
+
     public static function destructiveDenied(string $operation): self
     {
         return new self(sprintf('Destructive migration operation "%s" requires explicit authorization.', $operation));

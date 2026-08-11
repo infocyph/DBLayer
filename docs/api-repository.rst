@@ -30,6 +30,15 @@ Write APIs
 - ``firstOrCreate()``, ``updateOrCreate()``, ``upsert()``
 - ``updateByIdWithVersion()``
 
+``create()`` returns the freshly reloaded persisted row when DBLayer can locate
+it; otherwise it returns the normalized submitted payload. ``findMany()`` uses
+driver-aware batches and preserves requested order and duplicates with typed
+key identity.
+
+Repository reads can opt into ``cacheFor()``. They receive database-scoped
+table tags plus tenant and primary-key record tags where applicable. Successful
+structured mutations invalidate table tags after commit.
+
 Scopes and Features
 -------------------
 
@@ -52,3 +61,8 @@ Hooks and Mapping
 
 - Hooks: ``on()``, ``beforeCreate()``, ``afterCreate()``, ``beforeUpdate()``, ``afterUpdate()``, ``beforeDelete()``, ``afterDelete()``
 - Mapping: ``map()``, ``firstMap()``, ``mapInto()``, ``firstInto()``
+
+Create hooks cover ``create()`` and individual ``bulkInsert()`` rows. Update
+hooks cover explicit repository update and optimistic-update paths; delete hooks
+cover soft and force deletion. ``upsert()`` and ``restoreById()`` do not emit
+those generic hooks.

@@ -16,6 +16,16 @@ use PDO;
 interface DriverInterface
 {
     /**
+     * Apply best-effort read-only mode to the active transaction.
+     */
+    public function applyReadOnlyTransaction(PDO $pdo): void;
+
+    /**
+     * Apply a best-effort native statement/lock timeout to a PDO session.
+     */
+    public function applyStatementTimeout(PDO $pdo, int $timeoutMs): void;
+
+    /**
      * Compile a read-only SELECT execution-plan statement.
      */
     public function compileExplain(
@@ -37,6 +47,11 @@ interface DriverInterface
     public function createPdo(ConnectionConfig $config, bool $readOnly = false): PDO;
 
     /**
+     * Format used when repository helpers serialize date-time values.
+     */
+    public function dateFormat(): string;
+
+    /**
      * Describe driver capabilities / dialect features.
      */
     public function getCapabilities(): Capabilities;
@@ -45,6 +60,9 @@ interface DriverInterface
      * Canonical engine name, e.g. "mysql", "pgsql", "sqlite".
      */
     public function getName(): string;
+
+    /** Maximum bind parameters accepted by one statement. */
+    public function maxBindParameters(): int;
 
     /**
      * Merge driver-specific defaults into user config.

@@ -204,6 +204,66 @@ it('always releases migration ownership after a failure', function (): void {
         ->and($provider->releases)->toBe(1);
 });
 
+it('rolls back down work when the migration lease is lost after execution', function (): void {
+    $connection = migrationEdgeConnection();
+    $provider = new class implements LockProviderInterface {
+        public int $refreshes = 0;
+
+        public function acquire(string $key, float $waitSeconds, float $leaseSeconds = 30.0): LockHandle
+        {
+            return new LockHandle($key, (string) $waitSeconds, leaseSeconds: $leaseSeconds);
+        }
+
+        public function refresh(?LockHandle $handle, float $leaseSeconds): bool
+        {
+            $this->refreshes++;
+
+            return $handle instanceof LockHandle && $leaseSeconds > 0.0 && $this->refreshes < 4;
+        }
+
+        public function release(?LockHandle $handle): void {}
+    };
+    $migration = migrationEdgeCreateTable('20260729000000_down_lease', 'down_lease_items');
+    $runner = new MigrationRunner($connection, [$migration], $provider);
+    expect($runner->run())->toBe(['20260729000000_down_lease']);
+
+    expect(fn(): array => $runner->rollback())
+        ->toThrow(MigrationException::class, 'lease')
+        ->and((new SchemaManager($connection))->hasTable('down_lease_items'))->toBeTrue()
+        ->and($runner->status()[0]['applied'])->toBeTrue();
+});
+
+it('preserves the primary migration failure when lock release also fails', function (): void {
+    $connection = migrationEdgeConnection();
+    $provider = new class implements LockProviderInterface {
+        public function acquire(string $key, float $waitSeconds, float $leaseSeconds = 30.0): LockHandle
+        {
+            return new LockHandle($key, (string) $waitSeconds, leaseSeconds: $leaseSeconds);
+        }
+
+        public function refresh(?LockHandle $handle, float $leaseSeconds): bool
+        {
+            return $handle instanceof LockHandle && $leaseSeconds > 0.0;
+        }
+
+        public function release(?LockHandle $handle): void
+        {
+            if ($handle === null) {
+                return;
+            }
+
+            throw new RuntimeException('release failure');
+        }
+    };
+    $migration = migrationEdgeDefinition(
+        '20260729000000_primary_and_release_failure',
+        static fn() => throw new RuntimeException('primary migration failure'),
+    );
+
+    expect(fn(): array => (new MigrationRunner($connection, [$migration], $provider))->run())
+        ->toThrow(MigrationException::class, 'primary migration failure Cleanup also failed: release failure');
+});
+
 it('documents mysql partial ddl failure behavior when the driver is available', function (): void {
     $config = dblayerRequireDriver('mysql');
     DB::addConnection($config, 'mysql_partial_ddl');

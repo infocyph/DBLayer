@@ -32,7 +32,7 @@ function prefixEdgeConnection(): \Infocyph\DBLayer\Connection\Connection
     return $connection;
 }
 
-it('applies prefixes through complex grammar fallback joins', function (): void {
+it('applies prefixes through complex compiler joins', function (): void {
     $connection = prefixEdgeConnection();
 
     $count = $connection
@@ -47,7 +47,7 @@ it('applies prefixes through complex grammar fallback joins', function (): void 
     expect($count)->toBe(1);
 });
 
-it('applies prefixes to qualified mutations on the grammar fallback path', function (): void {
+it('applies prefixes to qualified compiler mutations', function (): void {
     $connection = prefixEdgeConnection();
 
     $updated = $connection
@@ -78,7 +78,7 @@ it('keeps derived-table aliases logical while prefixing their source tables', fu
     expect($row)->toMatchArray(['id' => 1, 'name' => 'item']);
 });
 
-it('keeps derived-table aliases logical on the grammar fallback path', function (): void {
+it('keeps derived-table aliases logical in structured compiler payloads', function (): void {
     $connection = prefixEdgeConnection();
     $subquery = $connection->table('items')->select(['id', 'name']);
 

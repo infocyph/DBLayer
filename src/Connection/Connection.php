@@ -18,10 +18,10 @@ use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Exceptions\SecurityException;
-use Infocyph\DBLayer\Grammar\Grammar;
 use Infocyph\DBLayer\Query\Core\CompiledQuery;
 use Infocyph\DBLayer\Query\Core\DriverResult;
 use Infocyph\DBLayer\Query\Core\QueryType;
+use Infocyph\DBLayer\Query\Core\SqlOrigin;
 use Infocyph\DBLayer\Query\Executor;
 use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
@@ -41,7 +41,6 @@ use Throwable;
  * - Automatic reconnection on connection loss
  * - Lightweight health checks
  * - Query statistics & performance sampling
- * - Query builder / grammar wiring (legacy path)
  * - Driver + compiler pipeline for structured queries
  * - Optional SQL security validation (config-driven)
  */
@@ -76,7 +75,12 @@ final class Connection
     private readonly DriverInterface $driver;
 
     /**
-     * Query executor for this connection (legacy path).
+     * Stateful read-replica strategy coordinator.
+     */
+    private readonly ReplicaSelector $replicaSelector;
+
+    /**
+     * Query executor for this connection.
      */
     private ?Executor $executor = null;
 
@@ -86,24 +90,9 @@ final class Connection
     private int $fetchMode = PDO::FETCH_ASSOC;
 
     /**
-     * SQL grammar instance for this connection (legacy path).
-     */
-    private ?Grammar $grammar = null;
-
-    /**
      * Optional health monitor for this connection.
      */
     private ?HealthCheck $healthCheck = null;
-
-    /**
-     * Cached best replica index for least-latency routing.
-     */
-    private ?int $leastLatencyReplicaIndex = null;
-
-    /**
-     * Unix timestamp of the last least-latency probe result.
-     */
-    private ?int $leastLatencyResolvedAt = null;
 
     /**
      * Lifecycle hooks around connect/reconnect/failure events.
@@ -183,30 +172,6 @@ final class Connection
     private ?PDO $readPdo = null;
 
     /**
-     * Round-robin cursor for read-replica selection.
-     */
-    private int $readReplicaCursor = 0;
-
-    /**
-     * Last selected read-replica index.
-     */
-    private ?int $readReplicaIndex = null;
-
-    /**
-     * Last measured read-replica latencies (milliseconds), keyed by replica index.
-     *
-     * @var array<int,float>
-     */
-    private array $readReplicaLatenciesMs = [];
-
-    /**
-     * Temporary read-replica suppression map: index => unix timestamp when retry is allowed.
-     *
-     * @var array<int,int>
-     */
-    private array $readReplicaUnavailableUntil = [];
-
-    /**
      * Indicates whether a write has occurred on this connection instance.
      *
      * Used by sticky read-after-write behavior.
@@ -273,10 +238,15 @@ final class Connection
     /**
      * Create a new connection instance.
      */
-    public function __construct(/**
-     * Connection configuration.
-     */
+    public function __construct(
+        /**
+         * Connection configuration.
+         */
         private ConnectionConfig $config,
+        /**
+         * Logical connection name used for diagnostics and cache identity.
+         */
+        private readonly string $name = 'default',
     ) {
         $prefix = $this->config->get('prefix');
         $this->tablePrefix = is_string($prefix) ? $prefix : '';
@@ -287,6 +257,7 @@ final class Connection
         $this->driver = DriverRegistry::resolve($this->config->getDriver());
         $this->compiler = $this->driver->createCompiler();
         $this->compiler->setTablePrefix($this->tablePrefix);
+        $this->replicaSelector = new ReplicaSelector($this->config);
     }
 
     /**
@@ -356,7 +327,7 @@ final class Connection
     }
 
     /**
-     * Begin transaction using the transaction manager (supports nesting/savepoints).
+     * Begin a managed transaction (supports nesting/savepoints).
      */
     public function begin(): void
     {
@@ -364,11 +335,46 @@ final class Connection
     }
 
     /**
-     * Begin a transaction (raw PDO-level).
+     * Begin the native PDO transaction used by the managed transaction engine.
+     *
+     * @internal
+     */
+    public function beginNativeTransaction(): bool
+    {
+        return $this->getPdo()->beginTransaction();
+    }
+
+    /**
+     * Begin a managed transaction using the familiar PDO-style name.
      */
     public function beginTransaction(): bool
     {
-        return $this->getPdo()->beginTransaction();
+        $this->begin();
+
+        return true;
+    }
+
+    /**
+     * Build a stable non-sensitive CacheLayer tag for a structured table dependency.
+     */
+    public function cacheTableTag(string $table, ?string $suffix = null): string
+    {
+        $table = strtolower(trim($table));
+        $schema = $this->config->get('schema');
+
+        if (!str_contains($table, '.') && is_string($schema) && $schema !== '') {
+            $table = strtolower($schema) . '.' . $table;
+        }
+
+        $identity = hash('xxh3', implode("\0", [
+            $this->name,
+            $this->getDriverName(),
+            $this->getDatabaseName(),
+            $this->tablePrefix,
+        ]));
+        $tag = 'db.' . $identity . '.table.' . hash('xxh3', $table);
+
+        return $suffix === null || $suffix === '' ? $tag : $tag . '.' . $suffix;
     }
 
     /**
@@ -390,9 +396,21 @@ final class Connection
     }
 
     /**
-     * Commit a transaction (raw PDO-level).
+     * Commit the current managed transaction.
      */
     public function commit(): bool
+    {
+        $this->commitTransaction();
+
+        return true;
+    }
+
+    /**
+     * Commit the native PDO transaction used by the managed transaction engine.
+     *
+     * @internal
+     */
+    public function commitNativeTransaction(): bool
     {
         return $this->getPdo()->commit();
     }
@@ -412,7 +430,9 @@ final class Connection
      */
     public function delete(string $sql, array $bindings = []): int
     {
-        return $this->execute($sql, $bindings)->rowCount();
+        $this->assertExpectedQueryType($sql, QueryType::DELETE);
+
+        return $this->executeKnownType($sql, $bindings, QueryType::DELETE)->rowCount();
     }
 
     /**
@@ -429,20 +449,11 @@ final class Connection
         $this->securityChecks = false;
     }
 
-    /**
-     * Disconnect from database (write + read).
-     */
-    public function disconnect(): void
+    public function effectiveMaxBindParameters(): int
     {
-        $this->pdo = null;
-        $this->readPdo = null;
-        $this->clearStatementCache();
-        $this->readReplicaIndex = null;
-        $this->leastLatencyReplicaIndex = null;
-        $this->leastLatencyResolvedAt = null;
-        $this->readReplicaLatenciesMs = [];
-        $this->readReplicaUnavailableUntil = [];
-        $this->recordsModified = false;
+        $configured = $this->config->securityConfig()['max_params'] ?? 512;
+
+        return min($this->driver->maxBindParameters(), is_int($configured) ? $configured : 512);
     }
 
     /**
@@ -579,14 +590,6 @@ final class Connection
     }
 
     /**
-     * Expose the configured grammar instance.
-     */
-    public function getGrammarInstance(): Grammar
-    {
-        return $this->getGrammar();
-    }
-
-    /**
      * Lazily create / get the HealthCheck monitor for this connection.
      */
     public function getHealthCheck(): HealthCheck
@@ -596,6 +599,14 @@ final class Connection
         }
 
         return $this->healthCheck;
+    }
+
+    /**
+     * Get the logical connection name.
+     */
+    public function getName(): string
+    {
+        return $this->name;
     }
 
     /**
@@ -666,11 +677,7 @@ final class Connection
      */
     public function getReadReplicaInfo(): array
     {
-        return [
-            'strategy' => $this->config->getReadStrategy(),
-            'selected_index' => $this->readReplicaIndex,
-            'latencies_ms' => $this->readReplicaLatenciesMs,
-        ];
+        return $this->replicaSelector->info();
     }
 
     /**
@@ -700,13 +707,23 @@ final class Connection
     }
 
     /**
+     * Whether sticky read-after-write routing is currently active.
+     */
+    public function hasStickyWrite(): bool
+    {
+        return $this->config->isSticky() && $this->recordsModified;
+    }
+
+    /**
      * Run an insert statement.
      *
      * @param array<int|string,mixed> $bindings
      */
     public function insert(string $sql, array $bindings = []): bool
     {
-        return $this->execute($sql, $bindings)->rowCount() > 0;
+        $this->assertExpectedQueryType($sql, QueryType::INSERT);
+
+        return $this->executeKnownType($sql, $bindings, QueryType::INSERT)->rowCount() > 0;
     }
 
     /**
@@ -714,7 +731,15 @@ final class Connection
      */
     public function inTransaction(): bool
     {
-        return $this->getPdo()->inTransaction();
+        return $this->managedTransactionLevel() > 0 || ($this->pdo?->inTransaction() ?? false);
+    }
+
+    /**
+     * Whether the write PDO has already been opened.
+     */
+    public function isConnected(): bool
+    {
+        return $this->pdo !== null;
     }
 
     /**
@@ -750,6 +775,14 @@ final class Connection
         $id = $this->getPdo()->lastInsertId($name);
 
         return $id === false ? '' : $id;
+    }
+
+    /**
+     * Return managed transaction nesting without opening PDO.
+     */
+    public function managedTransactionLevel(): int
+    {
+        return $this->transactionManager?->level($this) ?? 0;
     }
 
     /**
@@ -817,7 +850,7 @@ final class Connection
      */
     public function query(): QueryBuilder
     {
-        return new QueryBuilder($this, $this->getGrammar(), $this->getExecutor());
+        return new QueryBuilder($this, $this->getExecutor());
     }
 
     /**
@@ -883,6 +916,21 @@ final class Connection
     }
 
     /**
+     * Sanitize request-local state before a pool reuses this wrapper.
+     */
+    public function resetRuntimeStateForReuse(): bool
+    {
+        if ($this->managedTransactionLevel() > 0 || ($this->pdo?->inTransaction() ?? false)) {
+            return false;
+        }
+
+        $this->transactionManager?->clear();
+        $this->resetRequestRuntimeState();
+
+        return true;
+    }
+
+    /**
      * Reset statistics.
      */
     public function resetStats(): void
@@ -896,9 +944,21 @@ final class Connection
     }
 
     /**
-     * Rollback a transaction (raw PDO-level).
+     * Roll back the current managed transaction.
      */
     public function rollBack(): bool
+    {
+        $this->rollbackTransaction();
+
+        return true;
+    }
+
+    /**
+     * Roll back the native PDO transaction used by the managed transaction engine.
+     *
+     * @internal
+     */
+    public function rollBackNativeTransaction(): bool
     {
         return $this->getPdo()->rollBack();
     }
@@ -919,10 +979,8 @@ final class Connection
      * centralized execution path for security checks, retry policy, lifecycle
      * events, telemetry/performance tracking, and pretend mode behavior.
      */
-    public function runCompiled(CompiledQuery $query, bool $readOnly = false): DriverResult
+    public function runCompiled(CompiledQuery $query): DriverResult
     {
-        unset($readOnly); // reserved for future use when bypassing SQL classification
-
         $type = $query->type;
 
         if ($type === QueryType::SELECT) {
@@ -930,35 +988,80 @@ final class Connection
                 $query->sql,
                 $query->bindings,
                 QueryType::SELECT,
+                $query->origin,
             );
 
             return new DriverResult(array_values($rows), count($rows));
         }
 
         if ($type === QueryType::INSERT) {
-            $rowCount = $this->executeKnownType($query->sql, $query->bindings, QueryType::INSERT)->rowCount();
-            $id = $this->lastInsertId();
-            $lastId = $id !== '' ? $id : null;
+            $statement = $this->executeKnownType(
+                $query->sql,
+                $query->bindings,
+                QueryType::INSERT,
+                $query->origin,
+            );
+            $rowCount = $statement->rowCount();
+            $rows = null;
 
-            return new DriverResult(null, $rowCount, $lastId);
+            if ($statement->columnCount() > 0) {
+                /** @var list<array<string,mixed>> $returned */
+                $returned = $statement->fetchAll($this->fetchMode);
+                $rows = $returned;
+            }
+
+            $lastId = null;
+            if ($rows === null || $rows === []) {
+                $id = $this->lastInsertId();
+                $lastId = $id !== '' ? $id : null;
+            }
+
+            return new DriverResult($rows, $rowCount, $lastId);
         }
 
         if ($type === QueryType::UPDATE) {
-            $rowCount = $this->executeKnownType($query->sql, $query->bindings, QueryType::UPDATE)->rowCount();
+            $rowCount = $this->executeKnownType(
+                $query->sql,
+                $query->bindings,
+                QueryType::UPDATE,
+                $query->origin,
+            )->rowCount();
 
             return new DriverResult(null, $rowCount);
         }
 
         if ($type === QueryType::DELETE) {
-            $rowCount = $this->executeKnownType($query->sql, $query->bindings, QueryType::DELETE)->rowCount();
+            $rowCount = $this->executeKnownType(
+                $query->sql,
+                $query->bindings,
+                QueryType::DELETE,
+                $query->origin,
+            )->rowCount();
 
             return new DriverResult(null, $rowCount);
         }
 
         // TRUNCATE or anything else
-        $this->executeKnownType($query->sql, $query->bindings, $type);
+        $this->executeKnownType($query->sql, $query->bindings, $type, $query->origin);
 
         return new DriverResult(null, 0);
+    }
+
+    /** @return positive-int */
+    public function safeBatchSize(int $parametersPerRow = 1, int $fixedBindings = 0, ?int $requested = null): int
+    {
+        if ($parametersPerRow < 1 || $fixedBindings < 0) {
+            throw QueryException::invalidParameter('batch', 'Batch parameter counts must be positive/non-negative.');
+        }
+
+        $available = $this->effectiveMaxBindParameters() - $fixedBindings;
+        if ($available < $parametersPerRow) {
+            throw QueryException::invalidParameter('batch', 'Fixed bindings leave no room for one batch row.');
+        }
+
+        $rows = intdiv($available, $parametersPerRow);
+
+        return max(1, $requested === null ? $rows : min($rows, max(1, $requested)));
     }
 
     /**
@@ -985,7 +1088,8 @@ final class Connection
      */
     public function select(string $sql, array $bindings = []): array
     {
-        $statement = $this->execute($sql, $bindings);
+        $this->assertExpectedQueryType($sql, QueryType::SELECT);
+        $statement = $this->executeKnownType($sql, $bindings, QueryType::SELECT);
 
         /** @var array<int,array<string,mixed>> $rows */
         $rows = $statement->fetchAll($this->fetchMode);
@@ -1085,16 +1189,12 @@ final class Connection
     }
 
     /**
-     * Set the table prefix (updates grammar if already created).
+     * Set the table prefix used by the active compiler.
      */
     public function setTablePrefix(string $prefix): self
     {
         $this->tablePrefix = $prefix;
         $this->compiler->setTablePrefix($prefix);
-
-        if ($this->grammar !== null) {
-            $this->grammar->setTablePrefix($prefix);
-        }
 
         return $this;
     }
@@ -1213,7 +1313,6 @@ final class Connection
      *   committed:int,
      *   rolled_back:int,
      *   deadlocks:int,
-     *   timeouts:int,
      *   in_transaction:bool,
      *   current_level:int,
      *   savepoints:int,
@@ -1261,7 +1360,9 @@ final class Connection
      */
     public function update(string $sql, array $bindings = []): int
     {
-        return $this->execute($sql, $bindings)->rowCount();
+        $this->assertExpectedQueryType($sql, QueryType::UPDATE);
+
+        return $this->executeKnownType($sql, $bindings, QueryType::UPDATE)->rowCount();
     }
 
     /**
@@ -1373,6 +1474,20 @@ final class Connection
         return self::$pretendPdo;
     }
 
+    private function assertExpectedQueryType(string $sql, QueryType $expected): void
+    {
+        $actual = SqlStatementInspector::leadingStatementKeyword($sql);
+
+        $expectedKeyword = strtoupper($expected->value);
+
+        if ($actual !== $expectedKeyword) {
+            throw QueryException::invalidParameter(
+                'sql',
+                sprintf('%s() requires a %s statement; received %s.', $expected->value, $expectedKeyword, $actual ?: 'UNKNOWN'),
+            );
+        }
+    }
+
     /**
      * @param array<int|string,mixed> $bindings
      */
@@ -1432,9 +1547,13 @@ final class Connection
      *
      * @param array<int|string,mixed> $bindings
      */
-    private function executeKnownType(string $sql, array $bindings, QueryType $type): PDOStatement
-    {
-        return $this->executeTypedStatement($sql, $bindings, $type !== QueryType::SELECT);
+    private function executeKnownType(
+        string $sql,
+        array $bindings,
+        QueryType $type,
+        SqlOrigin $origin = SqlOrigin::RAW,
+    ): PDOStatement {
+        return $this->executeTypedStatement($sql, $bindings, $type !== QueryType::SELECT, $origin);
     }
 
     /**
@@ -1442,9 +1561,13 @@ final class Connection
      *
      * @param array<int|string,mixed> $bindings
      */
-    private function executeTypedStatement(string $sql, array $bindings, bool $isWrite): PDOStatement
-    {
-        $finalSql = $this->prepareSqlForExecution($sql, $bindings);
+    private function executeTypedStatement(
+        string $sql,
+        array $bindings,
+        bool $isWrite,
+        SqlOrigin $origin = SqlOrigin::RAW,
+    ): PDOStatement {
+        $finalSql = $this->prepareSqlForExecution($sql, $bindings, $origin);
 
         return $this->executeWithRetry(
             $finalSql,
@@ -1471,6 +1594,13 @@ final class Connection
         callable $operation,
         callable $pretendResult,
     ): mixed {
+        if ($this->pretending) {
+            $this->assertNotCancelled();
+            $this->recordPretend($sql, $bindings);
+
+            return $pretendResult();
+        }
+
         $start = microtime(true);
         $success = false;
         $rowsAffected = null;
@@ -1479,17 +1609,6 @@ final class Connection
         $this->dispatchQueryExecutingEvent($sql, $bindings);
 
         try {
-            if ($this->pretending) {
-                $this->assertNotCancelled();
-                $this->markExecutionSuccess($start, $isWrite, $sql, $bindings);
-                $result = $pretendResult();
-                $rowsAffected = $this->resolveRowsAffectedFromExecutionResult($result, $isWrite);
-                $attempts = 1;
-                $success = true;
-
-                return $result;
-            }
-
             [$result, $rowsAffected] = $this->runRetryableOperation(
                 $sql,
                 $bindings,
@@ -1527,9 +1646,13 @@ final class Connection
      * @param array<int|string,mixed> $bindings
      * @return array<int,array<string,mixed>>
      */
-    private function fetchAllFromKnownTypeStatement(string $sql, array $bindings, QueryType $type): array
-    {
-        $statement = $this->executeKnownType($sql, $bindings, $type);
+    private function fetchAllFromKnownTypeStatement(
+        string $sql,
+        array $bindings,
+        QueryType $type,
+        SqlOrigin $origin = SqlOrigin::RAW,
+    ): array {
+        $statement = $this->executeKnownType($sql, $bindings, $type, $origin);
 
         /** @var array<int,array<string,mixed>> $rows */
         $rows = $statement->fetchAll($this->fetchMode);
@@ -1558,7 +1681,7 @@ final class Connection
         PDO $pdo,
         bool $isWrite,
     ): PDO {
-        if (!$this->shouldRetryQuery($exception, $attempt, $sql, $bindings)) {
+        if (!$this->shouldRetryQuery($exception, $attempt, $sql, $bindings, $isWrite)) {
             $this->stats['errors']++;
             $this->recordPretend($sql, $bindings);
 
@@ -1572,6 +1695,20 @@ final class Connection
         $this->handleReconnectForPdo($pdo);
 
         return $isWrite ? $this->getPdo() : $this->getReadPdo();
+    }
+
+    private function resetRequestRuntimeState(): void
+    {
+        $this->recordsModified = false;
+        $this->queryTimeoutMs = null;
+        $this->queryDeadlineAt = null;
+        $this->queryCancellationChecker = null;
+        $this->queryRetryPolicy = null;
+        $this->queryRecorder = null;
+        $this->pretending = false;
+        $this->queryEventsEnabled = true;
+        $this->queryCommentContext = $this->config->getQueryCommentContext();
+        $this->fetchMode = PDO::FETCH_ASSOC;
     }
 
     private function resolveRowsAffectedFromExecutionResult(mixed $result, bool $isWrite): ?int

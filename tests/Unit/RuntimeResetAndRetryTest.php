@@ -90,6 +90,12 @@ it('retries connection errors once by default before stopping', function (): voi
 
     expect((bool) $shouldRetry->invoke($connection, $connectionError, 1, 'select 1', []))->toBeTrue();
     expect((bool) $shouldRetry->invoke($connection, $connectionError, 2, 'select 1', []))->toBeFalse();
+    expect((bool) $shouldRetry->invoke($connection, $connectionError, 1, 'insert into t values (1)', [], true))
+        ->toBeFalse();
+
+    $connection->beginNativeTransaction();
+    expect((bool) $shouldRetry->invoke($connection, $connectionError, 1, 'select 1', []))->toBeFalse();
+    $connection->rollBackNativeTransaction();
 });
 
 it('enforces retry max-attempt bounds even when custom policy always retries', function (): void {

@@ -6,6 +6,8 @@ namespace Infocyph\DBLayer\Driver\PostgreSQL;
 
 use Infocyph\DBLayer\Driver\AbstractPdoDriver;
 use Infocyph\DBLayer\Exceptions\QueryException;
+use PDO;
+use PDOException;
 
 /**
  * PostgreSQL driver.
@@ -44,6 +46,26 @@ final class PostgreSQLDriver extends AbstractPdoDriver
     ];
 
     #[\Override]
+    public function applyReadOnlyTransaction(PDO $pdo): void
+    {
+        try {
+            $pdo->exec('set transaction read only');
+        } catch (PDOException) {
+            // Native enforcement is best effort.
+        }
+    }
+
+    #[\Override]
+    public function applyStatementTimeout(PDO $pdo, int $timeoutMs): void
+    {
+        try {
+            $pdo->exec('set statement_timeout = ' . max(0, $timeoutMs));
+        } catch (PDOException) {
+            // Native enforcement is best effort; DBLayer still tracks its budget.
+        }
+    }
+
+    #[\Override]
     public function compileExplain(
         string $sql,
         bool $analyze = false,
@@ -75,6 +97,12 @@ final class PostgreSQLDriver extends AbstractPdoDriver
         }
 
         return 'EXPLAIN (' . implode(', ', $options) . ') ' . $sql;
+    }
+
+    #[\Override]
+    public function dateFormat(): string
+    {
+        return 'Y-m-d H:i:s.uP';
     }
 
     /**

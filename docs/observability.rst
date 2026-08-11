@@ -89,9 +89,10 @@ adjusted:
    DB::setProfilerMaxProfiles(2000);
    DB::setMaxQueryLogEntries(2000);
 
-The facade and per-connection executor query logs retain the newest 2,000
-entries by default. Passing ``null`` to their ``setMaxQueryLogEntries()`` method
-restores that default.
+The facade query log retains the newest 2,000 entries by default. Passing
+``null`` to ``DB::setMaxQueryLogEntries()`` restores that default. Query timing,
+logging, profiling, telemetry, and public listeners consume the same typed
+Connection lifecycle events, so a structured query is measured once.
 
 Failed-query telemetry defaults to redacted SQL/error payloads while preserving
 statement type, fingerprint, connection, duration, attempts, and exception

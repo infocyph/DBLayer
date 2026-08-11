@@ -47,12 +47,17 @@ final class MigrationRunner
         $this->migrations = $this->normalize($migrations);
         $this->repository = new MigrationRepository($connection, $table);
         $this->schema = new SchemaManager($connection);
-        $this->lockKey = sprintf(
-            'dblayer:migrations:%s:%s:%s',
+        $config = $connection->getConfig();
+        $identity = implode("\0", [
             $connection->getDriverName(),
-            hash('xxh3', $connection->getDatabaseName()),
+            self::lockIdentityPart($config->get('host', '')),
+            self::lockIdentityPart($config->get('unix_socket', '')),
+            self::lockIdentityPart($config->get('port', '')),
+            $connection->getDatabaseName(),
+            self::lockIdentityPart($config->get('schema', '')),
             $table,
-        );
+        ]);
+        $this->lockKey = 'dblayer:migrations:' . hash('sha256', $identity);
     }
 
     /**
@@ -203,10 +208,16 @@ final class MigrationRunner
         return $status;
     }
 
+    private static function lockIdentityPart(mixed $value): string
+    {
+        return is_scalar($value) ? (string) $value : '';
+    }
+
     private function apply(Migration $migration, int $batch, ?LockHandle $handle): void
     {
         $operation = function () use ($migration, $batch, $handle): void {
             $migration->up($this->schema, $this->context($handle));
+            $this->checkpoint($handle);
             $this->repository->log($migration->id(), $batch);
         };
 
@@ -302,6 +313,7 @@ final class MigrationRunner
     {
         $operation = function () use ($migration, $handle): void {
             $migration->down($this->schema, $this->context($handle));
+            $this->checkpoint($handle);
             $this->repository->delete($migration->id());
         };
 
@@ -380,9 +392,23 @@ final class MigrationRunner
         }
 
         try {
-            return $operation($handle);
-        } finally {
-            $this->locks->release($handle);
+            $result = $operation($handle);
+        } catch (Throwable $primary) {
+            try {
+                $this->locks->release($handle);
+            } catch (Throwable $cleanup) {
+                throw MigrationException::cleanupAlsoFailed($primary, $cleanup);
+            }
+
+            throw $primary;
         }
+
+        try {
+            $this->locks->release($handle);
+        } catch (Throwable $cleanup) {
+            throw new MigrationException('Migration lock release failed: ' . $cleanup->getMessage(), 0, $cleanup);
+        }
+
+        return $result;
     }
 }

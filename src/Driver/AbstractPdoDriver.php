@@ -109,6 +109,18 @@ abstract class AbstractPdoDriver implements DriverInterface
     abstract protected function buildDsn(array $config, bool $readOnly): string;
 
     #[\Override]
+    public function applyReadOnlyTransaction(PDO $pdo): void
+    {
+        unset($pdo);
+    }
+
+    #[\Override]
+    public function applyStatementTimeout(PDO $pdo, int $timeoutMs): void
+    {
+        unset($pdo, $timeoutMs);
+    }
+
+    #[\Override]
     final public function createCompiler(): QueryCompilerInterface
     {
         $compilerClass = static::COMPILER_CLASS;
@@ -148,6 +160,12 @@ abstract class AbstractPdoDriver implements DriverInterface
     }
 
     #[\Override]
+    public function dateFormat(): string
+    {
+        return 'Y-m-d H:i:s';
+    }
+
+    #[\Override]
     final public function getCapabilities(): Capabilities
     {
         $capabilities = static::CAPABILITIES;
@@ -176,6 +194,12 @@ abstract class AbstractPdoDriver implements DriverInterface
         }
 
         return $name;
+    }
+
+    #[\Override]
+    public function maxBindParameters(): int
+    {
+        return $this->getName() === 'sqlite' ? 999 : 65_535;
     }
 
     /**

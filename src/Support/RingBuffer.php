@@ -35,4 +35,22 @@ final class RingBuffer
         $buffer[$start] = $entry;
         $start = ($start + 1) % $max;
     }
+
+    /**
+     * @template TValue
+     * @param array<int,TValue> $buffer
+     * @return list<TValue>
+     */
+    public static function ordered(array $buffer, int $start, int $count, int $max): array
+    {
+        $ordered = [];
+        for ($offset = 0; $offset < $count; ++$offset) {
+            $index = ($start + $offset) % $max;
+            if (array_key_exists($index, $buffer)) {
+                $ordered[] = $buffer[$index];
+            }
+        }
+
+        return $ordered;
+    }
 }

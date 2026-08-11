@@ -46,7 +46,7 @@ Minimal Setup
 
    $one = User::find(1);                  // Repository dispatch
    $rows = User::query()->limit(20)->get(); // QueryBuilder dispatch
-   $stats = User::stats();                // DB facade dispatch
+   $stats = DB::stats('main');             // Infrastructure remains explicit
 
 Dispatch Rules
 --------------
@@ -55,10 +55,10 @@ Unknown static calls resolve by priority:
 
 1. Repository method
 2. QueryBuilder method
-3. DB facade method
 
-Because repository/query are checked first, use explicit raw SQL helpers for
-DB-style raw operations:
+Infrastructure methods are deliberately not forwarded through static magic.
+Use ``DB`` or ``connection()`` explicitly. Raw SQL convenience remains
+available through:
 
 - ``sqlSelect()``
 - ``sqlStatement()``

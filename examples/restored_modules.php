@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\CacheLayer\Cache\Cache;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
@@ -50,7 +51,8 @@ $removeDirectory = static function (string $directory): void {
 };
 
 $cacheDir = '/tmp/dblayer-example-cache-' . bin2hex(random_bytes(6));
-$cache = DB::useFileCache($cacheDir);
+$cache = Cache::file('dblayer', $cacheDir);
+DB::setCache($cache);
 $cache->set('hello', 'world', 60);
 $writeLine('Cache value: ' . (string) $cache->get('hello'));
 
@@ -82,6 +84,13 @@ DB::table('user_profiles')->insert([
     ['name' => 'Alice', 'active' => 1],
     ['name' => 'Bob', 'active' => 0],
 ]);
+
+$cachedProfiles = DB::table('user_profiles')
+    ->where('active', '=', 1)
+    ->cacheFor(120)
+    ->cacheTags('profiles')
+    ->get();
+$writeLine('Cached active profiles: ' . (string) count($cachedProfiles));
 
 $repository = DB::repository('UserProfiles');
 $writeLine('Repository count: ' . (string) $repository->all()->count());

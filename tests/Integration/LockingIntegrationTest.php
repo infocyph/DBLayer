@@ -37,19 +37,21 @@ it('executes lockForUpdate flows inside transactions on available drivers', func
     $connectionName = 'lock_runtime_' . $driver;
     dblayerAddConnectionForDriver($driver, $connectionName);
     $schemaDriver = dblayerConnectionDriver($connectionName);
+    $table = dblayerTable('locked_rows');
 
     DB::statement(sprintf(
-        'create table locked_rows (%s, value integer)',
+        'create table %s (%s, value integer)',
+        $table,
         dblayerAutoIncrementPrimaryKey($schemaDriver),
     ), [], $connectionName);
 
-    DB::table('locked_rows', $connectionName)->insert([
+    DB::table($table, $connectionName)->insert([
         'id' => 1,
         'value' => 10,
     ]);
 
-    DB::transaction(static function ($connection): void {
-        $row = $connection->table('locked_rows')
+    DB::transaction(static function ($connection) use ($table): void {
+        $row = $connection->table($table)
             ->where('id', '=', 1)
             ->lockForUpdate()
             ->first();

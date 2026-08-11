@@ -31,7 +31,7 @@ final class RelationLoader
             throw new InvalidArgumentException('Relation batch size must be at least one.');
         }
 
-        $this->batchSize = $batchSize;
+        $this->batchSize = $this->connection->safeBatchSize(requested: $batchSize);
     }
 
     public function lastQueryCount(): int
@@ -61,7 +61,7 @@ final class RelationLoader
         array $columns = ['*'],
         ?callable $scope = null,
     ): array {
-        $started = $this->connection->getStats()['queries'];
+        $this->lastQueryCount = 0;
         $rows = $this->fetchRelated($parents, $parentKey, $relatedTable, $relatedKey, $columns, $scope);
         $grouped = [];
 
@@ -75,13 +75,13 @@ final class RelationLoader
             $result[] = $parent;
         }
 
-        $this->recordDiagnostics($started, count($rows));
+        $this->recordDiagnostics(count($rows));
 
         return $result;
     }
 
     /**
-     * Attach related rows through a pivot table, preserving pivot row order.
+     * Attach related rows through a pivot table.
      *
      * Two bounded query phases are used: pivot keys, then related rows. There
      * is no per-parent query.
@@ -103,7 +103,7 @@ final class RelationLoader
         array $columns = ['*'],
         ?callable $scope = null,
     ): array {
-        $started = $this->connection->getStats()['queries'];
+        $this->lastQueryCount = 0;
         $parentValues = $this->values($parents, $parentKey);
         $pivotRows = [];
 
@@ -116,6 +116,7 @@ final class RelationLoader
                     ->whereIn($pivotParentKey, $values)
                     ->get(),
             );
+            $this->lastQueryCount++;
         }
 
         $relatedValues = $this->uniqueValues($pivotRows, $pivotRelatedKey);
@@ -151,7 +152,7 @@ final class RelationLoader
             $result[] = $parent;
         }
 
-        $this->recordDiagnostics($started, count($pivotRows) + count($relatedRows));
+        $this->recordDiagnostics(count($pivotRows) + count($relatedRows));
 
         return $result;
     }
@@ -173,7 +174,7 @@ final class RelationLoader
         array $columns = ['*'],
         ?callable $scope = null,
     ): array {
-        $started = $this->connection->getStats()['queries'];
+        $this->lastQueryCount = 0;
         $rows = $this->fetchRelated($parents, $parentKey, $relatedTable, $relatedKey, $columns, $scope);
         $indexed = [];
 
@@ -188,7 +189,7 @@ final class RelationLoader
             $result[] = $parent;
         }
 
-        $this->recordDiagnostics($started, count($rows));
+        $this->recordDiagnostics(count($rows));
 
         return $result;
     }
@@ -235,6 +236,7 @@ final class RelationLoader
             }
 
             $rows = array_merge($rows, $query->get());
+            $this->lastQueryCount++;
         }
 
         return $rows;
@@ -274,9 +276,8 @@ final class RelationLoader
         };
     }
 
-    private function recordDiagnostics(int $startedQueries, int $rowCount): void
+    private function recordDiagnostics(int $rowCount): void
     {
-        $this->lastQueryCount = $this->connection->getStats()['queries'] - $startedQueries;
         $this->lastRelatedRowCount = $rowCount;
     }
 

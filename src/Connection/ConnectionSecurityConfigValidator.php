@@ -23,6 +23,17 @@ final class ConnectionSecurityConfigValidator
         self::validateSecurityTlsPolicy($security);
     }
 
+    private static function isInvalidRegex(string $pattern): bool
+    {
+        set_error_handler(static fn(): bool => true);
+
+        try {
+            return preg_match($pattern, '') === false;
+        } finally {
+            restore_error_handler();
+        }
+    }
+
     /**
      * @param array<string,mixed> $security
      */
@@ -54,6 +65,13 @@ final class ConnectionSecurityConfigValidator
             if (!is_string($pattern) || trim($pattern) === '') {
                 throw ConnectionException::invalidConfiguration(
                     "Security config key 'raw_sql_allowlist' must contain only non-empty string patterns.",
+                );
+            }
+
+            $pattern = trim($pattern);
+            if (str_starts_with($pattern, '/') && self::isInvalidRegex($pattern)) {
+                throw ConnectionException::invalidConfiguration(
+                    "Security config key 'raw_sql_allowlist' contains an invalid regex pattern.",
                 );
             }
         }
@@ -90,11 +108,22 @@ final class ConnectionSecurityConfigValidator
     private static function validateSecurityNumericLimits(array $security): void
     {
         foreach (['max_sql_length', 'max_params', 'max_param_bytes', 'queries_per_second', 'queries_per_minute'] as $key) {
+            if (!array_key_exists($key, $security)) {
+                continue;
+            }
+
             $value = $security[$key] ?? null;
 
-            if ($value !== null && !is_int($value) && !is_numeric($value)) {
+            if (!is_int($value)) {
                 throw ConnectionException::invalidConfiguration(
-                    sprintf("Security config key '%s' must be numeric.", $key),
+                    sprintf("Security config key '%s' must be an integer.", $key),
+                );
+            }
+
+            $isRate = in_array($key, ['queries_per_second', 'queries_per_minute'], true);
+            if (($isRate && $value < 0) || (!$isRate && $value <= 0)) {
+                throw ConnectionException::invalidConfiguration(
+                    sprintf("Security config key '%s' is outside its valid range.", $key),
                 );
             }
         }

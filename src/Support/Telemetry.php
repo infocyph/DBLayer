@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Support;
 
 use Closure;
+use Infocyph\DBLayer\Connection\SqlStatementInspector;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionBeginning;
@@ -69,19 +70,27 @@ final class Telemetry
     private static int $maxTransactionEvents = self::DEFAULT_MAX_TRANSACTION_EVENTS;
 
     /**
-     * @var list<array<string,mixed>>
+     * @var array<int,array<string,mixed>>
      */
     private static array $queries = [];
+
+    private static int $queryCount = 0;
+
+    private static int $queryStart = 0;
 
     /**
      * Sequence id for generated span ids.
      */
     private static int $sequence = 0;
 
+    private static int $transactionCount = 0;
+
     /**
-     * @var list<array<string,mixed>>
+     * @var array<int,array<string,mixed>>
      */
     private static array $transactions = [];
+
+    private static int $transactionStart = 0;
 
     /**
      * Prevent static-only class instantiation.
@@ -95,6 +104,8 @@ final class Telemetry
     {
         self::$queries = [];
         self::$transactions = [];
+        self::$queryStart = self::$queryCount = 0;
+        self::$transactionStart = self::$transactionCount = 0;
         self::$sequence = 0;
     }
 
@@ -184,7 +195,7 @@ final class Telemetry
         $groups = [];
         $queryCount = 0;
 
-        foreach (self::$queries as $query) {
+        foreach (self::orderedQueries() as $query) {
             $duration = Numeric::arrayFloat($query, 'duration_ms');
 
             if ($minimumMs !== null && $duration < $minimumMs) {
@@ -250,18 +261,36 @@ final class Telemetry
     }
 
     /**
+     * Clear request-scoped buffers, exporter closures, and collection state.
+     */
+    public static function resetRuntimeState(): void
+    {
+        self::clear();
+        self::$enabled = false;
+        self::$exporter = null;
+        self::$maxQueryEvents = self::DEFAULT_MAX_QUERY_EVENTS;
+        self::$maxTransactionEvents = self::DEFAULT_MAX_TRANSACTION_EVENTS;
+    }
+
+    /**
      * Configure in-memory telemetry buffer limits.
      */
     public static function setBufferLimits(?int $queryEvents = null, ?int $transactionEvents = null): void
     {
         if ($queryEvents !== null) {
+            $queries = self::orderedQueries();
             self::$maxQueryEvents = max(1, $queryEvents);
-            self::trimQueryBuffer();
+            self::$queries = array_slice($queries, -self::$maxQueryEvents);
+            self::$queryStart = 0;
+            self::$queryCount = count(self::$queries);
         }
 
         if ($transactionEvents !== null) {
+            $transactions = self::orderedTransactions();
             self::$maxTransactionEvents = max(1, $transactionEvents);
-            self::trimTransactionBuffer();
+            self::$transactions = array_slice($transactions, -self::$maxTransactionEvents);
+            self::$transactionStart = 0;
+            self::$transactionCount = count(self::$transactions);
         }
     }
 
@@ -285,7 +314,7 @@ final class Telemetry
     {
         $durations = array_map(
             static fn(array $query): float => Numeric::arrayFloat($query, 'duration_ms'),
-            self::$queries,
+            self::orderedQueries(),
         );
 
         if ($durations === []) {
@@ -344,16 +373,18 @@ final class Telemetry
     {
         $totalQueryTime = 0.0;
 
-        foreach (self::$queries as $query) {
+        $queries = self::orderedQueries();
+        $transactions = self::orderedTransactions();
+        foreach ($queries as $query) {
             $totalQueryTime += Numeric::arrayFloat($query, 'duration_ms');
         }
 
         return [
-            'queries' => self::$queries,
-            'transactions' => self::$transactions,
+            'queries' => $queries,
+            'transactions' => $transactions,
             'summary' => [
-                'query_count' => \count(self::$queries),
-                'transaction_event_count' => \count(self::$transactions),
+                'query_count' => count($queries),
+                'transaction_event_count' => count($transactions),
                 'total_query_time_ms' => round($totalQueryTime, 4),
             ],
         ];
@@ -368,7 +399,7 @@ final class Telemetry
     {
         $spans = [];
 
-        foreach (self::$queries as $query) {
+        foreach (self::orderedQueries() as $query) {
             $durationMs = Numeric::arrayFloat($query, 'duration_ms');
             $end = Numeric::arrayFloat($query, 'timestamp', microtime(true));
             $start = max(0.0, $end - ($durationMs / 1_000.0));
@@ -406,12 +437,35 @@ final class Telemetry
                 'scopeSpans' => [[
                     'scope' => [
                         'name' => 'infocyph.dblayer',
-                        'version' => '1.0.0',
                     ],
                     'spans' => $spans,
                 ]],
             ]],
         ];
+    }
+
+    /** @param array<string,mixed> $entry */
+    private static function appendQuery(array $entry): void
+    {
+        RingBuffer::append(
+            self::$queries,
+            self::$queryStart,
+            self::$queryCount,
+            self::$maxQueryEvents,
+            $entry,
+        );
+    }
+
+    /** @param array<string,mixed> $entry */
+    private static function appendTransaction(array $entry): void
+    {
+        RingBuffer::append(
+            self::$transactions,
+            self::$transactionStart,
+            self::$transactionCount,
+            self::$maxTransactionEvents,
+            $entry,
+        );
     }
 
     /**
@@ -425,7 +479,7 @@ final class Telemetry
             }
 
             self::$sequence++;
-            self::$queries[] = [
+            self::appendQuery([
                 'span_id' => 'q-' . self::$sequence,
                 'sql' => $event->sql,
                 'statement' => self::statementFromSql($event->sql),
@@ -434,10 +488,10 @@ final class Telemetry
                 'duration_ms' => $event->time,
                 'success' => true,
                 'rows_affected' => $event->rowsAffected,
-                'connection' => $event->connection->getDriverName(),
+                'connection' => $event->connection->getName(),
+                'driver' => $event->connection->getDriverName(),
                 'timestamp' => microtime(true),
-            ];
-            self::trimQueryBuffer();
+            ]);
         };
 
         self::$listeners['db.query.failed'] ??= static function (QueryFailed $event): void {
@@ -446,7 +500,7 @@ final class Telemetry
             }
 
             self::$sequence++;
-            self::$queries[] = [
+            self::appendQuery([
                 'span_id' => 'q-' . self::$sequence,
                 'sql' => self::REDACTED_VALUE,
                 'bindings_count' => \count($event->bindings),
@@ -454,15 +508,15 @@ final class Telemetry
                 'duration_ms' => $event->time,
                 'success' => false,
                 'rows_affected' => null,
-                'connection' => $event->connection->getDriverName(),
+                'connection' => $event->connection->getName(),
+                'driver' => $event->connection->getDriverName(),
                 'timestamp' => microtime(true),
                 'error' => self::REDACTED_VALUE,
                 'statement' => self::statementFromSql($event->sql),
                 'fingerprint' => self::queryFingerprint($event->sql),
                 'attempts' => $event->attempts,
                 'exception' => $event->exceptionClass,
-            ];
-            self::trimQueryBuffer();
+            ]);
         };
 
         self::$listeners['db.transaction.beginning'] ??= static function (TransactionBeginning $event): void {
@@ -470,13 +524,13 @@ final class Telemetry
                 return;
             }
 
-            self::$transactions[] = [
+            self::appendTransaction([
                 'event' => 'begin',
-                'connection' => $event->connection->getDriverName(),
+                'connection' => $event->connection->getName(),
+                'driver' => $event->connection->getDriverName(),
                 'duration_ms' => 0.0,
                 'timestamp' => $event->time,
-            ];
-            self::trimTransactionBuffer();
+            ]);
         };
 
         self::$listeners['db.transaction.committed'] ??= static function (TransactionCommitted $event): void {
@@ -484,13 +538,13 @@ final class Telemetry
                 return;
             }
 
-            self::$transactions[] = [
+            self::appendTransaction([
                 'event' => 'commit',
-                'connection' => $event->connection->getDriverName(),
+                'connection' => $event->connection->getName(),
+                'driver' => $event->connection->getDriverName(),
                 'duration_ms' => $event->duration,
                 'timestamp' => microtime(true),
-            ];
-            self::trimTransactionBuffer();
+            ]);
         };
 
         self::$listeners['db.transaction.rolled_back'] ??= static function (TransactionRolledBack $event): void {
@@ -498,13 +552,13 @@ final class Telemetry
                 return;
             }
 
-            self::$transactions[] = [
+            self::appendTransaction([
                 'event' => 'rollback',
-                'connection' => $event->connection->getDriverName(),
+                'connection' => $event->connection->getName(),
+                'driver' => $event->connection->getDriverName(),
                 'duration_ms' => $event->duration,
                 'timestamp' => microtime(true),
-            ];
-            self::trimTransactionBuffer();
+            ]);
         };
 
         foreach (self::$listeners as $event => $listener) {
@@ -565,15 +619,21 @@ final class Telemetry
         return substr(hash('sha256', $input), 0, $length);
     }
 
-    /**
-     * Normalize whitespace and remove DBLayer's optional leading SQL comment.
-     */
-    private static function normalizeSqlShape(string $sql): string
+    /** @return list<array<string,mixed>> */
+    private static function orderedQueries(): array
     {
-        $withoutComment = preg_replace('/\A\s*\/\*.*?\*\/\s*/s', '', $sql) ?? $sql;
-        $normalized = preg_replace('/\s+/', ' ', trim($withoutComment)) ?? $withoutComment;
+        return RingBuffer::ordered(self::$queries, self::$queryStart, self::$queryCount, self::$maxQueryEvents);
+    }
 
-        return strtolower($normalized);
+    /** @return list<array<string,mixed>> */
+    private static function orderedTransactions(): array
+    {
+        return RingBuffer::ordered(
+            self::$transactions,
+            self::$transactionStart,
+            self::$transactionCount,
+            self::$maxTransactionEvents,
+        );
     }
 
     /**
@@ -581,9 +641,7 @@ final class Telemetry
      */
     private static function queryFingerprint(string $sql): string
     {
-        $normalized = self::normalizeSqlShape($sql);
-
-        return self::hexHash($normalized, 16);
+        return SqlFingerprint::hash($sql);
     }
 
     /**
@@ -631,9 +689,7 @@ final class Telemetry
      */
     private static function statementFromSql(string $sql): string
     {
-        $normalized = self::normalizeSqlShape($sql);
-
-        return strtoupper(substr($normalized, 0, strcspn($normalized, " \t\n\r")));
+        return SqlStatementInspector::leadingStatementKeyword($sql);
     }
 
     /**
@@ -642,29 +698,5 @@ final class Telemetry
     private static function toUnixNano(float $seconds): int
     {
         return (int) round($seconds * 1_000_000_000);
-    }
-
-    /**
-     * Keep query buffer size within configured max.
-     */
-    private static function trimQueryBuffer(): void
-    {
-        $overflow = \count(self::$queries) - self::$maxQueryEvents;
-
-        if ($overflow > 0) {
-            array_splice(self::$queries, 0, $overflow);
-        }
-    }
-
-    /**
-     * Keep transaction buffer size within configured max.
-     */
-    private static function trimTransactionBuffer(): void
-    {
-        $overflow = \count(self::$transactions) - self::$maxTransactionEvents;
-
-        if ($overflow > 0) {
-            array_splice(self::$transactions, 0, $overflow);
-        }
     }
 }
