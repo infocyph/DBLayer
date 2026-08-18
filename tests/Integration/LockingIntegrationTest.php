@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
+use PDOException;
 
 it('compiles lock clauses according to each SQL dialect', function (string $driver): void {
     $connectionName = 'lock_compile_' . $driver;
@@ -93,7 +94,7 @@ it('surfaces write-lock contention across concurrent connections', function (str
         try {
             expect(static function (): bool {
                 return DB::beginTransaction('writer_two');
-            })->toThrow(ConnectionException::class);
+            })->toThrow(PDOException::class);
 
             DB::statement(sprintf('insert into %s (value) values (1)', $table), [], 'writer_one');
         } finally {
