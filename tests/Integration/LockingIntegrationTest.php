@@ -89,12 +89,13 @@ it('surfaces write-lock contention across concurrent connections', function (str
         ), [], 'writer_one');
 
         DB::beginTransaction('writer_one');
-        DB::statement(sprintf('insert into %s (value) values (1)', $table), [], 'writer_one');
 
         try {
-            expect(static function () use ($table): bool {
-                return DB::statement(sprintf('insert into %s (value) values (2)', $table), [], 'writer_two');
+            expect(static function (): bool {
+                return DB::beginTransaction('writer_two');
             })->toThrow(ConnectionException::class);
+
+            DB::statement(sprintf('insert into %s (value) values (1)', $table), [], 'writer_one');
         } finally {
             DB::rollBack('writer_one');
             DB::connection('writer_one')->disconnect();
