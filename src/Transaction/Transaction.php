@@ -106,7 +106,7 @@ final class Transaction
     public function begin(): void
     {
         if ($this->level === 0) {
-            $this->connection->beginNativeTransaction();
+            $this->beginTopLevel();
             $this->stats['total']++;
             $this->stats['in_transaction'] = true;
             $this->startedAt = microtime(true);
@@ -140,7 +140,7 @@ final class Transaction
             return;
         }
 
-        $this->connection->commitNativeTransaction();
+        $this->commitTopLevel();
         $durationMs = $this->transactionDurationMs();
         $this->stats['committed']++;
         $this->level = 0;
@@ -286,7 +286,7 @@ final class Transaction
             return;
         }
 
-        $this->connection->rollBackNativeTransaction();
+        $this->rollBackTopLevel();
         $durationMs = $this->transactionDurationMs();
         $this->discardAfterCommitCallbacks(1);
         $this->stats['rolled_back']++;
@@ -309,6 +309,17 @@ final class Transaction
         usleep($delay);
     }
 
+    private function beginTopLevel(): void
+    {
+        if ($this->connection->getDriverName() === 'sqlite') {
+            $this->connection->statement('BEGIN IMMEDIATE');
+
+            return;
+        }
+
+        $this->connection->beginNativeTransaction();
+    }
+
     /**
      * Determine if the given exception is a retryable transaction conflict.
      */
@@ -317,6 +328,17 @@ final class Transaction
         $driver = $this->connection->getDriverName();
 
         return DriverProfile::causedByRetryableTransactionError($driver, $e);
+    }
+
+    private function commitTopLevel(): void
+    {
+        if ($this->connection->getDriverName() === 'sqlite') {
+            $this->connection->statement('COMMIT');
+
+            return;
+        }
+
+        $this->connection->commitNativeTransaction();
     }
 
     /**
@@ -416,6 +438,17 @@ final class Transaction
         }
 
         $this->connection->statement('ROLLBACK TO SAVEPOINT trans_' . $level);
+    }
+
+    private function rollBackTopLevel(): void
+    {
+        if ($this->connection->getDriverName() === 'sqlite') {
+            $this->connection->statement('ROLLBACK');
+
+            return;
+        }
+
+        $this->connection->rollBackNativeTransaction();
     }
 
     /**
