@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Transaction;
 
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Driver\Contracts\TransactionBeginInterface;
 use Infocyph\DBLayer\Driver\Support\DriverProfile;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionBeginning;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionCommitted;
@@ -82,7 +83,7 @@ final class Transaction
     ) {}
 
     /**
-     * Run a callback after the surrounding top-level transaction commits.
+     * Run a callback after the surrounding top-level commit.
      *
      * Callbacks registered in a nested transaction are promoted when its
      * savepoint commits and discarded if that savepoint rolls back.
@@ -140,7 +141,7 @@ final class Transaction
             return;
         }
 
-        $this->commitTopLevel();
+        $this->connection->commitNativeTransaction();
         $durationMs = $this->transactionDurationMs();
         $this->stats['committed']++;
         $this->level = 0;
@@ -168,7 +169,17 @@ final class Transaction
 
         $attempt++;
 
-        $this->begin();
+        try {
+            $this->begin();
+        } catch (Throwable $e) {
+            if ($attempt < $attempts && $this->causedByRetryableTransactionError($e)) {
+                $this->stats['deadlocks']++;
+                $this->backoff($attempt);
+                goto beginning;
+            }
+
+            throw TransactionException::failed($e);
+        }
 
         try {
             $result = $callback($this->connection);
@@ -286,7 +297,7 @@ final class Transaction
             return;
         }
 
-        $this->rollBackTopLevel();
+        $this->connection->rollBackNativeTransaction();
         $durationMs = $this->transactionDurationMs();
         $this->discardAfterCommitCallbacks(1);
         $this->stats['rolled_back']++;
@@ -311,8 +322,10 @@ final class Transaction
 
     private function beginTopLevel(): void
     {
-        if ($this->connection->getDriverName() === 'sqlite') {
-            $this->connection->statement('BEGIN IMMEDIATE');
+        $driver = $this->connection->getDriver();
+
+        if ($driver instanceof TransactionBeginInterface) {
+            $driver->beginTransaction($this->connection->getPdo());
 
             return;
         }
@@ -328,17 +341,6 @@ final class Transaction
         $driver = $this->connection->getDriverName();
 
         return DriverProfile::causedByRetryableTransactionError($driver, $e);
-    }
-
-    private function commitTopLevel(): void
-    {
-        if ($this->connection->getDriverName() === 'sqlite') {
-            $this->connection->statement('COMMIT');
-
-            return;
-        }
-
-        $this->connection->commitNativeTransaction();
     }
 
     /**
@@ -438,17 +440,6 @@ final class Transaction
         }
 
         $this->connection->statement('ROLLBACK TO SAVEPOINT trans_' . $level);
-    }
-
-    private function rollBackTopLevel(): void
-    {
-        if ($this->connection->getDriverName() === 'sqlite') {
-            $this->connection->statement('ROLLBACK');
-
-            return;
-        }
-
-        $this->connection->rollBackNativeTransaction();
     }
 
     /**
