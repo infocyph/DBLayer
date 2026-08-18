@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Transaction;
 
 use Infocyph\DBLayer\Connection\Connection;
-use Infocyph\DBLayer\Driver\Contracts\TransactionBeginInterface;
 use Infocyph\DBLayer\Driver\Support\DriverProfile;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionBeginning;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionCommitted;
@@ -83,7 +82,7 @@ final class Transaction
     ) {}
 
     /**
-     * Run a callback after the surrounding top-level commit.
+     * Run a callback after the surrounding top-level transaction commits.
      *
      * Callbacks registered in a nested transaction are promoted when its
      * savepoint commits and discarded if that savepoint rolls back.
@@ -322,15 +321,7 @@ final class Transaction
 
     private function beginTopLevel(): void
     {
-        $driver = $this->connection->getDriver();
-
-        if ($driver instanceof TransactionBeginInterface) {
-            $driver->beginTransaction($this->connection->getPdo());
-
-            return;
-        }
-
-        $this->connection->beginNativeTransaction();
+        $this->connection->getDriver()->beginTransaction($this->connection->getPdo());
     }
 
     /**
