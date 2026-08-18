@@ -26,6 +26,11 @@ interface DriverInterface
     public function applyStatementTimeout(PDO $pdo, int $timeoutMs): void;
 
     /**
+     * Begin a top-level transaction using driver-native semantics.
+     */
+    public function beginTransaction(PDO $pdo): bool;
+
+    /**
      * Compile a read-only SELECT execution-plan statement.
      */
     public function compileExplain(
