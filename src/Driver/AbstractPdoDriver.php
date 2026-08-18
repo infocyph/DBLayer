@@ -121,6 +121,12 @@ abstract class AbstractPdoDriver implements DriverInterface
     }
 
     #[\Override]
+    public function beginTransaction(PDO $pdo): bool
+    {
+        return $pdo->beginTransaction();
+    }
+
+    #[\Override]
     final public function createCompiler(): QueryCompilerInterface
     {
         $compilerClass = static::COMPILER_CLASS;
