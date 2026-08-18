@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Driver\SQLite;
 
 use Infocyph\DBLayer\Driver\AbstractPdoDriver;
+use Infocyph\DBLayer\Driver\Contracts\TransactionBeginInterface;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use PDO;
@@ -15,7 +16,7 @@ use PDOException;
  *
  * Supports file-based and in-memory databases.
  */
-final class SQLiteDriver extends AbstractPdoDriver
+final class SQLiteDriver extends AbstractPdoDriver implements TransactionBeginInterface
 {
     protected const array CAPABILITIES = parent::CAPABILITIES_SQLITE;
 
@@ -35,6 +36,12 @@ final class SQLiteDriver extends AbstractPdoDriver
         } catch (PDOException) {
             // SQLite exposes lock-wait timeout only; DBLayer tracks execution budget.
         }
+    }
+
+    #[\Override]
+    public function beginTransaction(PDO $pdo): bool
+    {
+        return $pdo->exec('BEGIN IMMEDIATE') !== false;
     }
 
     #[\Override]
