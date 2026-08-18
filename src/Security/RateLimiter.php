@@ -10,7 +10,7 @@ use Infocyph\DBLayer\Exceptions\SecurityException;
  * Rate Limiter
  *
  * Lightweight, process-local rate limiting for database operations.
- * Uses integer time buckets for performance (no date() formatting).
+ * Uses fixed windows anchored to the first request for each key/TTL pair.
  *
  * NOTE: This is per-PHP-process / worker; it is not a distributed limiter.
  */
@@ -21,12 +21,12 @@ final class RateLimiter
     /**
      * Expiration timestamps keyed identically to storage.
      *
-     * @var array<string, int>
+     * @var array<string,float>
      */
     private array $expiresAt = [];
 
     /**
-     * @var array<string, int>
+     * @var array<string,int>
      */
     private array $storage = [];
 
@@ -53,9 +53,12 @@ final class RateLimiter
             return;
         }
 
-        $now = time();
-        $bucket = intdiv($now, $ttlSeconds);
-        $storageKey = $key . ':' . $ttlSeconds . ':' . $bucket;
+        $now = microtime(true);
+        $storageKey = $this->storageKey($key, $ttlSeconds);
+
+        if (isset($this->expiresAt[$storageKey]) && $this->expiresAt[$storageKey] <= $now) {
+            unset($this->storage[$storageKey], $this->expiresAt[$storageKey]);
+        }
 
         if (!isset($this->storage[$storageKey]) && \count($this->storage) >= $this->maxEntries) {
             $this->purgeExpired($now);
@@ -65,9 +68,14 @@ final class RateLimiter
             }
         }
 
-        $count = ($this->storage[$storageKey] ?? 0) + 1;
-        $this->storage[$storageKey] = $count;
-        $this->expiresAt[$storageKey] = ($bucket + 1) * $ttlSeconds;
+        if (!isset($this->storage[$storageKey])) {
+            $this->storage[$storageKey] = 1;
+            $this->expiresAt[$storageKey] = $now + $ttlSeconds;
+
+            return;
+        }
+
+        $count = ++$this->storage[$storageKey];
 
         if ($count > $maxAttempts) {
             throw SecurityException::rateLimitExceeded($key, $maxAttempts, $ttlSeconds);
@@ -92,8 +100,14 @@ final class RateLimiter
             return 0;
         }
 
-        $bucket = intdiv(time(), $ttlSeconds);
-        $storageKey = $key . ':' . $ttlSeconds . ':' . $bucket;
+        $storageKey = $this->storageKey($key, $ttlSeconds);
+        $expiresAt = $this->expiresAt[$storageKey] ?? null;
+
+        if ($expiresAt === null || $expiresAt <= microtime(true)) {
+            unset($this->storage[$storageKey], $this->expiresAt[$storageKey]);
+
+            return 0;
+        }
 
         return $this->storage[$storageKey] ?? 0;
     }
@@ -105,7 +119,7 @@ final class RateLimiter
      */
     public function getStats(): array
     {
-        $this->purgeExpired(time());
+        $this->purgeExpired(microtime(true));
 
         return [
             'total_keys' => count($this->storage),
@@ -114,7 +128,7 @@ final class RateLimiter
     }
 
     /**
-     * Reset rate limit for a key (across all windows / TTL buckets).
+     * Reset rate limit for a key (across all windows / TTL values).
      */
     public function reset(string $key): void
     {
@@ -129,9 +143,9 @@ final class RateLimiter
     }
 
     /**
-     * Remove buckets that can no longer affect rate-limit decisions.
+     * Remove windows that can no longer affect rate-limit decisions.
      */
-    private function purgeExpired(int $now): void
+    private function purgeExpired(float $now): void
     {
         foreach ($this->expiresAt as $storageKey => $expiresAt) {
             if ($expiresAt > $now) {
@@ -140,5 +154,10 @@ final class RateLimiter
 
             unset($this->expiresAt[$storageKey], $this->storage[$storageKey]);
         }
+    }
+
+    private function storageKey(string $key, int $ttlSeconds): string
+    {
+        return $key . ':' . $ttlSeconds;
     }
 }

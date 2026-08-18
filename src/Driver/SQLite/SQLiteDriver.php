@@ -38,6 +38,12 @@ final class SQLiteDriver extends AbstractPdoDriver
     }
 
     #[\Override]
+    public function beginTransaction(PDO $pdo): bool
+    {
+        return $pdo->exec('BEGIN IMMEDIATE') !== false;
+    }
+
+    #[\Override]
     public function compileExplain(
         string $sql,
         bool $analyze = false,

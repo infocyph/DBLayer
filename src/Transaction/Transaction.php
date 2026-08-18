@@ -106,7 +106,7 @@ final class Transaction
     public function begin(): void
     {
         if ($this->level === 0) {
-            $this->connection->beginNativeTransaction();
+            $this->beginTopLevel();
             $this->stats['total']++;
             $this->stats['in_transaction'] = true;
             $this->startedAt = microtime(true);
@@ -168,7 +168,17 @@ final class Transaction
 
         $attempt++;
 
-        $this->begin();
+        try {
+            $this->begin();
+        } catch (Throwable $e) {
+            if ($attempt < $attempts && $this->causedByRetryableTransactionError($e)) {
+                $this->stats['deadlocks']++;
+                $this->backoff($attempt);
+                goto beginning;
+            }
+
+            throw TransactionException::failed($e);
+        }
 
         try {
             $result = $callback($this->connection);
@@ -307,6 +317,11 @@ final class Transaction
         $delay = self::BASE_BACKOFF_US * max(1, $attempt);
 
         usleep($delay);
+    }
+
+    private function beginTopLevel(): void
+    {
+        $this->connection->getDriver()->beginTransaction($this->connection->getPdo());
     }
 
     /**
