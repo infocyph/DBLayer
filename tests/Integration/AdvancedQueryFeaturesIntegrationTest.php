@@ -23,11 +23,15 @@ it('compiles structured source and join aliases without raw identifier strings',
         ->joinAs($users, 'u', 'o.user_id', '=', 'u.id')
         ->addSelectAs('o.id', 'order_id')
         ->addSelectAs('u.name', 'user_name');
-    $identifierQuote = $schemaDriver === 'mysql' ? '`' : '"';
+    [$identifierOpen, $identifierClose] = match ($schemaDriver) {
+        'mysql', 'mariadb' => ['`', '`'],
+        'mssql' => ['[', ']'],
+        default => ['"', '"'],
+    };
 
     expect($query->toSql())
-        ->toContain(" AS {$identifierQuote}o{$identifierQuote}")
-        ->toContain(" AS {$identifierQuote}u{$identifierQuote}")
+        ->toContain(" AS {$identifierOpen}o{$identifierClose}")
+        ->toContain(" AS {$identifierOpen}u{$identifierClose}")
         ->and($query->get())->toBe([['order_id' => 1, 'user_name' => 'Alice']]);
 
     expect(fn() => DB::table($orders . ' as o', $connection))
