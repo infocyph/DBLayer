@@ -82,7 +82,10 @@ abstract class AbstractMySqlMonitor extends AbstractDatabaseMonitor
         );
     }
 
-    /** @param list<array<string,mixed>> $rows @return array<string,mixed> */
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return array<string,mixed>
+     */
     private function variables(array $rows): array
     {
         $values = [];
