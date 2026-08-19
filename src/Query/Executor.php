@@ -65,68 +65,30 @@ final class Executor
         return $this->runCompiledObserved($compiled)->rowCount;
     }
 
-    public function disableBindingValidation(): void
-    {
-        $this->validateBindings = false;
-    }
-
-    public function disableEvents(): void
-    {
-        $this->dispatchEvents = false;
-    }
-
-    public function disableQueryLog(): void
-    {
-        $this->logging = false;
-    }
-
-    public function enableBindingValidation(): void
-    {
-        $this->validateBindings = true;
-    }
-
-    public function enableEvents(): void
-    {
-        $this->dispatchEvents = true;
-    }
-
-    public function enableQueryLog(): void
-    {
-        $this->logging = true;
-    }
+    public function disableBindingValidation(): void { $this->validateBindings = false; }
+    public function disableEvents(): void { $this->dispatchEvents = false; }
+    public function disableQueryLog(): void { $this->logging = false; }
+    public function enableBindingValidation(): void { $this->validateBindings = true; }
+    public function enableEvents(): void { $this->dispatchEvents = true; }
+    public function enableQueryLog(): void { $this->logging = true; }
 
     /** @return list<array{sql:string,bindings:list<mixed>,time:float,timestamp:float,error:string}> */
     public function getFailedQueries(): array
     {
-        $logs = $this->getQueryLog();
-
         /** @var list<array{sql:string,bindings:list<mixed>,time:float,timestamp:float,error:string}> $failed */
-        $failed = \array_filter(
-            $logs,
-            static fn(array $log): bool => isset($log['error']),
-        );
+        $failed = \array_filter($this->getQueryLog(), static fn(array $log): bool => isset($log['error']));
 
         return $failed;
     }
 
     /** @return list<array{sql:string,bindings:list<mixed>,time:float,timestamp:float,error?:string}> */
-    public function getQueryLog(): array
-    {
-        return $this->orderedQueryLog();
-    }
+    public function getQueryLog(): array { return $this->orderedQueryLog(); }
 
     /** @return array{total_queries:int,total_time:float,avg_time:float,min_time:float,max_time:float,failed_queries:int} */
     public function getQueryStats(): array
     {
         if ($this->queryLogCount === 0) {
-            return [
-                'total_queries' => 0,
-                'total_time' => 0.0,
-                'avg_time' => 0.0,
-                'min_time' => 0.0,
-                'max_time' => 0.0,
-                'failed_queries' => 0,
-            ];
+            return ['total_queries' => 0, 'total_time' => 0.0, 'avg_time' => 0.0, 'min_time' => 0.0, 'max_time' => 0.0, 'failed_queries' => 0];
         }
 
         $logs = $this->getQueryLog();
@@ -134,14 +96,7 @@ final class Executor
         $failed = $this->getFailedQueries();
 
         if ($times === []) {
-            return [
-                'total_queries' => $this->queryLogCount,
-                'total_time' => 0.0,
-                'avg_time' => 0.0,
-                'min_time' => 0.0,
-                'max_time' => 0.0,
-                'failed_queries' => \count($failed),
-            ];
+            return ['total_queries' => $this->queryLogCount, 'total_time' => 0.0, 'avg_time' => 0.0, 'min_time' => 0.0, 'max_time' => 0.0, 'failed_queries' => \count($failed)];
         }
 
         $totalTime = \array_sum($times);
@@ -161,10 +116,7 @@ final class Executor
     public function getSlowestQueries(int $limit = 10): array
     {
         $queries = $this->getQueryLog();
-        \usort(
-            $queries,
-            static fn(array $a, array $b): int => $b['time'] <=> $a['time'],
-        );
+        \usort($queries, static fn(array $a, array $b): int => $b['time'] <=> $a['time']);
 
         return \array_slice($queries, 0, $limit);
     }
@@ -185,9 +137,8 @@ final class Executor
                 $successful = true;
 
                 foreach (array_chunk($rows, $batchSize) as $batch) {
-                    if (!$this->insert($query, $batch)) {
-                        $successful = false;
-                    }
+                    $batchSucceeded = $this->insert($query, $batch);
+                    $successful = $successful && $batchSucceeded;
                 }
 
                 return $successful;
@@ -238,21 +189,14 @@ final class Executor
             throw QueryException::unsupportedCapability('insertIgnore', $this->connection->getDriverName());
         }
 
-        $compiled = $this->connection->getCompiler()->compile(
-            $query->toInsertPayload($rows, mode: 'ignore'),
-        );
+        $compiled = $this->connection->getCompiler()->compile($query->toInsertPayload($rows, mode: 'ignore'));
 
         return $this->runCompiledObserved($compiled)->rowCount > 0;
     }
 
-    /**
-     * @param array<int,array<string,mixed>>|array<string,mixed> $values
-     */
-    public function insertReturningResult(
-        QueryBuilder $query,
-        array $values,
-        ?string $column = null,
-    ): DriverResult {
+    /** @param array<int,array<string,mixed>>|array<string,mixed> $values */
+    public function insertReturningResult(QueryBuilder $query, array $values, ?string $column = null): DriverResult
+    {
         $rows = $this->normalizeInsertValues($values);
 
         if ($rows === []) {
@@ -262,23 +206,16 @@ final class Executor
         $column ??= 'id';
 
         if ($this->connection->capabilities()->supportsReturning) {
-            $compiled = $this->connection->getCompiler()->compile(
-                $query->toInsertPayload($rows, returning: [$column]),
-            );
+            $compiled = $this->connection->getCompiler()->compile($query->toInsertPayload($rows, returning: [$column]));
 
             return $this->runCompiledObserved($compiled);
         }
 
         if (count($rows) !== 1) {
-            throw QueryException::invalidParameter(
-                'insertReturning',
-                'Bulk INSERT RETURNING requires native driver support.',
-            );
+            throw QueryException::invalidParameter('insertReturning', 'Bulk INSERT RETURNING requires native driver support.');
         }
 
-        return $this->runCompiledObserved(
-            $this->connection->getCompiler()->compile($query->toInsertPayload($rows)),
-        );
+        return $this->runCompiledObserved($this->connection->getCompiler()->compile($query->toInsertPayload($rows)));
     }
 
     /** @param array<int|string,mixed> $bindings @return list<array<string,mixed>> */
@@ -315,10 +252,7 @@ final class Executor
     }
 
     /** @return list<array<string,mixed>> */
-    public function select(QueryBuilder $query): array
-    {
-        return $this->selectCompiled($this->compileSelect($query));
-    }
+    public function select(QueryBuilder $query): array { return $this->selectCompiled($this->compileSelect($query)); }
 
     /** @return list<array<string,mixed>> */
     public function selectCompiled(CompiledQuery $compiled): array
