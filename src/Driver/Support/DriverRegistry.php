@@ -16,51 +16,41 @@ use InvalidArgumentException;
  */
 final class DriverRegistry
 {
-    /**
-     * Cached driver instances.
-     *
-     * @var array<string,DriverInterface>
-     */
+    /** @var array<string,DriverInterface> */
     private static array $cache = [];
 
-    /**
-     * Driver name → class map.
-     *
-     * @var array<string,class-string<DriverInterface>>
-     */
+    /** @var array<string,class-string<DriverInterface>> */
     private static array $map = [
-        // defaults; concrete classes implemented in driver sub-namespaces
         'mysql' => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
-        'mariadb' => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
+        'pdo_mysql' => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
+        'mysqli' => \Infocyph\DBLayer\Driver\MySQL\MySQLDriver::class,
+        'mariadb' => \Infocyph\DBLayer\Driver\MariaDB\MariaDBDriver::class,
         'pgsql' => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
         'postgres' => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
+        'postgresql' => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
+        'psql' => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
+        'pdo_pgsql' => \Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver::class,
+        'mssql' => \Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver::class,
+        'sqlsrv' => \Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver::class,
+        'sqlserver' => \Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver::class,
+        'pdo_sqlsrv' => \Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver::class,
         'sqlite' => \Infocyph\DBLayer\Driver\SQLite\SQLiteDriver::class,
         'sqlite3' => \Infocyph\DBLayer\Driver\SQLite\SQLiteDriver::class,
+        'pdo_sqlite' => \Infocyph\DBLayer\Driver\SQLite\SQLiteDriver::class,
     ];
 
-    /**
-     * Clear cached driver instances (keeps the map).
-     */
     public static function clearCache(): void
     {
         self::$cache = [];
     }
 
-    /**
-     * Get currently registered driver names.
-     *
-     * @return list<string>
-     */
+    /** @return list<string> */
     public static function names(): array
     {
         return array_keys(self::$map);
     }
 
-    /**
-     * Register or override a driver.
-     *
-     * @param class-string<DriverInterface> $class
-     */
+    /** @param class-string<DriverInterface> $class */
     public static function register(string $name, string $class): void
     {
         $name = strtolower($name);
@@ -77,9 +67,6 @@ final class DriverRegistry
         unset(self::$cache[$name]);
     }
 
-    /**
-     * Resolve a driver implementation by logical name.
-     */
     public static function resolve(string $driver): DriverInterface
     {
         $driver = strtolower($driver);
@@ -93,7 +80,6 @@ final class DriverRegistry
         }
 
         $class = self::$map[$driver];
-
         $instance = new $class();
 
         return self::$cache[$driver] = $instance;
