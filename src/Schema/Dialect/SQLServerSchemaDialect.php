@@ -37,34 +37,31 @@ final class SQLServerSchemaDialect extends SchemaDialect
     #[\Override] public function compileDropPrimary(string $table, ?string $name): string
     {
         $name ??= $this->defaultPrimaryName($table);
-        return sprintf('ALTER TABLE %s DROP CONSTRAINT %s', $this->wrap($table), $this->wrap((string) $name));
+        return sprintf('ALTER TABLE %s DROP CONSTRAINT %s', $this->wrap($table), $this->wrap($name));
     }
     #[\Override] public function beforeDropAllStatements(): array
     {
         return ["DECLARE @dblayer_sql nvarchar(max) = N''; SELECT @dblayer_sql += N'ALTER TABLE ' + QUOTENAME(SCHEMA_NAME(t.schema_id)) + N'.' + QUOTENAME(t.name) + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';' FROM sys.foreign_keys fk JOIN sys.tables t ON t.object_id = fk.parent_object_id WHERE t.is_ms_shipped = 0; IF @dblayer_sql <> N'' EXEC sp_executesql @dblayer_sql"];
     }
-    #[\Override] public function defaultPrimaryName(string $table): ?string
+    #[\Override] public function defaultPrimaryName(string $table): string
     {
         $name = strtolower(str_replace('.', '_', $table) . '_primary'); $max = $this->maxIdentifierLength();
-        if ($max === null || strlen($name) <= $max) { return $name; }
+        if (strlen($name) <= $max) { return $name; }
         $hash = '_' . substr(hash('xxh3', $name), 0, 8);
         return substr($name, 0, $max - strlen($hash)) . $hash;
     }
-    #[\Override] public function maxIdentifierLength(): ?int { return 128; }
+    #[\Override] public function maxIdentifierLength(): int { return 128; }
     #[\Override] public function normalizeForeignAction(string $action): string { return $action === 'RESTRICT' ? 'NO ACTION' : $action; }
     #[\Override] public function columnExistsQuery(?string $namespace, string $table, string $column, string $database): array
     {
-        unset($database);
         return ['sql' => "SELECT TOP (1) 1 FROM information_schema.columns WHERE table_schema = COALESCE(?, 'dbo') AND table_name = ? AND column_name = ?", 'bindings' => [$namespace, $table, $column], 'key' => null, 'value' => null];
     }
     #[\Override] public function tableExistsQuery(?string $namespace, string $table, string $database): array
     {
-        unset($database);
         return ['sql' => "SELECT TOP (1) 1 FROM information_schema.tables WHERE table_schema = COALESCE(?, 'dbo') AND table_name = ?", 'bindings' => [$namespace, $table], 'key' => null, 'value' => null];
     }
     #[\Override] public function tablesQuery(string $database): array
     {
-        unset($database);
         return ['sql' => "SELECT table_schema + '.' + table_name AS qualified_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('sys', 'INFORMATION_SCHEMA')", 'bindings' => [], 'key' => 'qualified_name'];
     }
 }
