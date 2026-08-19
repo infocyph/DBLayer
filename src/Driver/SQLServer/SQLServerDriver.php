@@ -36,16 +36,13 @@ final class SQLServerDriver extends AbstractPdoDriver
     ];
 
     protected const string DRIVER_NAME = 'mssql';
-
     protected const array NETWORK_REQUIRED = ['database', 'host', 'username'];
-
-    protected const ?string TLS_REQUIREMENT_MESSAGE = 'Driver [{driver}] requires encrypted transport. '
-        . 'Set encrypt=true and trust_server_certificate=false for verified TLS.';
+    protected const ?string TLS_REQUIREMENT_MESSAGE = 'Driver [{driver}] requires encrypted transport. Set encrypt=true and trust_server_certificate=false for verified TLS.';
 
     #[\Override]
     public function applyReadOnlyTransaction(PDO $pdo): void
     {
-        // SQL Server read-only routing is expressed through ApplicationIntent.
+        unset($pdo);
     }
 
     #[\Override]
@@ -62,7 +59,6 @@ final class SQLServerDriver extends AbstractPdoDriver
             $attribute = constant('PDO::SQLSRV_ATTR_QUERY_TIMEOUT');
             $pdo->setAttribute($attribute, $seconds);
         } catch (Throwable) {
-            // Native enforcement is best effort; DBLayer still tracks its budget.
         }
     }
 
@@ -74,32 +70,22 @@ final class SQLServerDriver extends AbstractPdoDriver
         bool $verbose = false,
         ?string $serverVersion = null,
     ): string {
+        unset($sql, $analyze, $buffers, $verbose, $serverVersion);
+
         throw QueryException::invalidParameter(
             'explain',
-            'SQL Server execution plans require Connection::explain() because '
-                . 'SHOWPLAN/STATISTICS modes are session scoped.',
+            'SQL Server execution plans require Connection::explain() because SHOWPLAN/STATISTICS modes are session scoped.',
         );
     }
 
     /**
-     * Execute SQL Server estimated/actual XML plan collection on one PDO session.
-     *
      * @param array<int|string,mixed> $bindings
      * @return list<array<string,mixed>>
      */
-    public function executeExplain(
-        PDO $pdo,
-        string $sql,
-        array $bindings,
-        bool $analyze = false,
-        bool $buffers = false,
-        bool $verbose = false,
-    ): array {
+    public function executeExplain(PDO $pdo, string $sql, array $bindings, bool $analyze = false, bool $buffers = false, bool $verbose = false): array
+    {
         if ($buffers || $verbose) {
-            throw QueryException::invalidParameter(
-                'explain',
-                'SQL Server does not map PostgreSQL buffers/verbose EXPLAIN options.',
-            );
+            throw QueryException::invalidParameter('explain', 'SQL Server does not map PostgreSQL buffers/verbose EXPLAIN options.');
         }
 
         $mode = $analyze ? 'STATISTICS XML' : 'SHOWPLAN_XML';
@@ -108,9 +94,7 @@ final class SQLServerDriver extends AbstractPdoDriver
         try {
             $statement = $pdo->prepare($sql);
             if (!$statement instanceof PDOStatement) {
-                throw ConnectionException::invalidConfiguration(
-                    'Unable to prepare SQL Server execution-plan statement.',
-                );
+                throw ConnectionException::invalidConfiguration('Unable to prepare SQL Server execution-plan statement.');
             }
 
             foreach ($bindings as $key => $value) {
@@ -136,7 +120,6 @@ final class SQLServerDriver extends AbstractPdoDriver
             try {
                 $pdo->exec('SET ' . $mode . ' OFF');
             } catch (PDOException) {
-                // Preserve the original explain failure if cleanup also fails.
             }
         }
     }
@@ -157,18 +140,7 @@ final class SQLServerDriver extends AbstractPdoDriver
         $this->rejectUnsupportedSettings(
             $config,
             $driver,
-            [
-                'charset',
-                'collation',
-                'unix_socket',
-                'ssl_ca',
-                'ssl_cert',
-                'ssl_key',
-                'ssl_verify_server_cert',
-                'sslmode',
-                'schema',
-                'read_session_read_only',
-            ],
+            ['charset', 'collation', 'unix_socket', 'ssl_ca', 'ssl_cert', 'ssl_key', 'ssl_verify_server_cert', 'sslmode', 'schema', 'read_session_read_only'],
         );
         $this->requireOptionalBooleanSetting($config, 'encrypt', $driver);
         $this->requireOptionalBooleanSetting($config, 'trust_server_certificate', $driver);
@@ -176,10 +148,7 @@ final class SQLServerDriver extends AbstractPdoDriver
 
         $intent = $config['application_intent'] ?? 'ReadWrite';
         if (!is_string($intent) || !in_array(strtolower($intent), ['readonly', 'readwrite'], true)) {
-            $this->throwInvalidConfiguration(
-                $driver,
-                "Config key 'application_intent' must be ReadOnly or ReadWrite for driver 'mssql'.",
-            );
+            $this->throwInvalidConfiguration($driver, "Config key 'application_intent' must be ReadOnly or ReadWrite for driver 'mssql'.");
         }
     }
 
@@ -192,9 +161,7 @@ final class SQLServerDriver extends AbstractPdoDriver
         $database = $this->stringOrDefault($config['database'] ?? null, '');
         $encrypt = (bool) ($config['encrypt'] ?? true);
         $trust = (bool) ($config['trust_server_certificate'] ?? false);
-        $intent = $readOnly
-            ? 'ReadOnly'
-            : $this->normalizeApplicationIntent($config['application_intent'] ?? 'ReadWrite');
+        $intent = $readOnly ? 'ReadOnly' : $this->normalizeApplicationIntent($config['application_intent'] ?? 'ReadWrite');
 
         $parts = [
             'Server=' . $host . ',' . $port,
@@ -211,27 +178,18 @@ final class SQLServerDriver extends AbstractPdoDriver
         return 'sqlsrv:' . implode(';', $parts);
     }
 
-    /** @param array<string,mixed> $config */
     #[\Override]
     protected function hasRequiredTlsConfiguration(array $config): bool
     {
         return (bool) ($config['encrypt'] ?? true);
     }
 
-    /** @param array<string,mixed> $config */
     #[\Override]
     protected function isTlsEnforcedForConfig(array $config): bool
     {
         return $this->isTlsRequired($config);
     }
 
-    /**
-     * SQLSRV consumes the connection timeout from LoginTimeout in the DSN.
-     *
-     * @param array<int,mixed> $options
-     * @param array<string,mixed> $config
-     * @return array<int,mixed>
-     */
     #[\Override]
     protected function applyDerivedOptions(array $options, array $config): array
     {
@@ -243,11 +201,7 @@ final class SQLServerDriver extends AbstractPdoDriver
     /** @param array<string,mixed> $row */
     private function containsShowplanXml(array $row): bool
     {
-        return array_any(
-            $row,
-            static fn(mixed $value): bool => is_string($value)
-                && stripos($value, '<ShowPlanXML') !== false,
-        );
+        return array_any($row, static fn(mixed $value): bool => is_string($value) && stripos($value, '<ShowPlanXML') !== false);
     }
 
     private function normalizeApplicationIntent(mixed $intent): string
