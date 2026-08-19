@@ -65,10 +65,11 @@ abstract class AbstractDatabaseMonitor
         return $rows;
     }
 
+    /** @param array<int|string,mixed> $bindings */
     final protected function scalar(string $sql, array $bindings = []): mixed
     {
-        $row = $this->query($sql, $bindings)[0] ?? null;
-        if (!is_array($row) || $row === []) {
+        $row = $this->query($sql, $bindings)[0] ?? [];
+        if ($row === []) {
             return null;
         }
 
