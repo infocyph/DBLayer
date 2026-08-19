@@ -9,11 +9,9 @@ final class SQLServerMonitor extends AbstractDatabaseMonitor
     #[\Override]
     public function status(): array
     {
-        $row = $this->query(
+        return $this->query(
             "SELECT CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)) AS server_version, CAST(SERVERPROPERTY('ProductLevel') AS nvarchar(128)) AS product_level, CAST(SERVERPROPERTY('Edition') AS nvarchar(128)) AS edition, DB_NAME() AS database_name, @@SPID AS connection_id, CAST(DATABASEPROPERTYEX(DB_NAME(), 'Status') AS nvarchar(128)) AS database_status, CAST(DATABASEPROPERTYEX(DB_NAME(), 'Updateability') AS nvarchar(128)) AS updateability, (SELECT SUM(CAST(size AS bigint)) * 8192 FROM sys.database_files) AS database_bytes",
         )[0] ?? [];
-
-        return is_array($row) ? $row : [];
     }
 
     #[\Override]
