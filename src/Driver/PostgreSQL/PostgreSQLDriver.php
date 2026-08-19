@@ -73,8 +73,6 @@ final class PostgreSQLDriver extends AbstractPdoDriver
         bool $verbose = false,
         ?string $serverVersion = null,
     ): string {
-        unset($serverVersion);
-
         if ($buffers && !$analyze) {
             throw QueryException::invalidParameter(
                 'buffers',
@@ -165,8 +163,6 @@ final class PostgreSQLDriver extends AbstractPdoDriver
     #[\Override]
     protected function buildDsn(array $config, bool $readOnly): string
     {
-        unset($readOnly); // handled at transaction-level
-
         $database = $this->stringOrDefault($config['database'] ?? null, '');
         $host = $this->stringOrDefault($config['host'] ?? null, '127.0.0.1');
         $port = $this->intOrDefault($config['port'] ?? null, 5432);
