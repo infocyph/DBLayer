@@ -195,13 +195,12 @@ it('matches multi connections example flow', function (string $driver): void {
     ), [], 'reporting');
 
     DB::table($usersTable, 'main')->insert([
-        'id' => 1,
         'email' => 'hasan@example.com',
     ]);
 
     DB::table($eventsTable, 'reporting')->insert([
-        ['id' => 1, 'user_id' => 1, 'event' => 'signup', 'occurred_at' => '2025-01-01 00:00:00'],
-        ['id' => 2, 'user_id' => 1, 'event' => 'login', 'occurred_at' => '2025-01-02 00:00:00'],
+        ['user_id' => 1, 'event' => 'signup', 'occurred_at' => '2025-01-01 00:00:00'],
+        ['user_id' => 1, 'event' => 'login', 'occurred_at' => '2025-01-02 00:00:00'],
     ]);
 
     /** @var Connection $main */
