@@ -39,6 +39,7 @@ final class ConnectionConfig
         'raw_sql_policy' => 'allow', 'raw_sql_allowlist' => [],
     ];
 
+    /** @var array<string,mixed> */
     private array $config;
 
     /** @param array<string,mixed> $config */
@@ -48,6 +49,7 @@ final class ConnectionConfig
             $config['driver'] = $this->normalizeDriverName($config['driver']);
         }
 
+        /** @var array<string,mixed> $config */
         $config = array_replace(self::DEFAULTS, $config);
         $config['read_strategy'] = $this->normalizeReadStrategy($config['read_strategy'] ?? 'random');
         $config['security'] = array_replace(self::SECURITY_DEFAULT, $this->normalizeStringKeyArray($config['security'] ?? []));
@@ -56,7 +58,7 @@ final class ConnectionConfig
             'driver' => 'string', 'database' => 'string', 'options' => 'array', 'write' => 'array',
             'read' => 'array', 'security' => 'array',
         ]);
-        $this->validateSecurityConfig($config['security']);
+        $this->validateSecurityConfig($this->normalizeStringKeyArray($config['security']));
 
         $driver = $this->resolveDriver($config['driver'] ?? null);
         if ($driver instanceof DriverInterface) {
@@ -64,11 +66,12 @@ final class ConnectionConfig
         }
 
         foreach (['read', 'write'] as $replicaKey) {
-            $config[$replicaKey] = $this->expandReplicaHostVariants(
+            $replicas = $this->expandReplicaHostVariants(
                 $this->normalizeReplicaConfigs($this->requireReplicaArray($config[$replicaKey] ?? [], $replicaKey)),
             );
+            $config[$replicaKey] = $replicas;
 
-            foreach ($config[$replicaKey] as $replica) {
+            foreach ($replicas as $replica) {
                 $this->validateReplicaDescriptor($replica, $replicaKey);
                 $driver?->validateConfig(array_replace($config, $replica, ['read' => [], 'write' => []]));
             }
@@ -115,7 +118,12 @@ final class ConnectionConfig
         $v = $this->config['read_probe_sample_size'] ?? 0;
         return (!is_int($v) && !is_numeric($v)) ? 0 : max(0, (int) $v);
     }
-    public function getReadStrategy(): string { return (string) $this->config['read_strategy']; }
+    public function getReadStrategy(): string
+    {
+        $strategy = $this->config['read_strategy'] ?? 'random';
+
+        return is_string($strategy) ? $strategy : 'random';
+    }
     /** @return array<string,mixed> */
     public function getWriteConfig(): array { return $this->getWriteConfigs()[0] ?? []; }
     /** @return list<array<string,mixed>> */
@@ -200,17 +208,20 @@ final class ConnectionConfig
                 if (!is_array($replica) || $replica === []) {
                     throw ConnectionException::invalidConfiguration('Replica lists must contain non-empty configuration arrays.');
                 }
-                $normalized[] = $replica;
+                $normalized[] = $this->normalizeStringKeyArray($replica);
             }
             return $normalized;
         }
-        return [$replicas];
+        return [$this->normalizeStringKeyArray($replicas)];
     }
 
     /** @return array<string,mixed> */
     private function normalizeStringKeyArray(mixed $value): array { return ArrayNormalizer::stringKeyArray($value); }
 
-    /** @param array<array-key,mixed> $config @return array<array-key,mixed> */
+    /**
+     * @param array<array-key,mixed> $config
+     * @return array<array-key,mixed>
+     */
     private function redactSensitiveConfig(array $config): array
     {
         $redacted = [];
@@ -240,7 +251,11 @@ final class ConnectionConfig
     private function resolveReplicaConfigs(string $key): array
     {
         $replica = $this->config[$key] ?? [];
-        return is_array($replica) && $replica !== [] ? $replica : [];
+        if (!is_array($replica) || $replica === []) {
+            return [];
+        }
+
+        return $this->normalizeReplicaConfigs($replica);
     }
     private function shouldRedactConfigKey(string $key): bool
     {
