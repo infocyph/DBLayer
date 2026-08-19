@@ -21,12 +21,24 @@ it('compiles truncate without cascade or identity reset for every dialect', func
         'database' => 'app',
         'username' => 'app',
     ], 'DELETE FROM `parent_rows`'],
+    'mariadb' => [[
+        'driver' => 'mariadb',
+        'host' => '127.0.0.1',
+        'database' => 'app',
+        'username' => 'app',
+    ], 'DELETE FROM `parent_rows`'],
     'pgsql' => [[
         'driver' => 'pgsql',
         'host' => '127.0.0.1',
         'database' => 'app',
         'username' => 'app',
     ], 'TRUNCATE TABLE "parent_rows"'],
+    'mssql' => [[
+        'driver' => 'mssql',
+        'host' => '127.0.0.1',
+        'database' => 'app',
+        'username' => 'app',
+    ], 'DELETE FROM [parent_rows]'],
     'sqlite' => [[
         'driver' => 'sqlite',
         'database' => ':memory:',
