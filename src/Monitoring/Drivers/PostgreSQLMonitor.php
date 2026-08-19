@@ -9,11 +9,9 @@ final class PostgreSQLMonitor extends AbstractDatabaseMonitor
     #[\Override]
     public function status(): array
     {
-        $row = $this->query(
+        return $this->query(
             "SELECT version() AS server_version, current_database() AS database_name, EXTRACT(EPOCH FROM (clock_timestamp() - pg_postmaster_start_time()))::bigint AS uptime_seconds, pg_database_size(current_database()) AS database_bytes, (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()) AS connections_active, (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active') AS sessions_running, d.numbackends AS num_backends, d.xact_commit, d.xact_rollback, CASE WHEN (d.xact_commit + d.xact_rollback) > 0 THEN round((d.xact_commit::numeric * 100) / (d.xact_commit + d.xact_rollback), 4) ELSE NULL END AS commit_percent, d.deadlocks, d.conflicts, d.temp_files, d.temp_bytes, CASE WHEN (d.blks_hit + d.blks_read) > 0 THEN round((d.blks_hit::numeric * 100) / (d.blks_hit + d.blks_read), 4) ELSE NULL END AS cache_hit_percent FROM pg_stat_database d WHERE d.datname = current_database()",
         )[0] ?? [];
-
-        return is_array($row) ? $row : [];
     }
 
     #[\Override]
