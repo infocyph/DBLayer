@@ -71,8 +71,6 @@ abstract class AbstractMySqlFamilyDriver extends AbstractPdoDriver
     #[\Override]
     protected function buildDsn(array $config, bool $readOnly): string
     {
-        unset($readOnly);
-
         $database = $this->stringOrDefault($config['database'] ?? null, '');
         $charset = $this->stringOrDefault($config['charset'] ?? null, 'utf8mb4');
 
