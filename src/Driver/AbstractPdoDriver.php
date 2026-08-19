@@ -120,7 +120,9 @@ abstract class AbstractPdoDriver implements DriverInterface
         unset($pdo, $timeoutMs);
     }
 
-    #[\Override]
+    /**
+     * Compatibility entry point retained for consumers of DBLayer 4.0.1.
+     */
     public function beginTransaction(PDO $pdo): bool
     {
         return $pdo->beginTransaction();

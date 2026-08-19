@@ -11,6 +11,7 @@ use Infocyph\DBLayer\Events\DatabaseEvents\TransactionCommitted;
 use Infocyph\DBLayer\Events\DatabaseEvents\TransactionRolledBack;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\TransactionException;
+use PDO;
 use Throwable;
 
 /**
@@ -140,7 +141,11 @@ final class Transaction
             return;
         }
 
-        $this->connection->commitNativeTransaction();
+        if (!$this->connection->commitNativeTransaction()) {
+            throw TransactionException::commitFailed(
+                $this->nativeErrorMessage($this->connection->getPdo(), 'The PDO driver returned false.'),
+            );
+        }
         $durationMs = $this->transactionDurationMs();
         $this->stats['committed']++;
         $this->level = 0;
@@ -296,7 +301,11 @@ final class Transaction
             return;
         }
 
-        $this->connection->rollBackNativeTransaction();
+        if (!$this->connection->rollBackNativeTransaction()) {
+            throw TransactionException::rollBackFailed(
+                $this->nativeErrorMessage($this->connection->getPdo(), 'The PDO driver returned false.'),
+            );
+        }
         $durationMs = $this->transactionDurationMs();
         $this->discardAfterCommitCallbacks(1);
         $this->stats['rolled_back']++;
@@ -321,7 +330,11 @@ final class Transaction
 
     private function beginTopLevel(): void
     {
-        $this->connection->getDriver()->beginTransaction($this->connection->getPdo());
+        if (!$this->connection->beginNativeTransaction()) {
+            throw TransactionException::beginFailed(
+                $this->nativeErrorMessage($this->connection->getPdo(), 'The PDO driver returned false.'),
+            );
+        }
     }
 
     /**
@@ -386,6 +399,13 @@ final class Transaction
 
         $this->startedAt = null;
         $this->stats['in_transaction'] = false;
+    }
+
+    private function nativeErrorMessage(PDO $pdo, string $fallback): string
+    {
+        $message = $pdo->errorInfo()[2] ?? null;
+
+        return is_string($message) && $message !== '' ? $message : $fallback;
     }
 
     private function promoteAfterCommitCallbacks(int $fromLevel, int $toLevel): void

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
-use PDOException;
 
 it('compiles lock clauses according to each SQL dialect', function (string $driver): void {
     $connectionName = 'lock_compile_' . $driver;
@@ -92,12 +91,21 @@ it('surfaces write-lock contention across concurrent connections', function (str
         DB::beginTransaction('writer_one');
 
         try {
-            expect(static function (): bool {
-                return DB::beginTransaction('writer_two');
-            })->toThrow(PDOException::class);
-
             DB::statement(sprintf('insert into %s (value) values (1)', $table), [], 'writer_one');
+            DB::beginTransaction('writer_two');
+
+            expect(static function () use ($table): bool {
+                return DB::statement(
+                    sprintf('insert into %s (value) values (2)', $table),
+                    [],
+                    'writer_two',
+                );
+            })->toThrow(ConnectionException::class);
         } finally {
+            if (DB::transactionLevel('writer_two') > 0) {
+                DB::rollBack('writer_two');
+            }
+
             DB::rollBack('writer_one');
             DB::connection('writer_one')->disconnect();
             DB::connection('writer_two')->disconnect();
@@ -152,3 +160,39 @@ it('surfaces write-lock contention across concurrent connections', function (str
         DB::statement(sprintf('drop table if exists %s', $table), [], 'writer_one');
     }
 })->with('dblayer_drivers');
+
+it('allows concurrent SQLite readers with the default deferred transaction mode', function (): void {
+    $databaseFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR
+        . 'dblayer-readers-'
+        . bin2hex(random_bytes(8))
+        . '.sqlite';
+
+    foreach (['reader_one', 'reader_two'] as $connection) {
+        DB::addConnection([
+            'driver' => 'sqlite',
+            'database' => $databaseFile,
+            'options' => [PDO::ATTR_TIMEOUT => 0],
+        ], $connection);
+    }
+
+    DB::statement('create table reader_rows (id integer primary key)', [], 'reader_one');
+    DB::statement('insert into reader_rows (id) values (1)', [], 'reader_one');
+
+    try {
+        DB::beginTransaction('reader_one');
+        DB::beginTransaction('reader_two');
+
+        expect(DB::scalar('select count(*) from reader_rows', [], 'reader_one'))->toBe(1)
+            ->and(DB::scalar('select count(*) from reader_rows', [], 'reader_two'))->toBe(1);
+    } finally {
+        DB::rollBack('reader_two');
+        DB::rollBack('reader_one');
+        DB::connection('reader_one')->disconnect();
+        DB::connection('reader_two')->disconnect();
+
+        if (is_file($databaseFile)) {
+            unlink($databaseFile);
+        }
+    }
+});

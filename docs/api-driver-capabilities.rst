@@ -70,3 +70,7 @@ through ``compileExplain()``. Unsupported option combinations must be rejected
 explicitly rather than silently ignored. The method receives the SELECT SQL,
 the ``analyze``, ``buffers``, and ``verbose`` booleans, and an optional server
 version used when a vendor family has version-specific syntax.
+
+The base ``DriverInterface`` remains compatible with DBLayer 4.0. Managed
+transactions use the native PDO lifecycle, so custom drivers do not need a
+separate transaction-start capability.

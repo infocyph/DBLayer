@@ -3,8 +3,14 @@
 declare(strict_types=1);
 
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\DB;
+use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
+use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
 use Infocyph\DBLayer\Driver\MySQL\MySQLDriver;
 use Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver;
+use Infocyph\DBLayer\Driver\SQLite\SQLiteDriver;
+use Infocyph\DBLayer\Driver\Support\Capabilities;
+use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Pdo\Mysql;
 
@@ -100,6 +106,92 @@ it('rejects built-in options that do not apply to the selected driver', function
         ],
     ], "Security config key 'require_tls' is not supported by driver 'sqlite'."],
 ]);
+
+it('keeps the DBLayer 4.0 custom driver interface backward compatible', function (): void {
+    $legacyDriver = new class implements DriverInterface {
+        private SQLiteDriver $driver;
+
+        public function __construct()
+        {
+            $this->driver = new SQLiteDriver();
+        }
+
+        public function applyReadOnlyTransaction(\PDO $pdo): void
+        {
+            $this->driver->applyReadOnlyTransaction($pdo);
+        }
+
+        public function applyStatementTimeout(\PDO $pdo, int $timeoutMs): void
+        {
+            $this->driver->applyStatementTimeout($pdo, $timeoutMs);
+        }
+
+        public function compileExplain(
+            string $sql,
+            bool $analyze = false,
+            bool $buffers = false,
+            bool $verbose = false,
+            ?string $serverVersion = null,
+        ): string {
+            return $this->driver->compileExplain($sql, $analyze, $buffers, $verbose, $serverVersion);
+        }
+
+        public function createCompiler(): QueryCompilerInterface
+        {
+            return $this->driver->createCompiler();
+        }
+
+        public function createPdo(ConnectionConfig $config, bool $readOnly = false): \PDO
+        {
+            return $this->driver->createPdo($config, $readOnly);
+        }
+
+        public function dateFormat(): string
+        {
+            return $this->driver->dateFormat();
+        }
+
+        public function getCapabilities(): Capabilities
+        {
+            return $this->driver->getCapabilities();
+        }
+
+        public function getName(): string
+        {
+            return 'legacy_4_0';
+        }
+
+        public function maxBindParameters(): int
+        {
+            return $this->driver->maxBindParameters();
+        }
+
+        public function mergeDefaults(array $config): array
+        {
+            return $this->driver->mergeDefaults($config);
+        }
+
+        public function validateConfig(array $config): void
+        {
+            $this->driver->validateConfig($config);
+        }
+    };
+    $driverClass = $legacyDriver::class;
+
+    DriverRegistry::register('legacy_4_0', $driverClass);
+    DB::addConnection([
+        'driver' => 'legacy_4_0',
+        'database' => ':memory:',
+    ], 'legacy_4_0');
+
+    DB::transaction(static function ($connection): void {
+        $connection->statement('create table legacy_rows (id integer primary key)');
+        $connection->statement('insert into legacy_rows (id) values (1)');
+    }, connection: 'legacy_4_0');
+
+    expect((new ReflectionClass(DriverInterface::class))->hasMethod('beginTransaction'))->toBeFalse()
+        ->and(DB::scalar('select count(*) from legacy_rows', [], 'legacy_4_0'))->toBe(1);
+});
 
 it('builds an effective PostgreSQL DSN for every accepted connection option', function (): void {
     $config = ConnectionConfig::fromArray([
