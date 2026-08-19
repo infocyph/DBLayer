@@ -45,10 +45,26 @@ Built-in Driver Matrix
      - yes
      - yes
      - yes
+   * - MariaDB 10.5+
+     - yes
+     - yes
+     - yes
+     - yes
+     - yes
+     - yes
+     - yes
    * - PostgreSQL
      - yes
      - no
      - yes
+     - yes
+     - yes
+     - yes
+     - yes
+   * - Microsoft SQL Server
+     - yes (``OUTPUT``)
+     - no
+     - yes (``MERGE``)
      - yes
      - yes
      - yes
@@ -62,14 +78,21 @@ Built-in Driver Matrix
      - yes
      - yes
 
+The public ``Returning`` capability is semantic. PostgreSQL/MariaDB emit
+``RETURNING`` while SQL Server emits its native ``OUTPUT INSERTED`` form. The
+five canonical built-in pathways are ``mysql``, ``mariadb``, ``pgsql``,
+``mssql``, and ``sqlite``.
+
 Custom Driver Contract
 ----------------------
 
 Custom ``DriverInterface`` implementations compile their native plan syntax
 through ``compileExplain()``. Unsupported option combinations must be rejected
-explicitly rather than silently ignored. The method receives the SELECT SQL,
-the ``analyze``, ``buffers``, and ``verbose`` booleans, and an optional server
-version used when a vendor family has version-specific syntax.
+explicitly rather than silently ignored. The method receives the SELECT SQL, the
+``analyze``, ``buffers``, and ``verbose`` booleans, and an optional server
+version. SQL Server is the one built-in exception: its session-scoped
+SHOWPLAN/STATISTICS modes require connection-level coordination rather than one
+portable compiled statement.
 
 The base ``DriverInterface`` remains compatible with DBLayer 4.0. Managed
 transactions use the native PDO lifecycle, so custom drivers do not need a
