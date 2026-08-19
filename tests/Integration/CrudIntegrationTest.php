@@ -91,3 +91,33 @@ it('covers query builder CRUD operations end-to-end', function (string $driver):
     expect(DB::table($table)->truncate())->toBeTrue();
     expect((int) DB::table($table)->count())->toBe(0);
 })->with('dblayer_drivers');
+
+it('executes every insert-ignore chunk after an all-ignored batch', function (): void {
+    DB::addConnection([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ], 'insert_ignore_chunks');
+    DB::setDefaultConnection('insert_ignore_chunks');
+
+    DB::statement('create table chunk_items (id integer primary key autoincrement, email text unique, name text, age integer)');
+    DB::table('chunk_items')->insert([
+        'email' => 'duplicate@example.test',
+        'name' => 'Existing',
+        'age' => 1,
+    ]);
+
+    $rows = array_fill(0, 170, [
+        'email' => 'duplicate@example.test',
+        'name' => 'Ignored',
+        'age' => 2,
+    ]);
+    $rows[] = [
+        'email' => 'later@example.test',
+        'name' => 'Must execute',
+        'age' => 3,
+    ];
+
+    expect(DB::table('chunk_items')->insertIgnore($rows))->toBeTrue()
+        ->and(DB::table('chunk_items')->where('email', 'later@example.test')->exists())->toBeTrue()
+        ->and((int) DB::table('chunk_items')->count())->toBe(2);
+});
