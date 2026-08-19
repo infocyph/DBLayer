@@ -10,14 +10,19 @@ use Throwable;
 
 final class DriverProfile
 {
+    /** @var array<string,list<string>> */
     private const array DEADLOCK_ERROR_CODES = ['mysql' => ['1213'], 'mariadb' => ['1213'], 'mssql' => ['1205']];
+    /** @var array<string,list<string>> */
     private const array DEADLOCK_MESSAGE_HINTS = [
         'mysql' => ['deadlock found when trying to get lock', 'lock wait timeout exceeded; try restarting transaction', 'deadlock'],
         'mariadb' => ['deadlock'], 'pgsql' => ['deadlock detected', 'deadlock'], 'postgres' => ['deadlock detected', 'deadlock'],
         'sqlite' => ['database is locked', 'deadlock'], 'mssql' => ['deadlock victim', 'deadlocked on lock resources', 'deadlock'], 'default' => ['deadlock'],
     ];
+    /** @var array<string,list<string>> */
     private const array DEADLOCK_SQLSTATES = ['mysql' => ['40001'], 'mariadb' => ['40001'], 'mssql' => ['40001'], 'pgsql' => ['40P01', '40001'], 'postgres' => ['40P01', '40001']];
+    /** @var array<string,list<string>> */
     private const array RETRYABLE_TX_ERROR_CODES = ['mysql' => ['1213', '1205'], 'mariadb' => ['1213', '1205'], 'mssql' => ['1205', '1222'], 'sqlite' => ['5', '6']];
+    /** @var array<string,list<string>> */
     private const array RETRYABLE_TX_MESSAGE_HINTS = [
         'mysql' => ['deadlock found when trying to get lock', 'lock wait timeout exceeded', 'serialization failure', 'try restarting transaction'],
         'mariadb' => ['deadlock', 'lock wait timeout exceeded', 'serialization failure'],
@@ -28,11 +33,15 @@ final class DriverProfile
         'mssql' => ['deadlock victim', 'deadlocked on lock resources', 'lock request time out period exceeded', 'serialization failure'],
         'default' => ['deadlock', 'serialization failure', 'could not serialize access', 'database is locked', 'database is busy'],
     ];
+    /** @var array<string,list<string>> */
     private const array RETRYABLE_TX_SQLSTATES = ['mysql' => ['40001', '41000'], 'mariadb' => ['40001', '41000'], 'mssql' => ['40001'], 'pgsql' => ['40P01', '40001'], 'postgres' => ['40P01', '40001'], 'postgresql' => ['40P01', '40001']];
 
     private function __construct() {}
 
-    /** @param array<string,mixed> $config @return array<string,mixed> */
+    /**
+     * @param array<string,mixed> $config
+     * @return array<string,mixed>
+     */
     public static function applyConnectionDefaults(array $config): array
     {
         $driver = $config['driver'] ?? null;
@@ -78,7 +87,10 @@ final class DriverProfile
         $hints = self::RETRYABLE_TX_MESSAGE_HINTS[$driver] ?? self::RETRYABLE_TX_MESSAGE_HINTS['default'];
         return array_any($hints, fn(string $needle): bool => stripos($message, $needle) !== false);
     }
-    /** @param list<string> $states @param list<string> $codes */
+    /**
+     * @param list<string> $states
+     * @param list<string> $codes
+     */
     private static function metadataMatchesStateAndCodeSets(PDOException $e, array $states, array $codes): bool
     {
         $info = $e->errorInfo;
