@@ -11,6 +11,7 @@ use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
 use Infocyph\DBLayer\Driver\Support\Capabilities;
 use Infocyph\DBLayer\Driver\Support\DriverRegistry;
+use Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuting;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
@@ -497,6 +498,25 @@ final class Connection
             throw QueryException::invalidParameter(
                 'sql',
                 'Execution plans accept SELECT statements only.',
+            );
+        }
+
+        if ($this->driver instanceof SQLServerDriver) {
+            $preparedSql = $this->prepareSqlForExecution($sql, $bindings);
+
+            if ($this->pretending) {
+                $this->recordPretend($preparedSql, $bindings);
+
+                return [];
+            }
+
+            return $this->driver->executeExplain(
+                $this->getPdo(),
+                $preparedSql,
+                $bindings,
+                $analyze,
+                $buffers,
+                $verbose,
             );
         }
 
