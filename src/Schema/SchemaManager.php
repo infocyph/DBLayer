@@ -7,6 +7,7 @@ namespace Infocyph\DBLayer\Schema;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Exceptions\MigrationException;
+use Infocyph\DBLayer\Exceptions\SchemaException;
 use Throwable;
 
 final readonly class SchemaManager
@@ -49,7 +50,7 @@ final readonly class SchemaManager
         $query = $this->grammar->columnExistsQuery($namespace, $table, $column, $this->connection->getDatabaseName());
         $rows = $this->readSchemaRows($query['sql'], $query['bindings']);
         if ($query['key'] === null) { return $rows !== []; }
-        return array_any($rows, fn(array $row): bool => ($row[$query['key']] ?? null) === $query['value']);
+        return $this->containsSchemaValue($rows, $query['key'], $query['value']);
     }
 
     public function hasTable(string $table): bool
@@ -59,7 +60,7 @@ final readonly class SchemaManager
         $query = $this->grammar->tableExistsQuery($namespace, $table, $this->connection->getDatabaseName());
         $rows = $this->readSchemaRows($query['sql'], $query['bindings']);
         if ($query['key'] === null) { return $rows !== []; }
-        return array_any($rows, fn(array $row): bool => ($row[$query['key']] ?? null) === $query['value']);
+        return $this->containsSchemaValue($rows, $query['key'], $query['value']);
     }
 
     public function rename(string $from, string $to): void { $this->connection->statement($this->grammar->compileRename($from, $to)); $this->invalidateTables([$from, $to]); }
@@ -73,7 +74,7 @@ final readonly class SchemaManager
         $key = $query['key']; $tables = [];
         foreach ($this->readSchemaRows($query['sql'], $query['bindings']) as $row) {
             $name = $row[$key] ?? null;
-            if (!is_string($name)) { throw \Infocyph\DBLayer\Exceptions\SchemaException::invalid(sprintf('Database returned an invalid table name for key "%s".', $key)); }
+            if (!is_string($name)) { throw SchemaException::invalid(sprintf('Database returned an invalid table name for key "%s".', $key)); }
             $tables[] = $name;
         }
         return $tables;
@@ -85,6 +86,18 @@ final readonly class SchemaManager
     private function build(string $table, bool $creating, callable $definition): array
     {
         $blueprint = new Blueprint($table, $creating); $definition($blueprint); return $this->grammar->compile($blueprint);
+    }
+    /**
+     * @param list<array<string,mixed>> $rows
+     */
+    private function containsSchemaValue(array $rows, string $key, mixed $value): bool
+    {
+        foreach ($rows as $row) {
+            if (($row[$key] ?? null) === $value) {
+                return true;
+            }
+        }
+        return false;
     }
     /** @param non-empty-list<string> $statements */
     private function execute(array $statements): void { foreach ($statements as $statement) { $this->connection->statement($statement); } }
@@ -100,10 +113,15 @@ final readonly class SchemaManager
         if ($prefix === '' || str_contains($table, '.')) { return $table; }
         return str_starts_with($table, $prefix) ? $table : $prefix . $table;
     }
-    /** @param array<int|string,mixed> $bindings @return list<array<string,mixed>> */
+    /**
+     * @param array<int|string,mixed> $bindings
+     * @return list<array<string,mixed>>
+     */
     private function readSchemaRows(string $sql, array $bindings): array
     {
-        return $this->connection->selectResultSets($sql, $bindings)[0] ?? [];
+        $rows = $this->connection->selectResultSets($sql, $bindings)[0] ?? [];
+        /** @var list<array<string,mixed>> $rows */
+        return $rows;
     }
     private function restoreForeignKeyChecks(): void { foreach ($this->grammar->afterDropAllStatements() as $statement) { $this->connection->statement($statement); } }
     /** @return array{0:string|null,1:string} */
