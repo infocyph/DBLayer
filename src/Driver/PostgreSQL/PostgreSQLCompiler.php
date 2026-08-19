@@ -19,6 +19,7 @@ final class PostgreSQLCompiler extends AbstractSqlCompiler
         return $lock === 'update' ? 'FOR UPDATE' : 'FOR SHARE';
     }
 
+    /** @param list<string> $returning */
     #[\Override]
     protected function compileReturning(string $sql, array $returning): string
     {
@@ -28,6 +29,10 @@ final class PostgreSQLCompiler extends AbstractSqlCompiler
         ));
     }
 
+    /**
+     * @param list<string> $uniqueBy
+     * @param list<string> $update
+     */
     #[\Override]
     protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
     {
