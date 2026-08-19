@@ -33,6 +33,8 @@ final class SQLiteMonitor extends AbstractDatabaseMonitor
     #[\Override]
     public function longRunningQueries(int $seconds): array
     {
+        unset($seconds);
+
         return [];
     }
 
@@ -46,8 +48,7 @@ final class SQLiteMonitor extends AbstractDatabaseMonitor
     public function tableMetrics(): array
     {
         return $this->query(
-            "SELECT name AS table_name, sql FROM sqlite_master "
-                . "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+            "SELECT name AS table_name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
         );
     }
 
@@ -55,8 +56,7 @@ final class SQLiteMonitor extends AbstractDatabaseMonitor
     public function indexMetrics(): array
     {
         return $this->query(
-            "SELECT name AS index_name, tbl_name AS table_name, sql FROM sqlite_master "
-                . "WHERE type = 'index' AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY tbl_name, name",
+            "SELECT name AS index_name, tbl_name AS table_name, sql FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY tbl_name, name",
         );
     }
 
@@ -78,9 +78,7 @@ final class SQLiteMonitor extends AbstractDatabaseMonitor
             'page_size' => $pageSize,
             'free_pages' => $freePages,
             'reclaimable_bytes' => $freePages * $pageSize,
-            'reclaimable_percent' => $pageCount > 0
-                ? round(($freePages / $pageCount) * 100, 4)
-                : 0.0,
+            'reclaimable_percent' => $pageCount > 0 ? round(($freePages / $pageCount) * 100, 4) : 0.0,
         ]];
     }
 }

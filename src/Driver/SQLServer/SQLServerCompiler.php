@@ -16,6 +16,8 @@ final class SQLServerCompiler extends AbstractSqlCompiler
     #[\Override]
     protected function compileCtePrefix(bool $recursive): string
     {
+        unset($recursive);
+
         return 'WITH';
     }
 
@@ -64,6 +66,8 @@ final class SQLServerCompiler extends AbstractSqlCompiler
     #[\Override]
     protected function compileLock(string $lock): string
     {
+        unset($lock);
+
         return '';
     }
 
@@ -175,9 +179,7 @@ final class SQLServerCompiler extends AbstractSqlCompiler
         }
 
         return implode('.', array_map(
-            static fn(string $part): string => $part === '*'
-                ? '*'
-                : '[' . str_replace(']', ']]', $part) . ']',
+            static fn(string $part): string => $part === '*' ? '*' : '[' . str_replace(']', ']]', $part) . ']',
             explode('.', $identifier),
         ));
     }

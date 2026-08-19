@@ -6,9 +6,5 @@ namespace Infocyph\DBLayer\Schema\Dialect;
 
 final class MariaDBSchemaDialect extends AbstractMySqlSchemaDialect
 {
-    #[\Override]
-    public function name(): string
-    {
-        return 'mariadb';
-    }
+    #[\Override] public function name(): string { return 'mariadb'; }
 }

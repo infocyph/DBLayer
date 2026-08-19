@@ -9,7 +9,6 @@ use Infocyph\DBLayer\Exceptions\SchemaException;
 final class SchemaDialectRegistry
 {
     private function __construct() {}
-
     public static function resolve(string $driver): SchemaDialect
     {
         return match (strtolower($driver)) {

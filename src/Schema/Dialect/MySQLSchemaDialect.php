@@ -6,9 +6,5 @@ namespace Infocyph\DBLayer\Schema\Dialect;
 
 final class MySQLSchemaDialect extends AbstractMySqlSchemaDialect
 {
-    #[\Override]
-    public function name(): string
-    {
-        return 'mysql';
-    }
+    #[\Override] public function name(): string { return 'mysql'; }
 }

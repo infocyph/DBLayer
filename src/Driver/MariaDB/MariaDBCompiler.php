@@ -23,6 +23,8 @@ final class MariaDBCompiler extends AbstractMySqlCompiler
     #[\Override]
     protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
     {
+        unset($uniqueBy);
+
         if ($update === []) {
             throw new \LogicException('MariaDB UPSERT requires at least one update column.');
         }

@@ -111,11 +111,13 @@ abstract class AbstractPdoDriver implements DriverInterface
     #[\Override]
     public function applyReadOnlyTransaction(PDO $pdo): void
     {
+        unset($pdo);
     }
 
     #[\Override]
     public function applyStatementTimeout(PDO $pdo, int $timeoutMs): void
     {
+        unset($pdo, $timeoutMs);
     }
 
     /**
@@ -298,6 +300,8 @@ abstract class AbstractPdoDriver implements DriverInterface
      */
     protected function defaultPdoOptions(array $config): array
     {
+        unset($config); // reserved for future driver-specific tuning
+
         return [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -311,6 +315,8 @@ abstract class AbstractPdoDriver implements DriverInterface
      */
     protected function hasRequiredTlsConfiguration(array $config): bool
     {
+        unset($config);
+
         return true;
     }
 
