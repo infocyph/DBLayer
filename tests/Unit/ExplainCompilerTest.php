@@ -68,5 +68,10 @@ it('keeps SQL Server execution plans on the connection-scoped executor', functio
     });
 
     expect($result)->toBe([])
-        ->and($queries)->toBe([]);
+        ->and($queries)->toBe([
+            [
+                'sql' => 'select 1',
+                'bindings' => [],
+            ],
+        ]);
 });
