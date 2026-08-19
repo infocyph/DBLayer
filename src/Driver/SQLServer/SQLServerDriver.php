@@ -42,7 +42,6 @@ final class SQLServerDriver extends AbstractPdoDriver
     #[\Override]
     public function applyReadOnlyTransaction(PDO $pdo): void
     {
-        unset($pdo);
     }
 
     #[\Override]
@@ -70,8 +69,6 @@ final class SQLServerDriver extends AbstractPdoDriver
         bool $verbose = false,
         ?string $serverVersion = null,
     ): string {
-        unset($sql, $analyze, $buffers, $verbose, $serverVersion);
-
         throw QueryException::invalidParameter(
             'explain',
             'SQL Server execution plans require Connection::explain() because SHOWPLAN/STATISTICS modes are session scoped.',
@@ -103,19 +100,8 @@ final class SQLServerDriver extends AbstractPdoDriver
             }
 
             $statement->execute();
-            $planRows = [];
 
-            do {
-                while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
-                    if ($this->containsShowplanXml($row)) {
-                        $planRows[] = $row;
-                    }
-                }
-            } while ($statement->nextRowset());
-
-            $statement->closeCursor();
-
-            return $planRows;
+            return $this->collectExplainRows($statement);
         } finally {
             try {
                 $pdo->exec('SET ' . $mode . ' OFF');
@@ -196,6 +182,28 @@ final class SQLServerDriver extends AbstractPdoDriver
         unset($config['timeout']);
 
         return parent::applyDerivedOptions($options, $config);
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function collectExplainRows(PDOStatement $statement): array
+    {
+        $planRows = [];
+
+        do {
+            while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                /** @var array<string,mixed> $row */
+                if ($this->containsShowplanXml($row)) {
+                    $planRows[] = $row;
+                }
+            }
+        } while ($statement->nextRowset());
+
+        $statement->closeCursor();
+
+        return $planRows;
     }
 
     /** @param array<string,mixed> $row */
