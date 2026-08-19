@@ -21,6 +21,18 @@ final class Transaction
     /** @var array<int,list<callable():void>> */ private array $afterCommitCallbacks = [];
     private int $level = 0;
     private ?float $startedAt = null;
+    /**
+     * @var array{
+     *     total:int,
+     *     committed:int,
+     *     rolled_back:int,
+     *     deadlocks:int,
+     *     in_transaction:bool,
+     *     current_level:int,
+     *     savepoints:int,
+     *     elapsed_time:float
+     * }
+     */
     private array $stats = ['total' => 0, 'committed' => 0, 'rolled_back' => 0, 'deadlocks' => 0, 'in_transaction' => false, 'current_level' => 0, 'savepoints' => 0, 'elapsed_time' => 0.0];
 
     public function __construct(private readonly Connection $connection) {}
@@ -71,6 +83,18 @@ final class Transaction
     }
 
     public function getConnection(): Connection { return $this->connection; }
+    /**
+     * @return array{
+     *     total:int,
+     *     committed:int,
+     *     rolled_back:int,
+     *     deadlocks:int,
+     *     in_transaction:bool,
+     *     current_level:int,
+     *     savepoints:int,
+     *     elapsed_time:float
+     * }
+     */
     public function getStats(): array { return $this->stats; }
     public function inTransaction(): bool { return $this->level > 0; }
     public function level(): int { return $this->level; }
