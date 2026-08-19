@@ -1,6 +1,8 @@
 name: "PHPForge Test Details"
 
 on:
+  pull_request:
+    branches: ["main"]
   push:
     branches: ["feature/db-linup"]
   workflow_dispatch:
