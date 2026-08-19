@@ -2,8 +2,12 @@
 
 declare(strict_types=1);
 
+use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Driver\MariaDB\MariaDBDriver;
 use Infocyph\DBLayer\Driver\MySQL\MySQLDriver;
 use Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver;
+use Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver;
 use Infocyph\DBLayer\Driver\SQLite\SQLiteDriver;
 use Infocyph\DBLayer\Exceptions\QueryException;
 
@@ -27,14 +31,17 @@ it('requires PostgreSQL analysis before collecting buffers', function (): void {
     );
 })->throws(QueryException::class, 'PostgreSQL BUFFERS requires analyze=true');
 
-it('compiles MySQL and MariaDB plan dialects', function (): void {
-    $driver = new MySQLDriver();
+it('compiles MySQL and MariaDB plan dialects through separate drivers', function (): void {
+    $mysql = new MySQLDriver();
+    $maria = new MariaDBDriver();
 
-    expect($driver->compileExplain('select * from users'))
+    expect($mysql->compileExplain('select * from users'))
         ->toBe('EXPLAIN FORMAT=JSON select * from users')
-        ->and($driver->compileExplain('select * from users', analyze: true, serverVersion: '8.4.0'))
+        ->and($mysql->compileExplain('select * from users', analyze: true))
         ->toBe('EXPLAIN ANALYZE select * from users')
-        ->and($driver->compileExplain('select * from users', analyze: true, serverVersion: '11.4.2-MariaDB'))
+        ->and($maria->compileExplain('select * from users'))
+        ->toBe('EXPLAIN FORMAT=JSON select * from users')
+        ->and($maria->compileExplain('select * from users', analyze: true))
         ->toBe('ANALYZE FORMAT=JSON select * from users');
 });
 
@@ -44,3 +51,22 @@ it('rejects unsupported SQLite execution options', function (): void {
         analyze: true,
     );
 })->throws(QueryException::class, 'SQLite supports query-plan inspection only');
+
+it('keeps SQL Server execution plans on the connection-scoped executor', function (): void {
+    expect(static fn(): string => (new SQLServerDriver())->compileExplain('select 1'))
+        ->toThrow(QueryException::class, 'session scoped');
+
+    $connection = new Connection(new ConnectionConfig([
+        'driver' => 'mssql',
+        'database' => 'app',
+        'username' => 'app',
+    ]), 'mssql-explain');
+    $result = null;
+
+    $queries = $connection->pretend(function (Connection $connection) use (&$result): void {
+        $result = $connection->explain('select 1');
+    });
+
+    expect($result)->toBe([])
+        ->and($queries)->toBe([]);
+});
