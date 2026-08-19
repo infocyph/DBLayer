@@ -20,5 +20,33 @@ jobs:
       - uses: ramsey/composer-install@v3
         with:
           dependency-versions: highest
-      - name: Run PHPForge detailed tests
-        run: composer ic:tests:details
+      - name: Syntax
+        continue-on-error: true
+        run: composer ic:test:syntax
+      - name: Code tests
+        continue-on-error: true
+        run: composer ic:test:code
+      - name: Pint
+        continue-on-error: true
+        run: composer ic:test:lint
+      - name: PHPCS
+        continue-on-error: true
+        run: composer ic:test:sniff
+      - name: Duplicates
+        continue-on-error: true
+        run: composer ic:test:duplicates
+      - name: Comments
+        continue-on-error: true
+        run: composer ic:test:comments
+      - name: Architecture
+        continue-on-error: true
+        run: composer ic:test:architecture
+      - name: PHPStan
+        continue-on-error: true
+        run: composer ic:test:static
+      - name: Psalm security
+        continue-on-error: true
+        run: composer ic:test:security
+      - name: Rector
+        continue-on-error: true
+        run: composer ic:test:refactor
