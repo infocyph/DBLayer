@@ -11,6 +11,7 @@ use Infocyph\DBLayer\Driver\MySQLFamily\AbstractMySqlCompiler;
  */
 final class MariaDBCompiler extends AbstractMySqlCompiler
 {
+    /** @param list<string> $returning */
     #[\Override]
     protected function compileReturning(string $sql, array $returning): string
     {
@@ -20,11 +21,13 @@ final class MariaDBCompiler extends AbstractMySqlCompiler
         ));
     }
 
+    /**
+     * @param list<string> $uniqueBy
+     * @param list<string> $update
+     */
     #[\Override]
     protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
     {
-        unset($uniqueBy);
-
         if ($update === []) {
             throw new \LogicException('MariaDB UPSERT requires at least one update column.');
         }
