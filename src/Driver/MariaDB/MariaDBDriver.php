@@ -48,8 +48,6 @@ final class MariaDBDriver extends AbstractMySqlFamilyDriver
         bool $verbose = false,
         ?string $serverVersion = null,
     ): string {
-        unset($serverVersion);
-
         if ($buffers || $verbose) {
             throw QueryException::invalidParameter(
                 'explain',
