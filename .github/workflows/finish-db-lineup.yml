@@ -1,0 +1,105 @@
+name: Finish DB lineup patch
+
+on:
+  push:
+    branches:
+      - feature/db-linup
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/db-linup
+          fetch-depth: 0
+
+      - name: Apply exact runtime patches
+        shell: python
+        run: |
+          from pathlib import Path
+
+          connection = Path('src/Connection/Connection.php')
+          text = connection.read_text()
+
+          import_anchor = 'use Infocyph\\DBLayer\\Connection\\Concerns\\ConnectionInternals;\n'
+          import_line = 'use Infocyph\\DBLayer\\Connection\\Concerns\\ConnectionMonitoring;\n'
+          if import_line not in text:
+              if import_anchor not in text:
+                  raise SystemExit('Connection monitoring import anchor not found')
+              text = text.replace(import_anchor, import_anchor + import_line, 1)
+
+          sql_driver_anchor = 'use Infocyph\\DBLayer\\Driver\\Support\\DriverRegistry;\n'
+          sql_driver_import = 'use Infocyph\\DBLayer\\Driver\\SQLServer\\SQLServerDriver;\n'
+          if sql_driver_import not in text:
+              if sql_driver_anchor not in text:
+                  raise SystemExit('SQL Server driver import anchor not found')
+              text = text.replace(sql_driver_anchor, sql_driver_anchor + sql_driver_import, 1)
+
+          trait_anchor = '    use ConnectionInternals;\n    use ConnectionStreaming;\n'
+          trait_block = '    use ConnectionInternals;\n    use ConnectionMonitoring;\n    use ConnectionStreaming;\n'
+          if '    use ConnectionMonitoring;\n' not in text:
+              if trait_anchor not in text:
+                  raise SystemExit('Connection trait anchor not found')
+              text = text.replace(trait_anchor, trait_block, 1)
+
+          explain_anchor = '        $serverVersion = null;\n'
+          explain_block = '''        if ($this->driver instanceof SQLServerDriver) {
+            $preparedSql = $this->prepareSqlForExecution($sql, $bindings);
+
+            if ($this->pretending) {
+                $this->recordPretend($preparedSql, $bindings);
+
+                return [];
+            }
+
+            return $this->driver->executeExplain(
+                $this->getPdo(),
+                $preparedSql,
+                $bindings,
+                $analyze,
+                $buffers,
+                $verbose,
+            );
+        }
+
+        $serverVersion = null;
+'''
+          if 'return $this->driver->executeExplain(' not in text:
+              if explain_anchor not in text:
+                  raise SystemExit('Connection explain anchor not found')
+              text = text.replace(explain_anchor, explain_block, 1)
+
+          text = text.replace(
+              '- Multiple database drivers (MySQL, PostgreSQL, SQLite, custom)',
+              '- Multiple database drivers (MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, custom)',
+              1,
+          )
+          connection.write_text(text)
+
+          streaming = Path('src/Connection/Concerns/ConnectionStreaming.php')
+          stream_text = streaming.read_text()
+          stream_text = stream_text.replace('    use ConnectionMonitoring;\n\n', '', 1)
+          streaming.write_text(stream_text)
+
+      - name: Lint changed PHP
+        run: |
+          php -l src/Connection/Connection.php
+          php -l src/Connection/Concerns/ConnectionStreaming.php
+          php -l src/Connection/Concerns/ConnectionMonitoring.php
+          find src/Monitoring -name '*.php' -print0 | xargs -0 -n1 php -l
+          php -l tests/Unit/DatabaseMonitorTest.php
+          php -l tests/Unit/ExplainCompilerTest.php
+
+      - name: Commit finished runtime patch
+        run: |
+          rm .github/workflows/finish-db-lineup.yml
+          git config user.name "A. B. M. Mahmudul Hasan"
+          git config user.email "abmmhasan@users.noreply.github.com"
+          git add src/Connection/Connection.php src/Connection/Concerns/ConnectionStreaming.php .github/workflows/finish-db-lineup.yml
+          git commit -m "Finish SQL Server explain routing [skip ci]"
+          git push origin HEAD:feature/db-linup
