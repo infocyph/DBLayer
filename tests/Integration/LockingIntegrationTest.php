@@ -22,9 +22,16 @@ it('compiles lock clauses according to each SQL dialect', function (string $driv
         return;
     }
 
+    if ($schemaDriver === 'mssql') {
+        expect($updateSql)->toContain('with (updlock, rowlock)')
+            ->and($sharedSql)->toContain('with (holdlock, rowlock)');
+
+        return;
+    }
+
     expect($updateSql)->toContain('for update');
 
-    if ($schemaDriver === 'mysql') {
+    if (in_array($schemaDriver, ['mysql', 'mariadb'], true)) {
         expect($sharedSql)->toContain('lock in share mode');
 
         return;
@@ -46,7 +53,6 @@ it('executes lockForUpdate flows inside transactions on available drivers', func
     ), [], $connectionName);
 
     DB::table($table, $connectionName)->insert([
-        'id' => 1,
         'value' => 10,
     ]);
 
@@ -130,7 +136,6 @@ it('surfaces write-lock contention across concurrent connections', function (str
         dblayerAutoIncrementPrimaryKey($schemaDriver),
     ), [], 'writer_one');
     DB::table($table, 'writer_one')->insert([
-        'id' => 1,
         'value' => 1,
     ]);
 
@@ -142,8 +147,10 @@ it('surfaces write-lock contention across concurrent connections', function (str
             ->lockForUpdate()
             ->first();
 
-        if ($schemaDriver === 'mysql') {
+        if (in_array($schemaDriver, ['mysql', 'mariadb'], true)) {
             DB::statement('set innodb_lock_wait_timeout = 1', [], 'writer_two');
+        } elseif ($schemaDriver === 'mssql') {
+            DB::statement('set lock_timeout 250', [], 'writer_two');
         } else {
             DB::statement("set lock_timeout = '250ms'", [], 'writer_two');
         }
