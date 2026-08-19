@@ -19,9 +19,13 @@ abstract class AbstractMySqlMonitor extends AbstractDatabaseMonitor
         $values = $this->variables([...$statusRows, ...$variableRows]);
         $bufferRequests = $this->intValue($values['Innodb_buffer_pool_read_requests'] ?? 0);
         $bufferReads = $this->intValue($values['Innodb_buffer_pool_reads'] ?? 0);
+        $databaseBytes = $this->intValue($this->scalar(
+            'SELECT COALESCE(SUM(DATA_LENGTH + INDEX_LENGTH), 0) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()',
+        ));
 
         return [
             'server_version' => $this->serverVersion(),
+            'database_bytes' => $databaseBytes,
             'uptime_seconds' => $this->intValue($values['Uptime'] ?? 0),
             'connections_total' => $this->intValue($values['Connections'] ?? 0),
             'connections_active' => $this->intValue($values['Threads_connected'] ?? 0),
