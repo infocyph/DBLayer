@@ -61,13 +61,29 @@ Every structured builder operation follows one compilation path:
 
 ``QueryBuilder → QueryPayload → driver compiler → CompiledQuery → Connection``.
 
-MySQL, PostgreSQL, and SQLite provide dialect compilers, while ``Capabilities``
-flags decide whether returning, insert-ignore, upsert, and related semantics are
-available. ``Executor`` only coordinates batching and portable read-back; it is
-not a second compiler, event dispatcher, or security boundary.
+MySQL, MariaDB, PostgreSQL, Microsoft SQL Server, and SQLite each provide a
+dedicated dialect compiler, while ``Capabilities`` flags decide whether
+returning, insert-ignore, upsert, and related semantics are available.
+``Executor`` only coordinates batching and portable read-back; it is not a
+second compiler, event dispatcher, or security boundary.
 
-Dialect-sensitive features (for example ``RETURNING`` or lock syntax) are
-resolved through this layer, not through conditional logic in application code.
+Dialect-sensitive features (for example ``RETURNING``/``OUTPUT``, locking,
+pagination, or upsert syntax) are resolved through this layer, not through
+conditional logic in application code.
+
+Driver Path Separation
+----------------------
+
+Built-in engines have five canonical pathways: ``mysql``, ``mariadb``,
+``pgsql``, ``mssql``, and ``sqlite``. Aliases such as ``psql`` and ``sqlsrv``
+normalize to their canonical pathway before connection creation.
+
+MySQL and MariaDB share only internal PDO-MySQL protocol primitives. They do
+not resolve to the same concrete driver, compiler, capabilities, timeout/explain
+behavior, or schema dialect. Schema DDL follows the same separation through one
+resolved engine-specific dialect. Microsoft SQL Server likewise owns its T-SQL
+compiler, parameter ceiling, savepoint behavior, connection options, and schema
+dialect instead of adding ``mssql`` switches throughout the generic builder.
 
 Runtime Modules
 ---------------
