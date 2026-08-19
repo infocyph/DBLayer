@@ -131,7 +131,7 @@ final class SQLServerCompiler extends AbstractSqlCompiler
         $table = $matches[1];
         $columnSql = $matches[2];
         $valuesSql = $matches[3];
-        $columns = array_map('trim', explode(',', $columnSql));
+        $columns = array_map(trim(...), explode(',', $columnSql));
 
         $sourceValues = implode(', ', array_map(
             static fn(string $column): string => 'source.' . $column,

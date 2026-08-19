@@ -36,13 +36,13 @@ final class SQLServerDriver extends AbstractPdoDriver
     ];
 
     protected const string DRIVER_NAME = 'mssql';
+
     protected const array NETWORK_REQUIRED = ['database', 'host', 'username'];
+
     protected const ?string TLS_REQUIREMENT_MESSAGE = 'Driver [{driver}] requires encrypted transport. Set encrypt=true and trust_server_certificate=false for verified TLS.';
 
     #[\Override]
-    public function applyReadOnlyTransaction(PDO $pdo): void
-    {
-    }
+    public function applyReadOnlyTransaction(PDO $pdo): void {}
 
     #[\Override]
     public function applyStatementTimeout(PDO $pdo, int $timeoutMs): void
@@ -138,6 +138,14 @@ final class SQLServerDriver extends AbstractPdoDriver
         }
     }
 
+    #[\Override]
+    protected function applyDerivedOptions(array $options, array $config): array
+    {
+        unset($config['timeout']);
+
+        return parent::applyDerivedOptions($options, $config);
+    }
+
     /** @param array<string,mixed> $config */
     #[\Override]
     protected function buildDsn(array $config, bool $readOnly): string
@@ -174,14 +182,6 @@ final class SQLServerDriver extends AbstractPdoDriver
     protected function isTlsEnforcedForConfig(array $config): bool
     {
         return $this->isTlsRequired($config);
-    }
-
-    #[\Override]
-    protected function applyDerivedOptions(array $options, array $config): array
-    {
-        unset($config['timeout']);
-
-        return parent::applyDerivedOptions($options, $config);
     }
 
     /** @return list<array<string,mixed>> */

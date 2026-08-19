@@ -83,84 +83,171 @@ final class ConnectionConfig
     }
 
     /** @param array<string,mixed> $config */
-    public static function fromArray(array $config): self { return new self($config); }
-    public function get(string $key, mixed $default = null): mixed { return $this->config[$key] ?? $default; }
-    public function getDatabase(): string { $v = $this->config['database'] ?? ''; return is_string($v) ? $v : ''; }
+    public static function fromArray(array $config): self
+    {
+        return new self($config);
+    }
+
+    public function get(string $key, mixed $default = null): mixed
+    {
+        return $this->config[$key] ?? $default;
+    }
+
+    public function getDatabase(): string
+    {
+        $v = $this->config['database'] ?? '';
+
+        return is_string($v) ? $v : '';
+    }
+
     public function getDriver(): string
     {
         $v = $this->config['driver'] ?? '';
-        if (!is_string($v) || $v === '') { throw ConnectionException::invalidConfiguration('Database driver is required.'); }
+        if (!is_string($v) || $v === '') {
+            throw ConnectionException::invalidConfiguration('Database driver is required.');
+        }
+
         return $v;
     }
+
     public function getLeastLatencyCacheTtl(): int
     {
         $v = $this->config['read_latency_ttl'] ?? ($this->config['least_latency_ttl'] ?? 15);
+
         return (!is_int($v) && !is_numeric($v)) ? 15 : max(0, (int) $v);
     }
+
     /** @return array<string,mixed> */
-    public function getQueryCommentContext(): array { return $this->normalizeStringKeyArray($this->config['query_comment_context'] ?? []); }
+    public function getQueryCommentContext(): array
+    {
+        return $this->normalizeStringKeyArray($this->config['query_comment_context'] ?? []);
+    }
+
     public function getQueryCommentMaxLength(): int
     {
         $v = $this->config['query_comment_max_length'] ?? 160;
+
         return (!is_int($v) && !is_numeric($v)) ? 160 : max(32, (int) $v);
     }
+
     /** @return array<string,mixed> */
-    public function getReadConfig(): array { return $this->getReadConfigs()[0] ?? []; }
+    public function getReadConfig(): array
+    {
+        return $this->getReadConfigs()[0] ?? [];
+    }
+
     /** @return list<array<string,mixed>> */
-    public function getReadConfigs(): array { return $this->resolveReplicaConfigs('read'); }
+    public function getReadConfigs(): array
+    {
+        return $this->resolveReplicaConfigs('read');
+    }
+
     public function getReadHealthCooldown(): int
     {
         $v = $this->config['read_health_cooldown'] ?? 30;
+
         return (!is_int($v) && !is_numeric($v)) ? 30 : max(0, (int) $v);
     }
+
     public function getReadProbeSampleSize(): int
     {
         $v = $this->config['read_probe_sample_size'] ?? 0;
+
         return (!is_int($v) && !is_numeric($v)) ? 0 : max(0, (int) $v);
     }
+
     public function getReadStrategy(): string
     {
         $strategy = $this->config['read_strategy'] ?? 'random';
 
         return is_string($strategy) ? $strategy : 'random';
     }
+
     /** @return array<string,mixed> */
-    public function getWriteConfig(): array { return $this->getWriteConfigs()[0] ?? []; }
+    public function getWriteConfig(): array
+    {
+        return $this->getWriteConfigs()[0] ?? [];
+    }
+
     /** @return list<array<string,mixed>> */
-    public function getWriteConfigs(): array { return $this->resolveReplicaConfigs('write'); }
-    public function hasReadConfig(): bool { return $this->getReadConfigs() !== []; }
-    public function hasWriteConfig(): bool { return $this->getWriteConfigs() !== []; }
+    public function getWriteConfigs(): array
+    {
+        return $this->resolveReplicaConfigs('write');
+    }
+
+    public function hasReadConfig(): bool
+    {
+        return $this->getReadConfigs() !== [];
+    }
+
+    public function hasWriteConfig(): bool
+    {
+        return $this->getWriteConfigs() !== [];
+    }
+
     public function isSecurityEnabled(): bool
     {
         $security = $this->config['security'] ?? [];
+
         return is_array($security) && !empty($security['enabled']);
     }
-    public function isSticky(): bool { return (bool) ($this->config['sticky'] ?? false); }
+
+    public function isSticky(): bool
+    {
+        return (bool) ($this->config['sticky'] ?? false);
+    }
+
     /** @return array<string,mixed> */
     public function securityConfig(): array
     {
         return array_replace(self::SECURITY_DEFAULT, $this->normalizeStringKeyArray($this->config['security'] ?? []));
     }
-    public function shouldEnforceReadSessionReadOnly(): bool { return (bool) ($this->config['read_session_read_only'] ?? false); }
-    public function shouldUseQueryComments(): bool { return (bool) ($this->config['query_comment_enabled'] ?? false); }
-    public function shouldUseStatementCache(): bool { return (bool) ($this->config['statement_cache_enabled'] ?? false); }
+
+    public function shouldEnforceReadSessionReadOnly(): bool
+    {
+        return (bool) ($this->config['read_session_read_only'] ?? false);
+    }
+
+    public function shouldUseQueryComments(): bool
+    {
+        return (bool) ($this->config['query_comment_enabled'] ?? false);
+    }
+
+    public function shouldUseStatementCache(): bool
+    {
+        return (bool) ($this->config['statement_cache_enabled'] ?? false);
+    }
+
     public function statementCacheSize(): int
     {
         $v = $this->config['statement_cache_size'] ?? 64;
+
         return (!is_int($v) && !is_numeric($v)) ? 64 : max(0, (int) $v);
     }
+
     /** @return array<string,mixed> */
-    public function toArray(): array { return $this->config; }
+    public function toArray(): array
+    {
+        return $this->config;
+    }
+
     /** @return array<string,mixed> */
     public function toSafeArray(): array
     {
         $safe = [];
-        foreach ($this->config as $key => $value) { $safe[$key] = $this->redactSensitiveValue($key, $value); }
+        foreach ($this->config as $key => $value) {
+            $safe[$key] = $this->redactSensitiveValue($key, $value);
+        }
+
         return $safe;
     }
+
     public function with(string $key, mixed $value): self
     {
-        $config = $this->config; $config[$key] = $value; return new self($config);
+        $config = $this->config;
+        $config[$key] = $value;
+
+        return new self($config);
     }
 
     /** @param list<array<string,mixed>> $replicas @return list<array<string,mixed>> */
@@ -169,39 +256,55 @@ final class ConnectionConfig
         $expanded = [];
         foreach ($replicas as $replica) {
             $hosts = $replica['host'] ?? null;
-            if (!is_array($hosts)) { $expanded[] = $replica; continue; }
+            if (!is_array($hosts)) {
+                $expanded[] = $replica;
+
+                continue;
+            }
             $hasExpandedHost = false;
             foreach ($hosts as $host) {
                 if (!is_string($host) || trim($host) === '') {
                     throw ConnectionException::invalidConfiguration('Replica host lists must contain non-empty strings.');
                 }
-                $copy = $replica; $copy['host'] = trim($host); $expanded[] = $copy; $hasExpandedHost = true;
+                $copy = $replica;
+                $copy['host'] = trim($host);
+                $expanded[] = $copy;
+                $hasExpandedHost = true;
             }
-            if (!$hasExpandedHost) { $expanded[] = $replica; }
+            if (!$hasExpandedHost) {
+                $expanded[] = $replica;
+            }
         }
+
         return $expanded;
     }
 
     private function normalizeDriverName(string $driver): string
     {
         $driver = strtolower(trim($driver));
+
         return self::DRIVER_ALIASES[$driver] ?? $driver;
     }
 
     private function normalizeReadStrategy(mixed $strategy): string
     {
-        if (!is_string($strategy)) { throw ConnectionException::invalidConfiguration('read_strategy must be a string.'); }
+        if (!is_string($strategy)) {
+            throw ConnectionException::invalidConfiguration('read_strategy must be a string.');
+        }
         $strategy = strtolower(trim($strategy));
         if (!in_array($strategy, ['random', 'round_robin', 'weighted', 'least_latency'], true)) {
             throw ConnectionException::invalidConfiguration('read_strategy must be one of: random, round_robin, weighted, least_latency.');
         }
+
         return $strategy;
     }
 
     /** @param array<int|string,mixed> $replicas @return list<array<string,mixed>> */
     private function normalizeReplicaConfigs(array $replicas): array
     {
-        if ($replicas === []) { return []; }
+        if ($replicas === []) {
+            return [];
+        }
         if (\array_is_list($replicas)) {
             $normalized = [];
             foreach ($replicas as $replica) {
@@ -210,13 +313,18 @@ final class ConnectionConfig
                 }
                 $normalized[] = $this->normalizeStringKeyArray($replica);
             }
+
             return $normalized;
         }
+
         return [$this->normalizeStringKeyArray($replicas)];
     }
 
     /** @return array<string,mixed> */
-    private function normalizeStringKeyArray(mixed $value): array { return ArrayNormalizer::stringKeyArray($value); }
+    private function normalizeStringKeyArray(mixed $value): array
+    {
+        return ArrayNormalizer::stringKeyArray($value);
+    }
 
     /**
      * @param array<array-key,mixed> $config
@@ -226,27 +334,49 @@ final class ConnectionConfig
     {
         $redacted = [];
         foreach ($config as $key => $value) {
-            if (is_string($key) && $this->shouldRedactConfigKey($key)) { $redacted[$key] = '[redacted]'; continue; }
+            if (is_string($key) && $this->shouldRedactConfigKey($key)) {
+                $redacted[$key] = '[redacted]';
+
+                continue;
+            }
             $redacted[$key] = is_array($value) ? $this->redactSensitiveConfig($value) : $value;
         }
+
         return $redacted;
     }
+
     private function redactSensitiveValue(string $key, mixed $value): mixed
     {
-        if ($this->shouldRedactConfigKey($key)) { return '[redacted]'; }
+        if ($this->shouldRedactConfigKey($key)) {
+            return '[redacted]';
+        }
+
         return is_array($value) ? $this->redactSensitiveConfig($value) : $value;
     }
+
     /** @return array<int|string,mixed> */
     private function requireReplicaArray(mixed $replicas, string $key): array
     {
-        if (!is_array($replicas)) { throw ConnectionException::invalidConfiguration("Config key '{$key}' must be an array."); }
+        if (!is_array($replicas)) {
+            throw ConnectionException::invalidConfiguration("Config key '{$key}' must be an array.");
+        }
+
         return $replicas;
     }
+
     private function resolveDriver(mixed $driverName): ?DriverInterface
     {
-        if (!is_string($driverName) || $driverName === '') { return null; }
-        try { return DriverRegistry::resolve($driverName); } catch (ConnectionException) { return null; }
+        if (!is_string($driverName) || $driverName === '') {
+            return null;
+        }
+
+        try {
+            return DriverRegistry::resolve($driverName);
+        } catch (ConnectionException) {
+            return null;
+        }
     }
+
     /** @return list<array<string,mixed>> */
     private function resolveReplicaConfigs(string $key): array
     {
@@ -257,10 +387,12 @@ final class ConnectionConfig
 
         return $this->normalizeReplicaConfigs($replica);
     }
+
     private function shouldRedactConfigKey(string $key): bool
     {
         return in_array(strtolower(trim($key)), self::SAFE_EXPORT_REDACT_KEYS, true);
     }
+
     /** @param array<string,mixed> $config */
     private function validateConfig(array $config): void
     {
@@ -281,6 +413,7 @@ final class ConnectionConfig
             }
         }
     }
+
     /** @param array<string,mixed> $replica */
     private function validateReplicaDescriptor(array $replica, string $key): void
     {
@@ -294,6 +427,10 @@ final class ConnectionConfig
             }
         }
     }
+
     /** @param array<string,mixed> $security */
-    private function validateSecurityConfig(array $security): void { ConnectionSecurityConfigValidator::validate($security); }
+    private function validateSecurityConfig(array $security): void
+    {
+        ConnectionSecurityConfigValidator::validate($security);
+    }
 }

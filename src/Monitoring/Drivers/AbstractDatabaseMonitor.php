@@ -13,29 +13,34 @@ abstract class AbstractDatabaseMonitor
 {
     public function __construct(protected readonly Connection $connection) {}
 
-    /** @return array<string,mixed> */
-    abstract public function status(): array;
-
     /** @return list<array<string,mixed>> */
-    abstract public function sessions(): array;
-
-    /** @return list<array<string,mixed>> */
-    abstract public function longRunningQueries(int $seconds): array;
+    abstract public function indexMetrics(): array;
 
     /** @return list<array<string,mixed>> */
     abstract public function locks(): array;
 
     /** @return list<array<string,mixed>> */
-    abstract public function tableMetrics(): array;
+    abstract public function longRunningQueries(int $seconds): array;
 
     /** @return list<array<string,mixed>> */
-    abstract public function indexMetrics(): array;
+    abstract public function maintenance(): array;
 
     /** @return list<array<string,mixed>> */
     abstract public function replication(): array;
 
     /** @return list<array<string,mixed>> */
-    abstract public function maintenance(): array;
+    abstract public function sessions(): array;
+
+    /** @return array<string,mixed> */
+    abstract public function status(): array;
+
+    /** @return list<array<string,mixed>> */
+    abstract public function tableMetrics(): array;
+
+    final protected function intValue(mixed $value): int
+    {
+        return is_int($value) || is_numeric($value) ? (int) $value : 0;
+    }
 
     /**
      * Execute a read-only operational query directly on the writer PDO.
@@ -83,11 +88,6 @@ abstract class AbstractDatabaseMonitor
         return is_string($version) || is_int($version) || is_float($version)
             ? (string) $version
             : '';
-    }
-
-    final protected function intValue(mixed $value): int
-    {
-        return is_int($value) || is_numeric($value) ? (int) $value : 0;
     }
 
     private function parameterType(mixed $value): int

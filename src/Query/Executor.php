@@ -8,7 +8,6 @@ use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuting;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryFailed;
-use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Query\Concerns\ExecutorInternals;
 use Infocyph\DBLayer\Query\Core\CompiledQuery;
@@ -32,7 +31,9 @@ final class Executor
     private const int DEFAULT_MAX_QUERY_LOG_ENTRIES = 2_000;
 
     private bool $dispatchEvents = true;
+
     private bool $logging = false;
+
     private int $maxLogEntries = self::DEFAULT_MAX_QUERY_LOG_ENTRIES;
 
     /**
@@ -41,7 +42,9 @@ final class Executor
     private array $queryLog = [];
 
     private int $queryLogCount = 0;
+
     private int $queryLogStart = 0;
+
     private bool $validateBindings = true;
 
     public function __construct(private readonly Connection $connection) {}
@@ -65,12 +68,35 @@ final class Executor
         return $this->runCompiledObserved($compiled)->rowCount;
     }
 
-    public function disableBindingValidation(): void { $this->validateBindings = false; }
-    public function disableEvents(): void { $this->dispatchEvents = false; }
-    public function disableQueryLog(): void { $this->logging = false; }
-    public function enableBindingValidation(): void { $this->validateBindings = true; }
-    public function enableEvents(): void { $this->dispatchEvents = true; }
-    public function enableQueryLog(): void { $this->logging = true; }
+    public function disableBindingValidation(): void
+    {
+        $this->validateBindings = false;
+    }
+
+    public function disableEvents(): void
+    {
+        $this->dispatchEvents = false;
+    }
+
+    public function disableQueryLog(): void
+    {
+        $this->logging = false;
+    }
+
+    public function enableBindingValidation(): void
+    {
+        $this->validateBindings = true;
+    }
+
+    public function enableEvents(): void
+    {
+        $this->dispatchEvents = true;
+    }
+
+    public function enableQueryLog(): void
+    {
+        $this->logging = true;
+    }
 
     /** @return list<array{sql:string,bindings:list<mixed>,time:float,timestamp:float,error:string}> */
     public function getFailedQueries(): array
@@ -82,7 +108,10 @@ final class Executor
     }
 
     /** @return list<array{sql:string,bindings:list<mixed>,time:float,timestamp:float,error?:string}> */
-    public function getQueryLog(): array { return $this->orderedQueryLog(); }
+    public function getQueryLog(): array
+    {
+        return $this->orderedQueryLog();
+    }
 
     /** @return array{total_queries:int,total_time:float,avg_time:float,min_time:float,max_time:float,failed_queries:int} */
     public function getQueryStats(): array
@@ -252,7 +281,10 @@ final class Executor
     }
 
     /** @return list<array<string,mixed>> */
-    public function select(QueryBuilder $query): array { return $this->selectCompiled($this->compileSelect($query)); }
+    public function select(QueryBuilder $query): array
+    {
+        return $this->selectCompiled($this->compileSelect($query));
+    }
 
     /** @return list<array<string,mixed>> */
     public function selectCompiled(CompiledQuery $compiled): array

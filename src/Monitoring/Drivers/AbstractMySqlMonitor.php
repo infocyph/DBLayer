@@ -8,6 +8,39 @@ namespace Infocyph\DBLayer\Monitoring\Drivers;
 abstract class AbstractMySqlMonitor extends AbstractDatabaseMonitor
 {
     #[\Override]
+    public function indexMetrics(): array
+    {
+        return $this->query(
+            'SELECT OBJECT_SCHEMA AS schema_name, OBJECT_NAME AS table_name, INDEX_NAME AS index_name, COUNT_READ AS reads, COUNT_WRITE AS writes, COUNT_FETCH AS fetches, COUNT_INSERT AS inserts, COUNT_UPDATE AS updates, COUNT_DELETE AS deletes FROM performance_schema.table_io_waits_summary_by_index_usage WHERE OBJECT_SCHEMA = DATABASE() AND INDEX_NAME IS NOT NULL ORDER BY COUNT_READ DESC, OBJECT_NAME, INDEX_NAME',
+        );
+    }
+
+    #[\Override]
+    public function longRunningQueries(int $seconds): array
+    {
+        return $this->query(
+            "SELECT ID AS id, USER AS user_name, HOST AS host, DB AS database_name, COMMAND AS command, TIME AS seconds, STATE AS state, INFO AS query FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() AND COMMAND <> 'Sleep' AND TIME >= ? ORDER BY TIME DESC",
+            [max(1, $seconds)],
+        );
+    }
+
+    #[\Override]
+    public function maintenance(): array
+    {
+        return $this->query(
+            "SELECT TABLE_SCHEMA AS schema_name, TABLE_NAME AS table_name, ENGINE AS engine, TABLE_ROWS AS estimated_rows, DATA_LENGTH AS data_bytes, INDEX_LENGTH AS index_bytes, DATA_FREE AS reclaimable_bytes, CASE WHEN DATA_LENGTH > 0 THEN ROUND((DATA_FREE / DATA_LENGTH) * 100, 2) ELSE 0 END AS reclaimable_percent FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' AND DATA_FREE > 0 ORDER BY DATA_FREE DESC LIMIT 50",
+        );
+    }
+
+    #[\Override]
+    public function sessions(): array
+    {
+        return $this->query(
+            'SELECT ID AS id, USER AS user_name, HOST AS host, DB AS database_name, COMMAND AS command, TIME AS seconds, STATE AS state, INFO AS query FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() ORDER BY TIME DESC',
+        );
+    }
+
+    #[\Override]
     public function status(): array
     {
         $statusRows = $this->query(
@@ -42,43 +75,10 @@ abstract class AbstractMySqlMonitor extends AbstractDatabaseMonitor
     }
 
     #[\Override]
-    public function sessions(): array
-    {
-        return $this->query(
-            'SELECT ID AS id, USER AS user_name, HOST AS host, DB AS database_name, COMMAND AS command, TIME AS seconds, STATE AS state, INFO AS query FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() ORDER BY TIME DESC',
-        );
-    }
-
-    #[\Override]
-    public function longRunningQueries(int $seconds): array
-    {
-        return $this->query(
-            "SELECT ID AS id, USER AS user_name, HOST AS host, DB AS database_name, COMMAND AS command, TIME AS seconds, STATE AS state, INFO AS query FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() AND COMMAND <> 'Sleep' AND TIME >= ? ORDER BY TIME DESC",
-            [max(1, $seconds)],
-        );
-    }
-
-    #[\Override]
     public function tableMetrics(): array
     {
         return $this->query(
             "SELECT TABLE_SCHEMA AS schema_name, TABLE_NAME AS table_name, ENGINE AS engine, TABLE_ROWS AS estimated_rows, DATA_LENGTH AS data_bytes, INDEX_LENGTH AS index_bytes, DATA_FREE AS free_bytes, AUTO_INCREMENT AS auto_increment FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC, TABLE_NAME",
-        );
-    }
-
-    #[\Override]
-    public function indexMetrics(): array
-    {
-        return $this->query(
-            'SELECT OBJECT_SCHEMA AS schema_name, OBJECT_NAME AS table_name, INDEX_NAME AS index_name, COUNT_READ AS reads, COUNT_WRITE AS writes, COUNT_FETCH AS fetches, COUNT_INSERT AS inserts, COUNT_UPDATE AS updates, COUNT_DELETE AS deletes FROM performance_schema.table_io_waits_summary_by_index_usage WHERE OBJECT_SCHEMA = DATABASE() AND INDEX_NAME IS NOT NULL ORDER BY COUNT_READ DESC, OBJECT_NAME, INDEX_NAME',
-        );
-    }
-
-    #[\Override]
-    public function maintenance(): array
-    {
-        return $this->query(
-            "SELECT TABLE_SCHEMA AS schema_name, TABLE_NAME AS table_name, ENGINE AS engine, TABLE_ROWS AS estimated_rows, DATA_LENGTH AS data_bytes, INDEX_LENGTH AS index_bytes, DATA_FREE AS reclaimable_bytes, CASE WHEN DATA_LENGTH > 0 THEN ROUND((DATA_FREE / DATA_LENGTH) * 100, 2) ELSE 0 END AS reclaimable_percent FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' AND DATA_FREE > 0 ORDER BY DATA_FREE DESC LIMIT 50",
         );
     }
 

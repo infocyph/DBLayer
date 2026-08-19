@@ -10,8 +10,8 @@ use Infocyph\DBLayer\Monitoring\Drivers\AbstractDatabaseMonitor;
 use Infocyph\DBLayer\Monitoring\Drivers\MariaDBMonitor;
 use Infocyph\DBLayer\Monitoring\Drivers\MySQLMonitor;
 use Infocyph\DBLayer\Monitoring\Drivers\PostgreSQLMonitor;
-use Infocyph\DBLayer\Monitoring\Drivers\SQLServerMonitor;
 use Infocyph\DBLayer\Monitoring\Drivers\SQLiteMonitor;
+use Infocyph\DBLayer\Monitoring\Drivers\SQLServerMonitor;
 use Throwable;
 
 /**
@@ -20,11 +20,11 @@ use Throwable;
  * Construction is cheap. Database inspection queries execute only when one of
  * the monitoring methods is called.
  */
-final class DatabaseMonitor
+final readonly class DatabaseMonitor
 {
-    private readonly AbstractDatabaseMonitor $driverMonitor;
+    private AbstractDatabaseMonitor $driverMonitor;
 
-    public function __construct(private readonly Connection $connection)
+    public function __construct(private Connection $connection)
     {
         $this->driverMonitor = match ($connection->getDriverName()) {
             'mysql' => new MySQLMonitor($connection),
@@ -36,38 +36,10 @@ final class DatabaseMonitor
         };
     }
 
-    /**
-     * Lightweight database/server status. Status intentionally lives under the
-     * monitor surface instead of adding another DB facade shortcut.
-     *
-     * @return array<string,mixed>
-     */
-    public function status(): array
-    {
-        $server = $this->driverMonitor->status();
-
-        return [
-            'driver' => $this->connection->getDriverName(),
-            'database' => $this->connection->getDatabaseName(),
-            'connected' => $this->connection->isConnected(),
-            'transaction_level' => $this->connection->managedTransactionLevel(),
-            'sticky_write' => $this->connection->hasStickyWrite(),
-            'connection_stats' => $this->connection->getStats(),
-            'replica' => $this->connection->getReadReplicaInfo(),
-            'server' => $server,
-        ];
-    }
-
     /** @return list<array<string,mixed>> */
-    public function sessions(): array
+    public function indexMetrics(): array
     {
-        return $this->driverMonitor->sessions();
-    }
-
-    /** @return list<array<string,mixed>> */
-    public function longRunningQueries(int $seconds = 10): array
-    {
-        return $this->driverMonitor->longRunningQueries(max(1, $seconds));
+        return $this->driverMonitor->indexMetrics();
     }
 
     /** @return list<array<string,mixed>> */
@@ -77,15 +49,15 @@ final class DatabaseMonitor
     }
 
     /** @return list<array<string,mixed>> */
-    public function tableMetrics(): array
+    public function longRunningQueries(int $seconds = 10): array
     {
-        return $this->driverMonitor->tableMetrics();
+        return $this->driverMonitor->longRunningQueries(max(1, $seconds));
     }
 
     /** @return list<array<string,mixed>> */
-    public function indexMetrics(): array
+    public function maintenance(): array
     {
-        return $this->driverMonitor->indexMetrics();
+        return $this->driverMonitor->maintenance();
     }
 
     /** @return list<array<string,mixed>> */
@@ -95,9 +67,9 @@ final class DatabaseMonitor
     }
 
     /** @return list<array<string,mixed>> */
-    public function maintenance(): array
+    public function sessions(): array
     {
-        return $this->driverMonitor->maintenance();
+        return $this->driverMonitor->sessions();
     }
 
     /**
@@ -113,13 +85,13 @@ final class DatabaseMonitor
     {
         $errors = [];
         $sections = [
-            'status' => fn(): array => $this->status(),
-            'sessions' => fn(): array => $this->sessions(),
+            'status' => $this->status(...),
+            'sessions' => $this->sessions(...),
             'long_running_queries' => fn(): array => $this->longRunningQueries($longRunningSeconds),
-            'locks' => fn(): array => $this->locks(),
-            'table_metrics' => fn(): array => $this->tableMetrics(),
-            'index_metrics' => fn(): array => $this->indexMetrics(),
-            'replication' => fn(): array => $this->replication(),
+            'locks' => $this->locks(...),
+            'table_metrics' => $this->tableMetrics(...),
+            'index_metrics' => $this->indexMetrics(...),
+            'replication' => $this->replication(...),
         ];
 
         if ($includeMaintenance) {
@@ -147,5 +119,33 @@ final class DatabaseMonitor
         $snapshot['errors'] = $errors;
 
         return $snapshot;
+    }
+
+    /**
+     * Lightweight database/server status. Status intentionally lives under the
+     * monitor surface instead of adding another DB facade shortcut.
+     *
+     * @return array<string,mixed>
+     */
+    public function status(): array
+    {
+        $server = $this->driverMonitor->status();
+
+        return [
+            'driver' => $this->connection->getDriverName(),
+            'database' => $this->connection->getDatabaseName(),
+            'connected' => $this->connection->isConnected(),
+            'transaction_level' => $this->connection->managedTransactionLevel(),
+            'sticky_write' => $this->connection->hasStickyWrite(),
+            'connection_stats' => $this->connection->getStats(),
+            'replica' => $this->connection->getReadReplicaInfo(),
+            'server' => $server,
+        ];
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function tableMetrics(): array
+    {
+        return $this->driverMonitor->tableMetrics();
     }
 }
