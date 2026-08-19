@@ -16,8 +16,6 @@ final class SQLServerCompiler extends AbstractSqlCompiler
     #[\Override]
     protected function compileCtePrefix(bool $recursive): string
     {
-        unset($recursive);
-
         return 'WITH';
     }
 
@@ -66,11 +64,10 @@ final class SQLServerCompiler extends AbstractSqlCompiler
     #[\Override]
     protected function compileLock(string $lock): string
     {
-        unset($lock);
-
         return '';
     }
 
+    /** @param list<string> $returning */
     #[\Override]
     protected function compileReturning(string $sql, array $returning): string
     {
@@ -116,6 +113,10 @@ final class SQLServerCompiler extends AbstractSqlCompiler
         ) ?? $select;
     }
 
+    /**
+     * @param list<string> $uniqueBy
+     * @param list<string> $update
+     */
     #[\Override]
     protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
     {
