@@ -6,11 +6,11 @@ use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Monitoring\DatabaseMonitor;
 
 beforeEach(function (): void {
-    DB::reset();
+    DB::purge();
 });
 
 afterEach(function (): void {
-    DB::reset();
+    DB::purge();
 });
 
 it('exposes database status only through the monitor surface', function (): void {
