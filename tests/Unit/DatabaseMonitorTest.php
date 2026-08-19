@@ -20,12 +20,13 @@ it('exposes database status only through the monitor surface', function (): void
     ]);
 
     $monitor = DB::monitor();
+    $status = $monitor->status();
 
     expect($monitor)->toBeInstanceOf(DatabaseMonitor::class);
-    expect($monitor->status())
+    expect($status)
         ->driver->toBe('sqlite')
-        ->database->toBe(':memory:')
-        ->toHaveKey('server');
+        ->database->toBe(':memory:');
+    expect($status)->toHaveKey('server');
 });
 
 it('collects an on-demand sqlite system snapshot without synthetic server features', function (): void {
