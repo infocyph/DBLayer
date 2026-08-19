@@ -7,6 +7,7 @@ namespace Infocyph\DBLayer\Connection\Concerns;
 use Generator;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\QueryException;
+use Infocyph\DBLayer\Monitoring\DatabaseMonitor;
 use PDO;
 use PDOException;
 use PDOStatement;
@@ -18,6 +19,14 @@ use Throwable;
 trait ConnectionStreaming
 {
     private int $postgresStreamCursorSequence = 0;
+
+    /**
+     * Create an explicit on-demand database-system monitor for this connection.
+     */
+    public function monitor(): DatabaseMonitor
+    {
+        return new DatabaseMonitor($this);
+    }
 
     /**
      * Stream without a full client-side result buffer where the driver supports it.
