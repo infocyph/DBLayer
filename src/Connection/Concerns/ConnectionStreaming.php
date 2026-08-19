@@ -22,8 +22,10 @@ trait ConnectionStreaming
     /**
      * Stream without a full client-side result buffer where the driver supports it.
      *
-     * MySQL temporarily disables PDO buffered queries. PostgreSQL uses a
-     * transaction-scoped server cursor. SQLite delegates to incremental fetch().
+     * MySQL and MariaDB temporarily disable PDO-MySQL buffering. PostgreSQL uses
+     * a transaction-scoped server cursor. SQLite delegates to incremental fetch().
+     * Microsoft SQL Server intentionally has no declared unbuffered strategy until
+     * PDO_SQLSRV bounded-memory behavior is verified by the integration/load suite.
      *
      * @param array<int|string,mixed> $bindings
      * @return Generator<mixed>
@@ -39,7 +41,7 @@ trait ConnectionStreaming
         }
 
         yield from match ($this->getDriverName()) {
-            'mysql' => $this->mysqlUnbufferedStream($sql, $bindings, $fetchMode),
+            'mysql', 'mariadb' => $this->mysqlUnbufferedStream($sql, $bindings, $fetchMode),
             'pgsql' => $this->postgresUnbufferedStream($sql, $bindings, $fetchMode, $fetchSize),
             'sqlite' => $this->stream($sql, $bindings, $fetchMode),
             default => throw ConnectionException::invalidConfiguration(
