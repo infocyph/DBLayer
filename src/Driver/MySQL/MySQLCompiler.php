@@ -11,11 +11,13 @@ use Infocyph\DBLayer\Driver\MySQLFamily\AbstractMySqlCompiler;
  */
 final class MySQLCompiler extends AbstractMySqlCompiler
 {
+    /**
+     * @param list<string> $uniqueBy
+     * @param list<string> $update
+     */
     #[\Override]
     protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
     {
-        unset($uniqueBy);
-
         if ($update === []) {
             throw new \LogicException('MySQL UPSERT requires at least one update column.');
         }
