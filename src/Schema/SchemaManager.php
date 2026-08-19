@@ -47,7 +47,7 @@ final readonly class SchemaManager
         Blueprint::assertIdentifier($table); Blueprint::assertIdentifier($column);
         [$namespace, $table] = $this->splitQualifiedTable($this->physicalTable($table));
         $query = $this->grammar->columnExistsQuery($namespace, $table, $column, $this->connection->getDatabaseName());
-        $rows = $this->connection->select($query['sql'], $query['bindings']);
+        $rows = $this->readSchemaRows($query['sql'], $query['bindings']);
         if ($query['key'] === null) { return $rows !== []; }
         return array_any($rows, fn(array $row): bool => ($row[$query['key']] ?? null) === $query['value']);
     }
@@ -57,7 +57,7 @@ final readonly class SchemaManager
         Blueprint::assertIdentifier($table);
         [$namespace, $table] = $this->splitQualifiedTable($this->physicalTable($table));
         $query = $this->grammar->tableExistsQuery($namespace, $table, $this->connection->getDatabaseName());
-        $rows = $this->connection->select($query['sql'], $query['bindings']);
+        $rows = $this->readSchemaRows($query['sql'], $query['bindings']);
         if ($query['key'] === null) { return $rows !== []; }
         return array_any($rows, fn(array $row): bool => ($row[$query['key']] ?? null) === $query['value']);
     }
@@ -71,7 +71,7 @@ final readonly class SchemaManager
     {
         $query = $this->grammar->tablesQuery($this->connection->getDatabaseName());
         $key = $query['key']; $tables = [];
-        foreach ($this->connection->select($query['sql'], $query['bindings']) as $row) {
+        foreach ($this->readSchemaRows($query['sql'], $query['bindings']) as $row) {
             $name = $row[$key] ?? null;
             if (!is_string($name)) { throw \Infocyph\DBLayer\Exceptions\SchemaException::invalid(sprintf('Database returned an invalid table name for key "%s".', $key)); }
             $tables[] = $name;
@@ -99,6 +99,11 @@ final readonly class SchemaManager
         $prefix = $this->connection->getTablePrefix();
         if ($prefix === '' || str_contains($table, '.')) { return $table; }
         return str_starts_with($table, $prefix) ? $table : $prefix . $table;
+    }
+    /** @param array<int|string,mixed> $bindings @return list<array<string,mixed>> */
+    private function readSchemaRows(string $sql, array $bindings): array
+    {
+        return $this->connection->selectResultSets($sql, $bindings)[0] ?? [];
     }
     private function restoreForeignKeyChecks(): void { foreach ($this->grammar->afterDropAllStatements() as $statement) { $this->connection->statement($statement); } }
     /** @return array{0:string|null,1:string} */
