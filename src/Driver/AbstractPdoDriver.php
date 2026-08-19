@@ -12,8 +12,26 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
 use LogicException;
 use PDO;
 
+/**
+ * Base PDO-backed driver.
+ *
+ * - Normalises createPdo() so concrete drivers only care about DSN + capabilities.
+ * - Leaves config validation to ConnectionConfig by default (drivers can override).
+ * - Provides a consistent set of secure, production-grade PDO attributes.
+ */
 abstract class AbstractPdoDriver implements DriverInterface
 {
+    /**
+     * @var array{
+     *   supportsReturning:bool,
+     *   supportsInsertIgnore:bool,
+     *   supportsUpsert:bool,
+     *   supportsSavepoints:bool,
+     *   supportsSchemas:bool,
+     *   supportsJson:bool,
+     *   supportsWindowFunctions:bool
+     * }
+     */
     protected const array CAPABILITIES = [
         'supportsReturning' => false,
         'supportsInsertIgnore' => false,
@@ -54,20 +72,40 @@ abstract class AbstractPdoDriver implements DriverInterface
         'supportsWindowFunctions' => true,
     ];
 
-    /** @var class-string<QueryCompilerInterface> */
+    /**
+     * @var class-string<QueryCompilerInterface>
+     */
     protected const ?string COMPILER_CLASS = null;
-    /** @var array<string,mixed> */
+
+    /**
+     * @var array<string,mixed>
+     */
     protected const array DRIVER_DEFAULTS = [];
+
     protected const string DRIVER_NAME = '';
-    /** @var list<string> */
+
+    /**
+     * @var list<string>
+     */
     protected const array NETWORK_OPTIONAL_STRINGS = [];
-    /** @var list<string> */
+
+    /**
+     * @var list<string>
+     */
     protected const array NETWORK_REQUIRED = [];
-    /** @var list<string> */
+
+    /**
+     * @var list<string>
+     */
     protected const array NETWORK_REQUIRED_ANY = [];
+
     protected const ?string TLS_REQUIREMENT_MESSAGE = null;
 
-    /** @param array<string,mixed> $config */
+    /**
+     * Build the PDO DSN string for the driver.
+     *
+     * @param array<string,mixed> $config
+     */
     abstract protected function buildDsn(array $config, bool $readOnly): string;
 
     #[\Override]
@@ -80,7 +118,9 @@ abstract class AbstractPdoDriver implements DriverInterface
     {
     }
 
-    /** Compatibility entry point retained for consumers of DBLayer 4.0.1. */
+    /**
+     * Compatibility entry point retained for consumers of DBLayer 4.0.1.
+     */
     public function beginTransaction(PDO $pdo): bool
     {
         return $pdo->beginTransaction();
@@ -90,6 +130,7 @@ abstract class AbstractPdoDriver implements DriverInterface
     final public function createCompiler(): QueryCompilerInterface
     {
         $compilerClass = static::COMPILER_CLASS;
+
         if ($compilerClass === null) {
             throw new LogicException(sprintf('%s must define COMPILER_CLASS.', static::class));
         }
@@ -97,16 +138,28 @@ abstract class AbstractPdoDriver implements DriverInterface
         return new $compilerClass();
     }
 
+    /**
+     * Create a PDO instance for this driver.
+     *
+     * Concrete drivers only need to implement buildDsn().
+     */
     #[\Override]
     final public function createPdo(ConnectionConfig $config, bool $readOnly = false): PDO
     {
         $data = $config->toArray();
         $dsn = $this->buildDsn($data, $readOnly);
+
         $username = $this->stringValue($data['username'] ?? '');
         $password = $this->stringValue($data['password'] ?? '');
         $options = $this->normalizePdoOptions($data['options'] ?? null);
+
+        // Derive PDO attributes from config if not explicitly set.
         $options = $this->applyDerivedOptions($options, $data);
+
+        // Driver-provided defaults (secure by default).
         $defaults = $this->defaultPdoOptions($data);
+
+        // User-specified options should win.
         $options = $options + $defaults;
 
         return new PDO($dsn, $username, $password, $options);
@@ -134,10 +187,14 @@ abstract class AbstractPdoDriver implements DriverInterface
         );
     }
 
+    /**
+     * Canonical engine name, e.g. "mysql", "pgsql", "sqlite".
+     */
     #[\Override]
     final public function getName(): string
     {
         $name = static::DRIVER_NAME;
+
         if ($name === '') {
             throw new LogicException(sprintf('%s must define DRIVER_NAME.', static::class));
         }
@@ -151,7 +208,14 @@ abstract class AbstractPdoDriver implements DriverInterface
         return $this->getName() === 'sqlite' ? 999 : 65_535;
     }
 
-    /** @param array<string,mixed> $config @return array<string,mixed> */
+    /**
+     * Merge driver-specific defaults into user config.
+     *
+     * Default: ensure "driver" is set to this driver's canonical name.
+     *
+     * @param array<string,mixed> $config
+     * @return array<string,mixed>
+     */
     #[\Override]
     public function mergeDefaults(array $config): array
     {
@@ -166,11 +230,18 @@ abstract class AbstractPdoDriver implements DriverInterface
         return $config;
     }
 
-    /** @param array<string,mixed> $config */
+    /**
+     * Validate driver-specific configuration.
+     *
+     * By default, rely on ConnectionConfig to enforce core invariants.
+     *
+     * @param array<string,mixed> $config
+     */
     #[\Override]
     public function validateConfig(array $config): void
     {
         $driver = $this->getName();
+
         $this->validateNetworkConfig(
             $config,
             $driver,
@@ -193,16 +264,25 @@ abstract class AbstractPdoDriver implements DriverInterface
         );
     }
 
-    /** @param array<int,mixed> $options @param array<string,mixed> $config @return array<int,mixed> */
+    /**
+     * Apply derived PDO options based on generic config keys.
+     *
+     * @param array<int,mixed> $options
+     * @param array<string,mixed> $config
+     * @return array<int,mixed>
+     */
     protected function applyDerivedOptions(array $options, array $config): array
     {
+        // Connection timeout (seconds) → ATTR_TIMEOUT (if not explicitly set).
         if (isset($config['timeout']) && is_numeric($config['timeout'])) {
             $timeout = (int) $config['timeout'];
+
             if ($timeout > 0 && !array_key_exists(PDO::ATTR_TIMEOUT, $options)) {
                 $options[PDO::ATTR_TIMEOUT] = $timeout;
             }
         }
 
+        // Persistent connections.
         if (!empty($config['persistent']) && !array_key_exists(PDO::ATTR_PERSISTENT, $options)) {
             $options[PDO::ATTR_PERSISTENT] = true;
         }
@@ -210,7 +290,12 @@ abstract class AbstractPdoDriver implements DriverInterface
         return $options;
     }
 
-    /** @param array<string,mixed> $config @return array<int,mixed> */
+    /**
+     * Default PDO attributes for this driver.
+     *
+     * @param array<string,mixed> $config
+     * @return array<int,mixed>
+     */
     protected function defaultPdoOptions(array $config): array
     {
         return [
@@ -221,7 +306,9 @@ abstract class AbstractPdoDriver implements DriverInterface
         ];
     }
 
-    /** @param array<string,mixed> $config */
+    /**
+     * @param array<string,mixed> $config
+     */
     protected function hasRequiredTlsConfiguration(array $config): bool
     {
         return true;
@@ -232,6 +319,7 @@ abstract class AbstractPdoDriver implements DriverInterface
         if (is_int($value)) {
             return $value;
         }
+
         if (is_string($value) && ctype_digit($value)) {
             return (int) $value;
         }
@@ -244,30 +332,46 @@ abstract class AbstractPdoDriver implements DriverInterface
         return is_string($value) && ctype_digit($value);
     }
 
-    /** @param array<string,mixed> $config */
+    /**
+     * @param array<string,mixed> $config
+     */
     protected function isTlsEnforcedForConfig(array $config): bool
     {
         return $this->isTlsRequired($config);
     }
 
-    /** @param array<string,mixed> $config */
+    /**
+     * Whether TLS is required by generic security config.
+     *
+     * @param array<string,mixed> $config
+     */
     protected function isTlsRequired(array $config): bool
     {
         $security = $config['security'] ?? [];
-        if (!is_array($security) || !isset($security['require_tls'])) {
+
+        if (!is_array($security)) {
+            return false;
+        }
+
+        if (!isset($security['require_tls'])) {
             return false;
         }
 
         return (bool) $security['require_tls'];
     }
 
-    /** @return list<string> */
+    /**
+     * @return list<string>
+     */
     protected function optionalNetworkStringSettings(): array
     {
         return static::NETWORK_OPTIONAL_STRINGS;
     }
 
-    /** @param array<string,mixed> $config @param list<string> $keys */
+    /**
+     * @param array<string,mixed> $config
+     * @param list<string> $keys
+     */
     protected function rejectUnsupportedSettings(array $config, string $driver, array $keys): void
     {
         foreach ($keys as $key) {
@@ -283,11 +387,15 @@ abstract class AbstractPdoDriver implements DriverInterface
         }
     }
 
-    /** @param array<string,mixed> $config @param list<string> $keys */
+    /**
+     * @param array<string,mixed> $config
+     * @param list<string> $keys
+     */
     protected function requireAnyNonEmptyStringSetting(array $config, array $keys, string $driver): void
     {
         foreach ($keys as $key) {
             $value = $config[$key] ?? null;
+
             if (is_string($value) && $value !== '') {
                 return;
             }
@@ -296,28 +404,37 @@ abstract class AbstractPdoDriver implements DriverInterface
         $this->throwInvalidConfiguration($driver);
     }
 
-    /** @return list<string> */
+    /**
+     * @return list<string>
+     */
     protected function requiredAnyNetworkSettings(): array
     {
         return static::NETWORK_REQUIRED_ANY;
     }
 
-    /** @return list<string> */
+    /**
+     * @return list<string>
+     */
     protected function requiredNetworkSettings(): array
     {
         return static::NETWORK_REQUIRED;
     }
 
-    /** @param array<string,mixed> $config */
+    /**
+     * @param array<string,mixed> $config
+     */
     protected function requireNonEmptyStringSetting(array $config, string $key, string $driver): void
     {
         $value = $config[$key] ?? null;
+
         if (!is_string($value) || $value === '') {
             $this->throwInvalidConfiguration($driver);
         }
     }
 
-    /** @param array<string,mixed> $config */
+    /**
+     * @param array<string,mixed> $config
+     */
     protected function requireOptionalBooleanSetting(array $config, string $key, string $driver): void
     {
         if (isset($config[$key]) && !is_bool($config[$key])) {
@@ -328,7 +445,9 @@ abstract class AbstractPdoDriver implements DriverInterface
         }
     }
 
-    /** @param array<string,mixed> $config */
+    /**
+     * @param array<string,mixed> $config
+     */
     protected function requireOptionalNumericPort(array $config, string $driver): void
     {
         if (isset($config['port']) && !is_int($config['port']) && !$this->isNumericString($config['port'])) {
@@ -336,7 +455,9 @@ abstract class AbstractPdoDriver implements DriverInterface
         }
     }
 
-    /** @param array<string,mixed> $config */
+    /**
+     * @param array<string,mixed> $config
+     */
     protected function requireOptionalStringSetting(array $config, string $key, string $driver): void
     {
         if (isset($config[$key]) && !is_string($config[$key])) {
@@ -344,7 +465,9 @@ abstract class AbstractPdoDriver implements DriverInterface
         }
     }
 
-    /** @param array<string,mixed> $config */
+    /**
+     * @param array<string,mixed> $config
+     */
     protected function requireOptionalTokenSetting(
         array $config,
         string $key,
@@ -369,6 +492,7 @@ abstract class AbstractPdoDriver implements DriverInterface
         if (is_string($value)) {
             return $value;
         }
+
         if (is_int($value) || is_float($value) || is_bool($value)) {
             return (string) $value;
         }
@@ -385,7 +509,11 @@ abstract class AbstractPdoDriver implements DriverInterface
     {
         $message = static::TLS_REQUIREMENT_MESSAGE;
 
-        return $message === null ? null : str_replace('{driver}', $driver, $message);
+        if ($message === null) {
+            return null;
+        }
+
+        return str_replace('{driver}', $driver, $message);
     }
 
     /**
@@ -404,10 +532,13 @@ abstract class AbstractPdoDriver implements DriverInterface
         foreach ($required as $key) {
             $this->requireNonEmptyStringSetting($config, $key, $driver);
         }
+
         if ($requiredAny !== []) {
             $this->requireAnyNonEmptyStringSetting($config, $requiredAny, $driver);
         }
+
         $this->requireOptionalNumericPort($config, $driver);
+
         foreach ($optionalStrings as $key) {
             $this->requireOptionalStringSetting($config, $key, $driver);
         }
@@ -425,15 +556,24 @@ abstract class AbstractPdoDriver implements DriverInterface
         string $message,
         ?callable $isTlsRequired = null,
     ): void {
-        $requiresTls = $isTlsRequired !== null ? $isTlsRequired($config) : $this->isTlsRequired($config);
-        if (!$requiresTls || $hasTlsConfiguration($config)) {
+        $requiresTls = $isTlsRequired !== null
+            ? $isTlsRequired($config)
+            : $this->isTlsRequired($config);
+
+        if (!$requiresTls) {
+            return;
+        }
+
+        if ($hasTlsConfiguration($config)) {
             return;
         }
 
         $this->throwInvalidConfiguration($driver, $message);
     }
 
-    /** @return array<int,mixed> */
+    /**
+     * @return array<int,mixed>
+     */
     private function normalizePdoOptions(mixed $options): array
     {
         if (!is_array($options)) {
@@ -441,11 +581,14 @@ abstract class AbstractPdoDriver implements DriverInterface
         }
 
         $normalized = [];
+
         foreach ($options as $key => $value) {
             if (is_int($key)) {
                 $normalized[$key] = $value;
+
                 continue;
             }
+
             if (ctype_digit($key)) {
                 $normalized[(int) $key] = $value;
             }
@@ -459,6 +602,7 @@ abstract class AbstractPdoDriver implements DriverInterface
         if (is_string($value)) {
             return $value;
         }
+
         if (is_int($value) || is_float($value) || is_bool($value)) {
             return (string) $value;
         }
