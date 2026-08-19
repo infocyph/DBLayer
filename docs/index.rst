@@ -9,10 +9,10 @@ that still provides:
 
 - A fluent query builder
 - Repository-level conveniences
-- Multi-driver support (MySQL, PostgreSQL, SQLite)
+- Multi-driver support (MySQL, MariaDB, PostgreSQL, Microsoft SQL Server, SQLite)
 - Read/write splitting with replica strategies
 - Transaction and retry controls
-- Security checks, telemetry, and profiling
+- Security checks, telemetry, profiling, and on-demand database-system monitoring
 
 How To Read This Documentation
 ------------------------------
@@ -28,7 +28,7 @@ If you are new to the project, follow this order:
 7. ``query-builder`` and ``repository`` for day-to-day application code.
 8. ``relation-loading`` for bounded, explicit relationship projection.
 9. ``schema-migrations`` for DDL, deployment migrations, and seeding.
-10. ``security`` and ``observability`` before deploying.
+10. ``security``, ``observability``, and ``monitoring`` before deploying.
 
 The API reference sections are intentionally method-oriented and are best used
 as lookup pages after reading the guides.
@@ -60,6 +60,7 @@ as lookup pages after reading the guides.
    security
    limitations
    observability
+   monitoring
    events-helpers
    benchmarks
 
