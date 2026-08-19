@@ -28,6 +28,7 @@ final class SQLiteCompiler extends AbstractSqlCompiler
         };
     }
 
+    /** @param list<string> $returning */
     #[\Override]
     protected function compileReturning(string $sql, array $returning): string
     {
@@ -37,6 +38,10 @@ final class SQLiteCompiler extends AbstractSqlCompiler
         ));
     }
 
+    /**
+     * @param list<string> $uniqueBy
+     * @param list<string> $update
+     */
     #[\Override]
     protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
     {
