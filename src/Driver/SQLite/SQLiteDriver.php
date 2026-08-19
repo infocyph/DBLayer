@@ -45,8 +45,6 @@ final class SQLiteDriver extends AbstractPdoDriver
         bool $verbose = false,
         ?string $serverVersion = null,
     ): string {
-        unset($serverVersion);
-
         if ($analyze || $buffers || $verbose) {
             throw QueryException::invalidParameter(
                 'explain',
@@ -125,8 +123,6 @@ final class SQLiteDriver extends AbstractPdoDriver
         // Keep a stable DSN target for both read and write handles.
         // Using "sqlite:<path>?mode=ro" is not portable across runtimes and
         // may resolve to a different file target, causing schema drift.
-        unset($readOnly);
-
         return 'sqlite:' . $database;
     }
 }
