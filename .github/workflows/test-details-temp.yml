@@ -7,6 +7,11 @@ on:
     branches: ["feature/db-linup"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 jobs:
   test-details:
     runs-on: ubuntu-latest
@@ -21,4 +26,43 @@ jobs:
         with:
           dependency-versions: highest
       - name: Run exact PHPForge detailed suite
-        run: composer ic:tests:details
+        shell: bash
+        run: |
+          set +e
+          composer ic:tests:details 2>&1 | tee /tmp/ic-tests-details.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
+      - name: Publish exact failure output
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- ic-tests-details-diagnostic -->';
+            const text = fs.existsSync('/tmp/ic-tests-details.log')
+              ? fs.readFileSync('/tmp/ic-tests-details.log', 'utf8')
+              : 'The detailed test command failed before producing a captured log.';
+            const tail = text.slice(-50000).replace(/```/g, '```\u200b');
+            const body = `${marker}\nExact \`composer ic:tests:details\` failure output:\n\n\`\`\`text\n${tail}\n\`\`\``;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find(comment => comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
