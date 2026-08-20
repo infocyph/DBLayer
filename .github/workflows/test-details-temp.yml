@@ -1,127 +1,73 @@
 name: "PHPForge Test Details"
 
 on:
-  pull_request:
-    branches: ["main"]
   push:
     branches: ["feature/db-linup"]
-  workflow_dispatch:
 
 permissions:
   contents: write
-  pull-requests: write
-  issues: write
 
 jobs:
-  test-details:
+  apply-exact-failures:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/db-linup
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.4"
-          extensions: pdo, pdo_mysql, pdo_pgsql, pdo_sqlite
-          coverage: none
-      - uses: ramsey/composer-install@v3
-        with:
-          dependency-versions: highest
-      - name: Run exact PHPForge detailed suite
+      - name: Apply exact ic:tests:details failures
         shell: bash
         run: |
-          set +e
-          composer ic:tests:details 2>&1 | tee /tmp/ic-tests-details.log
-          status=${PIPESTATUS[0]}
-          exit "$status"
-      - name: Publish exact failure output
-        if: failure() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const marker = '<!-- ic-tests-details-diagnostic -->';
-            const text = fs.existsSync('/tmp/ic-tests-details.log')
-              ? fs.readFileSync('/tmp/ic-tests-details.log', 'utf8')
-              : 'The detailed test command failed before producing a captured log.';
-            const tail = text.slice(-50000).replace(/```/g, '```\u200b');
-            const body = `${marker}\nExact \`composer ic:tests:details\` failure output:\n\n\`\`\`text\n${tail}\n\`\`\``;
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 100,
-            });
-            const existing = comments.find(comment => comment.body?.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
-      - name: Apply current exact failures
-        if: failure()
-        shell: python
-        run: |
+          python <<'PY'
           from pathlib import Path
 
-          def replace(path: str, old: str, new: str) -> None:
-              file = Path(path)
-              text = file.read_text()
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
               if old not in text:
-                  return
-              file.write_text(text.replace(old, new, 1))
+                  raise SystemExit(f'Expected source not found: {path}')
+              p.write_text(text.replace(old, new, 1))
 
-          replace(
-              'src/Connection/ConnectionConfig.php',
-              '/** @param list<array<string,mixed>> $replicas @return list<array<string,mixed>> */',
-              '/**\n     * @param list<array<string,mixed>> $replicas\n     * @return list<array<string,mixed>>\n     */',
-          )
-          replace(
-              'src/Connection/ConnectionConfig.php',
-              '/** @param array<int|string,mixed> $replicas @return list<array<string,mixed>> */',
-              '/**\n     * @param array<int|string,mixed> $replicas\n     * @return list<array<string,mixed>>\n     */',
-          )
-          replace(
-              'src/Driver/AbstractSqlCompiler.php',
-              '    protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string\n',
-              '    /**\n     * @param list<string> $uniqueBy\n     * @param list<string> $update\n     */\n    protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string\n',
-          )
-          replace(
-              'src/Query/Executor.php',
-              '    /** @param array<int|string,mixed> $bindings @return list<array<string,mixed>> */\n    public function raw(string $sql, array $bindings = []): array\n',
-              '    /**\n     * @param array<int|string,mixed> $bindings\n     * @return list<array<string,mixed>>\n     */\n    public function raw(string $sql, array $bindings = []): array\n',
-          )
+          replace('src/Connection/ConnectionConfig.php', '/** @param list<array<string,mixed>> $replicas @return list<array<string,mixed>> */', '''/**
+               * @param list<array<string,mixed>> $replicas
+               * @return list<array<string,mixed>>
+               */''')
+          replace('src/Connection/ConnectionConfig.php', '/** @param array<int|string,mixed> $replicas @return list<array<string,mixed>> */', '''/**
+               * @param array<int|string,mixed> $replicas
+               * @return list<array<string,mixed>>
+               */''')
+          replace('src/Driver/AbstractSqlCompiler.php', '    protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string\n', '''    /**
+               * @param list<string> $uniqueBy
+               * @param list<string> $update
+               */
+              protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
+          ''')
+          replace('src/Query/Executor.php', '    /** @param array<int|string,mixed> $bindings @return list<array<string,mixed>> */\n    public function raw(string $sql, array $bindings = []): array\n', '''    /**
+               * @param array<int|string,mixed> $bindings
+               * @return list<array<string,mixed>>
+               */
+              public function raw(string $sql, array $bindings = []): array
+          ''')
 
           connection = Path('src/Connection/Connection.php')
-          connection_text = connection.read_text()
-          explain_start = connection_text.index('    /**\n     * Inspect the execution plan for a SELECT statement.')
-          explain_end = connection_text.index('    /**\n     * Get declared capabilities for this driver.', explain_start)
-          connection_text = connection_text[:explain_start] + connection_text[explain_end:]
-          connection_text = connection_text.replace('use Infocyph\\DBLayer\\Driver\\SQLServer\\SQLServerDriver;\n', '')
-          connection.write_text(connection_text)
+          text = connection.read_text()
+          start = text.index('    /**\n     * Inspect the execution plan for a SELECT statement.')
+          end = text.index('    /**\n     * Get declared capabilities for this driver.', start)
+          text = text[:start] + text[end:]
+          text = text.replace('use Infocyph\\DBLayer\\Driver\\SQLServer\\SQLServerDriver;\n', '')
+          connection.write_text(text)
 
-          monitoring = Path('src/Connection/Concerns/ConnectionMonitoring.php')
-          monitoring.write_text('''<?php
+          Path('src/Connection/Concerns/ConnectionMonitoring.php').write_text(r'''<?php
 
 declare(strict_types=1);
 
-namespace Infocyph\\DBLayer\\Connection\\Concerns;
+namespace Infocyph\DBLayer\Connection\Concerns;
 
-use Infocyph\\DBLayer\\Connection\\SqlStatementInspector;
-use Infocyph\\DBLayer\\Driver\\SQLServer\\SQLServerDriver;
-use Infocyph\\DBLayer\\Exceptions\\QueryException;
-use Infocyph\\DBLayer\\Monitoring\\DatabaseMonitor;
-use Infocyph\\DBLayer\\Query\\Core\\QueryType;
+use Infocyph\DBLayer\Connection\SqlStatementInspector;
+use Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver;
+use Infocyph\DBLayer\Exceptions\QueryException;
+use Infocyph\DBLayer\Monitoring\DatabaseMonitor;
+use Infocyph\DBLayer\Query\Core\QueryType;
 use PDO;
 
 /**
@@ -147,15 +93,11 @@ trait ConnectionMonitoring
         bool $verbose = false,
     ): array {
         if (SqlStatementInspector::leadingStatementKeyword($sql) !== 'SELECT') {
-            throw QueryException::invalidParameter(
-                'sql',
-                'Execution plans accept SELECT statements only.',
-            );
+            throw QueryException::invalidParameter('sql', 'Execution plans accept SELECT statements only.');
         }
 
         if ($this->driver instanceof SQLServerDriver) {
             $preparedSql = $this->prepareSqlForExecution($sql, $bindings);
-
             if ($this->pretending) {
                 $this->recordPretend($preparedSql, $bindings);
 
@@ -193,30 +135,24 @@ trait ConnectionMonitoring
 ''')
 
           schema = Path('src/Schema/SchemaColumnCompiler.php')
-          schema_text = schema.read_text()
-          compile_start = schema_text.index('    public function compile(ColumnDefinition $column): string')
-          compile_end = schema_text.index('    public function compileType(ColumnDefinition $column): string', compile_start)
-          schema_text = schema_text[:compile_start] + schema_text[compile_end:]
-          schema_text = schema_text.replace(
-              'use Infocyph\\DBLayer\\Query\\Expression;\n',
-              'use Infocyph\\DBLayer\\Query\\Expression;\nuse Infocyph\\DBLayer\\Schema\\Concerns\\CompilesColumnDefinitions;\n',
-          )
-          schema_text = schema_text.replace(
-              'final readonly class SchemaColumnCompiler\n{\n',
-              'final readonly class SchemaColumnCompiler\n{\n    use CompilesColumnDefinitions;\n\n',
-          )
-          schema.write_text(schema_text)
+          text = schema.read_text()
+          start = text.index('    public function compile(ColumnDefinition $column): string')
+          end = text.index('    public function compileType(ColumnDefinition $column): string', start)
+          text = text[:start] + text[end:]
+          text = text.replace('use Infocyph\\DBLayer\\Query\\Expression;\n', 'use Infocyph\\DBLayer\\Query\\Expression;\nuse Infocyph\\DBLayer\\Schema\\Concerns\\CompilesColumnDefinitions;\n')
+          text = text.replace('final readonly class SchemaColumnCompiler\n{\n', 'final readonly class SchemaColumnCompiler\n{\n    use CompilesColumnDefinitions;\n\n')
+          schema.write_text(text)
 
           concern = Path('src/Schema/Concerns/CompilesColumnDefinitions.php')
           concern.parent.mkdir(parents=True, exist_ok=True)
-          concern.write_text('''<?php
+          concern.write_text(r'''<?php
 
 declare(strict_types=1);
 
-namespace Infocyph\\DBLayer\\Schema\\Concerns;
+namespace Infocyph\DBLayer\Schema\Concerns;
 
-use Infocyph\\DBLayer\\Exceptions\\SchemaException;
-use Infocyph\\DBLayer\\Schema\\ColumnDefinition;
+use Infocyph\DBLayer\Exceptions\SchemaException;
+use Infocyph\DBLayer\Schema\ColumnDefinition;
 
 trait CompilesColumnDefinitions
 {
@@ -274,15 +210,12 @@ trait CompilesColumnDefinitions
     }
 }
 ''')
-      - name: Commit exact failures
-        if: failure()
+          PY
+      - name: Commit fixes
         shell: bash
         run: |
-          if git diff --quiet && [ -z "$(git status --porcelain)" ]; then
-            exit 0
-          fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src
+          git add src/Connection/Connection.php src/Connection/ConnectionConfig.php src/Connection/Concerns/ConnectionMonitoring.php src/Driver/AbstractSqlCompiler.php src/Query/Executor.php src/Schema/SchemaColumnCompiler.php src/Schema/Concerns/CompilesColumnDefinitions.php
           git commit -m "Fix PHPForge detailed test failures"
           git push origin HEAD:feature/db-linup
