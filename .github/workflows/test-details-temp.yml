@@ -8,46 +8,18 @@ permissions:
   contents: write
 
 jobs:
-  apply-exact-failures:
+  apply-remaining-failures:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/db-linup
-      - name: Apply exact ic:tests:details failures
+      - name: Apply remaining exact ic:tests:details failures
         shell: bash
         run: |
           python <<'PY'
           from pathlib import Path
-
-          def replace(path, old, new):
-              p = Path(path)
-              text = p.read_text()
-              if old not in text:
-                  raise SystemExit(f'Expected source not found: {path}')
-              p.write_text(text.replace(old, new, 1))
-
-          replace('src/Connection/ConnectionConfig.php', '/** @param list<array<string,mixed>> $replicas @return list<array<string,mixed>> */', '''/**
-               * @param list<array<string,mixed>> $replicas
-               * @return list<array<string,mixed>>
-               */''')
-          replace('src/Connection/ConnectionConfig.php', '/** @param array<int|string,mixed> $replicas @return list<array<string,mixed>> */', '''/**
-               * @param array<int|string,mixed> $replicas
-               * @return list<array<string,mixed>>
-               */''')
-          replace('src/Driver/AbstractSqlCompiler.php', '    protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string\n', '''    /**
-               * @param list<string> $uniqueBy
-               * @param list<string> $update
-               */
-              protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
-          ''')
-          replace('src/Query/Executor.php', '    /** @param array<int|string,mixed> $bindings @return list<array<string,mixed>> */\n    public function raw(string $sql, array $bindings = []): array\n', '''    /**
-               * @param array<int|string,mixed> $bindings
-               * @return list<array<string,mixed>>
-               */
-              public function raw(string $sql, array $bindings = []): array
-          ''')
 
           connection = Path('src/Connection/Connection.php')
           text = connection.read_text()
@@ -93,11 +65,15 @@ trait ConnectionMonitoring
         bool $verbose = false,
     ): array {
         if (SqlStatementInspector::leadingStatementKeyword($sql) !== 'SELECT') {
-            throw QueryException::invalidParameter('sql', 'Execution plans accept SELECT statements only.');
+            throw QueryException::invalidParameter(
+                'sql',
+                'Execution plans accept SELECT statements only.',
+            );
         }
 
         if ($this->driver instanceof SQLServerDriver) {
             $preparedSql = $this->prepareSqlForExecution($sql, $bindings);
+
             if ($this->pretending) {
                 $this->recordPretend($preparedSql, $bindings);
 
@@ -115,16 +91,28 @@ trait ConnectionMonitoring
         }
 
         $serverVersion = null;
+
         if ($analyze && $this->driver->getName() === 'mysql' && !$this->pretending) {
             $resolvedVersion = $this->getPdo()->getAttribute(PDO::ATTR_SERVER_VERSION);
+
             if (is_string($resolvedVersion) || is_int($resolvedVersion) || is_float($resolvedVersion)) {
                 $serverVersion = (string) $resolvedVersion;
             }
         }
 
-        $explainSql = $this->driver->compileExplain($sql, $analyze, $buffers, $verbose, $serverVersion);
+        $explainSql = $this->driver->compileExplain(
+            $sql,
+            $analyze,
+            $buffers,
+            $verbose,
+            $serverVersion,
+        );
 
-        return array_values($this->fetchAllFromKnownTypeStatement($explainSql, $bindings, QueryType::SELECT));
+        return array_values($this->fetchAllFromKnownTypeStatement(
+            $explainSql,
+            $bindings,
+            QueryType::SELECT,
+        ));
     }
 
     public function monitor(): DatabaseMonitor
@@ -139,8 +127,14 @@ trait ConnectionMonitoring
           start = text.index('    public function compile(ColumnDefinition $column): string')
           end = text.index('    public function compileType(ColumnDefinition $column): string', start)
           text = text[:start] + text[end:]
-          text = text.replace('use Infocyph\\DBLayer\\Query\\Expression;\n', 'use Infocyph\\DBLayer\\Query\\Expression;\nuse Infocyph\\DBLayer\\Schema\\Concerns\\CompilesColumnDefinitions;\n')
-          text = text.replace('final readonly class SchemaColumnCompiler\n{\n', 'final readonly class SchemaColumnCompiler\n{\n    use CompilesColumnDefinitions;\n\n')
+          text = text.replace(
+              'use Infocyph\\DBLayer\\Query\\Expression;\n',
+              'use Infocyph\\DBLayer\\Query\\Expression;\nuse Infocyph\\DBLayer\\Schema\\Concerns\\CompilesColumnDefinitions;\n',
+          )
+          text = text.replace(
+              'final readonly class SchemaColumnCompiler\n{\n',
+              'final readonly class SchemaColumnCompiler\n{\n    use CompilesColumnDefinitions;\n\n',
+          )
           schema.write_text(text)
 
           concern = Path('src/Schema/Concerns/CompilesColumnDefinitions.php')
@@ -216,6 +210,6 @@ trait CompilesColumnDefinitions
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/Connection/Connection.php src/Connection/ConnectionConfig.php src/Connection/Concerns/ConnectionMonitoring.php src/Driver/AbstractSqlCompiler.php src/Query/Executor.php src/Schema/SchemaColumnCompiler.php src/Schema/Concerns/CompilesColumnDefinitions.php
-          git commit -m "Fix PHPForge detailed test failures"
+          git add src/Connection/Connection.php src/Connection/Concerns/ConnectionMonitoring.php src/Schema/SchemaColumnCompiler.php src/Schema/Concerns/CompilesColumnDefinitions.php
+          git commit -m "Reduce PHPForge complexity findings"
           git push origin HEAD:feature/db-linup
