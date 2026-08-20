@@ -1,8 +1,8 @@
 name: "PHPForge Pint Repair"
 
 on:
-  push:
-    branches: ["feature/db-linup"]
+  pull_request:
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
