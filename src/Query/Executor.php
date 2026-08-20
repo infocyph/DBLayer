@@ -247,7 +247,10 @@ final class Executor
         return $this->runCompiledObserved($this->connection->getCompiler()->compile($query->toInsertPayload($rows)));
     }
 
-    /** @param array<int|string,mixed> $bindings @return list<array<string,mixed>> */
+    /**
+     * @param array<int|string,mixed> $bindings
+     * @return list<array<string,mixed>>
+     */
     public function raw(string $sql, array $bindings = []): array
     {
         $bindings = $this->normalizeBindings($bindings);
