@@ -16,7 +16,7 @@ final class SQLServerCompiler extends AbstractSqlCompiler
     #[\Override]
     protected function compileCtePrefix(bool $recursive): string
     {
-        return 'WITH';
+        return $recursive ? 'WITH' : parent::compileCtePrefix(false);
     }
 
     #[\Override]
@@ -64,7 +64,10 @@ final class SQLServerCompiler extends AbstractSqlCompiler
     #[\Override]
     protected function compileLock(string $lock): string
     {
-        return '';
+        return match ($lock) {
+            'update', 'shared' => '',
+            default => throw new LogicException("Unsupported SQL Server lock mode [{$lock}]."),
+        };
     }
 
     /** @param list<string> $returning */
