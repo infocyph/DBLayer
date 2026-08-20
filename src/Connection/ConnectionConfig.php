@@ -250,7 +250,10 @@ final class ConnectionConfig
         return new self($config);
     }
 
-    /** @param list<array<string,mixed>> $replicas @return list<array<string,mixed>> */
+    /**
+     * @param list<array<string,mixed>> $replicas
+     * @return list<array<string,mixed>>
+     */
     private function expandReplicaHostVariants(array $replicas): array
     {
         $expanded = [];
@@ -299,7 +302,10 @@ final class ConnectionConfig
         return $strategy;
     }
 
-    /** @param array<int|string,mixed> $replicas @return list<array<string,mixed>> */
+    /**
+     * @param array<int|string,mixed> $replicas
+     * @return list<array<string,mixed>>
+     */
     private function normalizeReplicaConfigs(array $replicas): array
     {
         if ($replicas === []) {
