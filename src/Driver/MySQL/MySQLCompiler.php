@@ -12,8 +12,8 @@ use Infocyph\DBLayer\Driver\MySQLFamily\AbstractMySqlCompiler;
 final class MySQLCompiler extends AbstractMySqlCompiler
 {
     /**
-     * @param list<string> $uniqueBy
-     * @param list<string> $update
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>  $update
      */
     #[\Override]
     protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
@@ -29,9 +29,9 @@ final class MySQLCompiler extends AbstractMySqlCompiler
         $assignments = array_map(function (string $column): string {
             $wrapped = $this->wrapIdentifier($column);
 
-            return $wrapped . ' = new_row.' . $wrapped;
+            return $wrapped.' = new_row.'.$wrapped;
         }, $update);
 
-        return $insertSql . ' AS new_row ON DUPLICATE KEY UPDATE ' . implode(', ', $assignments);
+        return $insertSql.' AS new_row ON DUPLICATE KEY UPDATE '.implode(', ', $assignments);
     }
 }

@@ -70,7 +70,7 @@ final readonly class SchemaColumnCompiler
         if ($column->allowedValues === []) {
             throw SchemaException::invalid('Choice columns require at least one allowed value.');
         }
-        if ($set && !$this->dialect->isMySqlFamily()) {
+        if ($set && ! $this->dialect->isMySqlFamily()) {
             throw SchemaException::unsupported($this->dialect->name(), 'set column');
         }
         if ($this->dialect->isMySqlFamily()) {
@@ -84,10 +84,10 @@ final readonly class SchemaColumnCompiler
 
     private function currentOnUpdate(ColumnDefinition $column): string
     {
-        if (!$column->useCurrentOnUpdate) {
+        if (! $column->useCurrentOnUpdate) {
             return '';
         }
-        if (!$this->dialect->isMySqlFamily()) {
+        if (! $this->dialect->isMySqlFamily()) {
             throw SchemaException::unsupported($this->dialect->name(), 'CURRENT_TIMESTAMP on update');
         }
 
@@ -98,7 +98,7 @@ final readonly class SchemaColumnCompiler
     {
         $default = $this->resolvedDefault($column);
 
-        return $default === null ? '' : ' DEFAULT ' . $default;
+        return $default === null ? '' : ' DEFAULT '.$default;
     }
 
     private function generated(ColumnDefinition $column): string
@@ -129,10 +129,10 @@ final readonly class SchemaColumnCompiler
 
     private function isSqliteAutoIncrement(ColumnDefinition $column): bool
     {
-        if (!$column->autoIncrement || !$this->dialect->isSqlite()) {
+        if (! $column->autoIncrement || ! $this->dialect->isSqlite()) {
             return false;
         }
-        if (!$column->primary) {
+        if (! $column->primary) {
             throw SchemaException::invalid('SQLite AUTOINCREMENT requires an integer primary key.');
         }
 
@@ -183,13 +183,13 @@ final readonly class SchemaColumnCompiler
 
     private function quoteChoices(ColumnDefinition $column): string
     {
-        return implode(', ', array_map(static fn(string $value): string => "'" . str_replace("'", "''", $value) . "'", $column->allowedValues));
+        return implode(', ', array_map(static fn (string $value): string => "'".str_replace("'", "''", $value)."'", $column->allowedValues));
     }
 
     private function quoteDefault(mixed $value): string
     {
         return match (true) {
-            $value === null => 'NULL', is_bool($value) => $this->booleanDefault($value), is_int($value) => (string) $value, is_float($value) && is_finite($value) => (string) $value, is_string($value) => "'" . str_replace("'", "''", $value) . "'", $value instanceof Expression => $value->getValue(), default => throw SchemaException::invalid('Schema defaults must be null, boolean, finite numeric, string, or Expression values.')
+            $value === null => 'NULL', is_bool($value) => $this->booleanDefault($value), is_int($value) => (string) $value, is_float($value) && is_finite($value) => (string) $value, is_string($value) => "'".str_replace("'", "''", $value)."'", $value instanceof Expression => $value->getValue(), default => throw SchemaException::invalid('Schema defaults must be null, boolean, finite numeric, string, or Expression values.')
         };
     }
 
@@ -212,12 +212,12 @@ final readonly class SchemaColumnCompiler
     private function spatialType(ColumnDefinition $column, bool $geography): string
     {
         if ($this->dialect->isSqlite() || ($geography && $this->dialect->isMySqlFamily())) {
-            throw SchemaException::unsupported($this->dialect->name(), $column->type . ' column');
+            throw SchemaException::unsupported($this->dialect->name(), $column->type.' column');
         }
         $type = strtoupper($column->spatialSubtype ?? 'geometry');
         $srid = $column->srid ?? 0;
         if ($this->dialect->isMySqlFamily()) {
-            return $type . ($srid > 0 ? ' SRID ' . $srid : '');
+            return $type.($srid > 0 ? ' SRID '.$srid : '');
         }
         if ($this->dialect->isSqlServer()) {
             return $geography ? 'GEOGRAPHY' : 'GEOMETRY';
@@ -256,21 +256,21 @@ final readonly class SchemaColumnCompiler
         if ($this->dialect->isSqlite()) {
             return 'TEXT';
         }
-        $precision = ($column->precision ?? 0) > 0 ? '(' . $column->precision . ')' : '';
+        $precision = ($column->precision ?? 0) > 0 ? '('.$column->precision.')' : '';
         if ($this->dialect->isSqlServer()) {
             return match ($column->type) {
-                'dateTime', 'timestamp' => 'DATETIME2' . $precision, 'dateTimeTz', 'timestampTz' => 'DATETIMEOFFSET' . $precision, 'time' => 'TIME' . $precision, 'timeTz' => throw SchemaException::unsupported($this->dialect->name(), 'time with timezone column'), default => 'DATETIME2' . $precision
+                'dateTime', 'timestamp' => 'DATETIME2'.$precision, 'dateTimeTz', 'timestampTz' => 'DATETIMEOFFSET'.$precision, 'time' => 'TIME'.$precision, 'timeTz' => throw SchemaException::unsupported($this->dialect->name(), 'time with timezone column'), default => 'DATETIME2'.$precision
             };
         }
         if ($this->dialect->isMySqlFamily()) {
-            return $mysql . $precision;
+            return $mysql.$precision;
         }
         $separator = strpos($pgsql, ' ');
         if ($separator === false) {
-            return $pgsql . $precision;
+            return $pgsql.$precision;
         }
 
-        return substr($pgsql, 0, $separator) . $precision . substr($pgsql, $separator);
+        return substr($pgsql, 0, $separator).$precision.substr($pgsql, $separator);
     }
 
     private function unsigned(ColumnDefinition $column): string
@@ -287,21 +287,21 @@ final readonly class SchemaColumnCompiler
 
     private function validateAutoIncrement(ColumnDefinition $column): void
     {
-        if ($column->autoIncrement && !in_array($column->type, ['tinyInteger', 'smallInteger', 'mediumInteger', 'integer', 'bigInteger'], true)) {
+        if ($column->autoIncrement && ! in_array($column->type, ['tinyInteger', 'smallInteger', 'mediumInteger', 'integer', 'bigInteger'], true)) {
             throw SchemaException::invalid('Auto increment is supported only for integer columns.');
         }
     }
 
     private function validateTemporalModifiers(ColumnDefinition $column): void
     {
-        if (($column->useCurrent || $column->useCurrentOnUpdate) && !in_array($column->type, ['dateTime', 'dateTimeTz', 'timestamp', 'timestampTz'], true)) {
+        if (($column->useCurrent || $column->useCurrentOnUpdate) && ! in_array($column->type, ['dateTime', 'dateTimeTz', 'timestamp', 'timestampTz'], true)) {
             throw SchemaException::invalid('Current timestamp modifiers require a date-time or timestamp column.');
         }
     }
 
     private function vectorType(ColumnDefinition $column): string
     {
-        if (!$this->dialect->isPostgreSql()) {
+        if (! $this->dialect->isPostgreSql()) {
             throw SchemaException::unsupported($this->dialect->name(), 'vector column');
         }
 

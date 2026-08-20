@@ -15,15 +15,15 @@ final class MariaDBCompiler extends AbstractMySqlCompiler
     #[\Override]
     protected function compileReturning(string $sql, array $returning): string
     {
-        return $sql . ' RETURNING ' . implode(', ', array_map(
+        return $sql.' RETURNING '.implode(', ', array_map(
             $this->wrapIdentifier(...),
             $returning,
         ));
     }
 
     /**
-     * @param list<string> $uniqueBy
-     * @param list<string> $update
+     * @param  list<string>  $uniqueBy
+     * @param  list<string>  $update
      */
     #[\Override]
     protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
@@ -39,9 +39,9 @@ final class MariaDBCompiler extends AbstractMySqlCompiler
         $assignments = array_map(function (string $column): string {
             $wrapped = $this->wrapIdentifier($column);
 
-            return $wrapped . ' = VALUES(' . $wrapped . ')';
+            return $wrapped.' = VALUES('.$wrapped.')';
         }, $update);
 
-        return $insertSql . ' ON DUPLICATE KEY UPDATE ' . implode(', ', $assignments);
+        return $insertSql.' ON DUPLICATE KEY UPDATE '.implode(', ', $assignments);
     }
 }
