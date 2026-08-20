@@ -270,6 +270,10 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
         return [$sql, $bindings];
     }
 
+    /**
+     * @param list<string> $uniqueBy
+     * @param list<string> $update
+     */
     protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
     {
         throw new LogicException('UPSERT is not supported by this SQL compiler.');
