@@ -69,9 +69,22 @@ final class SQLServerDriver extends AbstractPdoDriver
         bool $verbose = false,
         ?string $serverVersion = null,
     ): string {
+        $mode = $analyze ? 'actual' : 'estimated';
+        $unsupportedOptions = array_filter([
+            $buffers ? 'buffers' : null,
+            $verbose ? 'verbose' : null,
+        ]);
+        $details = sprintf(
+            'requested %s plan for %d-byte SQL on server %s%s',
+            $mode,
+            strlen($sql),
+            $serverVersion ?? 'unknown',
+            $unsupportedOptions === [] ? '' : ' with unsupported options: ' . implode(', ', $unsupportedOptions),
+        );
+
         throw QueryException::invalidParameter(
             'explain',
-            'SQL Server execution plans require Connection::explain() because SHOWPLAN/STATISTICS modes are session scoped.',
+            'SQL Server execution plans require Connection::explain() because SHOWPLAN/STATISTICS modes are session scoped; ' . $details . '.',
         );
     }
 
