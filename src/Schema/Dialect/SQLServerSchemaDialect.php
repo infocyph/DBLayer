@@ -18,7 +18,7 @@ final class SQLServerSchemaDialect extends SchemaDialect
     #[\Override]
     public function columnExistsQuery(?string $namespace, string $table, string $column, string $database): array
     {
-        return ['sql' => "SELECT TOP (1) 1 FROM information_schema.columns WHERE table_schema = COALESCE(?, 'dbo') AND table_name = ? AND column_name = ?", 'bindings' => [$namespace, $table, $column], 'key' => null, 'value' => null];
+        return ['sql' => "SELECT TOP (1) 1 FROM information_schema.columns WHERE table_catalog = ? AND table_schema = COALESCE(?, 'dbo') AND table_name = ? AND column_name = ?", 'bindings' => [$database, $namespace, $table, $column], 'key' => null, 'value' => null];
     }
 
     #[\Override]
@@ -107,13 +107,13 @@ final class SQLServerSchemaDialect extends SchemaDialect
     #[\Override]
     public function tableExistsQuery(?string $namespace, string $table, string $database): array
     {
-        return ['sql' => "SELECT TOP (1) 1 FROM information_schema.tables WHERE table_schema = COALESCE(?, 'dbo') AND table_name = ?", 'bindings' => [$namespace, $table], 'key' => null, 'value' => null];
+        return ['sql' => "SELECT TOP (1) 1 FROM information_schema.tables WHERE table_catalog = ? AND table_schema = COALESCE(?, 'dbo') AND table_name = ?", 'bindings' => [$database, $namespace, $table], 'key' => null, 'value' => null];
     }
 
     #[\Override]
     public function tablesQuery(string $database): array
     {
-        return ['sql' => "SELECT table_schema + '.' + table_name AS qualified_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('sys', 'INFORMATION_SCHEMA')", 'bindings' => [], 'key' => 'qualified_name'];
+        return ['sql' => "SELECT table_schema + '.' + table_name AS qualified_name FROM information_schema.tables WHERE table_catalog = ? AND table_type = 'BASE TABLE' AND table_schema NOT IN ('sys', 'INFORMATION_SCHEMA')", 'bindings' => [$database], 'key' => 'qualified_name'];
     }
 
     #[\Override]
