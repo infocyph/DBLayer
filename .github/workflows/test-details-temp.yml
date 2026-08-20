@@ -1,215 +1,68 @@
 name: "PHPForge Test Details"
 
 on:
+  pull_request:
+    branches: ["main"]
   push:
     branches: ["feature/db-linup"]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
-  apply-remaining-failures:
-    if: github.actor != 'github-actions[bot]'
+  test-details:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
         with:
-          ref: feature/db-linup
-      - name: Apply remaining exact ic:tests:details failures
+          php-version: "8.4"
+          extensions: pdo, pdo_mysql, pdo_pgsql, pdo_sqlite
+          coverage: none
+      - uses: ramsey/composer-install@v3
+        with:
+          dependency-versions: highest
+      - name: Run exact PHPForge detailed suite
         shell: bash
         run: |
-          python <<'PY'
-          from pathlib import Path
-
-          connection = Path('src/Connection/Connection.php')
-          text = connection.read_text()
-          start = text.index('    /**\n     * Inspect the execution plan for a SELECT statement.')
-          end = text.index('    /**\n     * Get declared capabilities for this driver.', start)
-          text = text[:start] + text[end:]
-          text = text.replace('use Infocyph\\DBLayer\\Driver\\SQLServer\\SQLServerDriver;\n', '')
-          connection.write_text(text)
-
-          Path('src/Connection/Concerns/ConnectionMonitoring.php').write_text(r'''<?php
-
-declare(strict_types=1);
-
-namespace Infocyph\DBLayer\Connection\Concerns;
-
-use Infocyph\DBLayer\Connection\SqlStatementInspector;
-use Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver;
-use Infocyph\DBLayer\Exceptions\QueryException;
-use Infocyph\DBLayer\Monitoring\DatabaseMonitor;
-use Infocyph\DBLayer\Query\Core\QueryType;
-use PDO;
-
-/**
- * Explicit on-demand database-system diagnostics and monitoring entry points.
- */
-trait ConnectionMonitoring
-{
-    /**
-     * Inspect the execution plan for a SELECT statement.
-     *
-     * The returned rows retain the database-native plan representation.
-     * PostgreSQL/MySQL return JSON plans by default; SQLite returns
-     * EXPLAIN QUERY PLAN rows.
-     *
-     * @param array<int|string,mixed> $bindings
-     * @return list<array<string,mixed>>
-     */
-    public function explain(
-        string $sql,
-        array $bindings = [],
-        bool $analyze = false,
-        bool $buffers = false,
-        bool $verbose = false,
-    ): array {
-        if (SqlStatementInspector::leadingStatementKeyword($sql) !== 'SELECT') {
-            throw QueryException::invalidParameter(
-                'sql',
-                'Execution plans accept SELECT statements only.',
-            );
-        }
-
-        if ($this->driver instanceof SQLServerDriver) {
-            $preparedSql = $this->prepareSqlForExecution($sql, $bindings);
-
-            if ($this->pretending) {
-                $this->recordPretend($preparedSql, $bindings);
-
-                return [];
+          set +e
+          composer ic:tests:details 2>&1 | tee /tmp/ic-tests-details.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
+      - name: Publish exact failure output
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- ic-tests-details-diagnostic -->';
+            const text = fs.existsSync('/tmp/ic-tests-details.log')
+              ? fs.readFileSync('/tmp/ic-tests-details.log', 'utf8')
+              : 'The detailed test command failed before producing a captured log.';
+            const tail = text.slice(-50000).replace(/```/g, '```\u200b');
+            const body = `${marker}\nExact \`composer ic:tests:details\` failure output:\n\n\`\`\`text\n${tail}\n\`\`\``;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find(comment => comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
             }
-
-            return $this->driver->executeExplain(
-                $this->getPdo(),
-                $preparedSql,
-                $bindings,
-                $analyze,
-                $buffers,
-                $verbose,
-            );
-        }
-
-        $serverVersion = null;
-
-        if ($analyze && $this->driver->getName() === 'mysql' && !$this->pretending) {
-            $resolvedVersion = $this->getPdo()->getAttribute(PDO::ATTR_SERVER_VERSION);
-
-            if (is_string($resolvedVersion) || is_int($resolvedVersion) || is_float($resolvedVersion)) {
-                $serverVersion = (string) $resolvedVersion;
-            }
-        }
-
-        $explainSql = $this->driver->compileExplain(
-            $sql,
-            $analyze,
-            $buffers,
-            $verbose,
-            $serverVersion,
-        );
-
-        return array_values($this->fetchAllFromKnownTypeStatement(
-            $explainSql,
-            $bindings,
-            QueryType::SELECT,
-        ));
-    }
-
-    public function monitor(): DatabaseMonitor
-    {
-        return new DatabaseMonitor($this);
-    }
-}
-''')
-
-          schema = Path('src/Schema/SchemaColumnCompiler.php')
-          text = schema.read_text()
-          start = text.index('    public function compile(ColumnDefinition $column): string')
-          end = text.index('    public function compileType(ColumnDefinition $column): string', start)
-          text = text[:start] + text[end:]
-          text = text.replace(
-              'use Infocyph\\DBLayer\\Query\\Expression;\n',
-              'use Infocyph\\DBLayer\\Query\\Expression;\nuse Infocyph\\DBLayer\\Schema\\Concerns\\CompilesColumnDefinitions;\n',
-          )
-          text = text.replace(
-              'final readonly class SchemaColumnCompiler\n{\n',
-              'final readonly class SchemaColumnCompiler\n{\n    use CompilesColumnDefinitions;\n\n',
-          )
-          schema.write_text(text)
-
-          concern = Path('src/Schema/Concerns/CompilesColumnDefinitions.php')
-          concern.parent.mkdir(parents=True, exist_ok=True)
-          concern.write_text(r'''<?php
-
-declare(strict_types=1);
-
-namespace Infocyph\DBLayer\Schema\Concerns;
-
-use Infocyph\DBLayer\Exceptions\SchemaException;
-use Infocyph\DBLayer\Schema\ColumnDefinition;
-
-trait CompilesColumnDefinitions
-{
-    public function compile(ColumnDefinition $column): string
-    {
-        $this->validateAutoIncrement($column);
-        $this->validateTemporalModifiers($column);
-        if ($this->isSqliteAutoIncrement($column)) {
-            return $this->wrap($column->name) . ' INTEGER PRIMARY KEY AUTOINCREMENT';
-        }
-        if ($this->dialect->isSqlServer() && $column->generatedExpression !== null) {
-            return $this->wrap($column->name) . $this->generated($column);
-        }
-        $sql = $this->wrap($column->name) . ' ' . $this->compileType($column) . $this->unsigned($column)
-            . ($column->autoIncrement && $this->dialect->isSqlServer() ? ' IDENTITY(1,1)' : '') . $this->choiceConstraint($column);
-        if ($column->generatedExpression !== null) {
-            return $sql . $this->generated($column);
-        }
-
-        return $sql . ($column->nullable ? ' NULL' : ' NOT NULL') . $this->defaultValue($column) . $this->currentOnUpdate($column)
-            . ($column->autoIncrement && $this->dialect->isMySqlFamily() ? ' AUTO_INCREMENT' : '')
-            . ($column->primary && !$this->dialect->isSqlServer() ? ' PRIMARY KEY' : '');
-    }
-
-    /** @return non-empty-list<string> */
-    public function compileChange(string $wrappedTable, ColumnDefinition $column): array
-    {
-        if ($this->dialect->isSqlite()) {
-            throw SchemaException::unsupported($this->dialect->name(), 'change column');
-        }
-        if ($this->dialect->isMySqlFamily()) {
-            return [sprintf('ALTER TABLE %s MODIFY COLUMN %s', $wrappedTable, $this->compile($column))];
-        }
-        if ($this->dialect->isSqlServer()) {
-            if ($column->autoIncrement || $column->generatedExpression !== null || $column->hasDefault || $column->useCurrent) {
-                throw SchemaException::unsupported($this->dialect->name(), 'change identity/generated/default column');
-            }
-
-            return [sprintf('ALTER TABLE %s ALTER COLUMN %s %s %s', $wrappedTable, $this->wrap($column->name), $this->compileType($column), $column->nullable ? 'NULL' : 'NOT NULL')];
-        }
-        if ($column->autoIncrement || $column->generatedExpression !== null) {
-            throw SchemaException::unsupported($this->dialect->name(), 'change auto-increment or generated column');
-        }
-        $wrappedColumn = $this->wrap($column->name);
-        $statements = [
-            sprintf('ALTER TABLE %s ALTER COLUMN %s TYPE %s', $wrappedTable, $wrappedColumn, $this->compileType($column)),
-            sprintf('ALTER TABLE %s ALTER COLUMN %s %s NOT NULL', $wrappedTable, $wrappedColumn, $column->nullable ? 'DROP' : 'SET'),
-        ];
-        $default = $this->resolvedDefault($column);
-        $statements[] = $default === null
-            ? sprintf('ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT', $wrappedTable, $wrappedColumn)
-            : sprintf('ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s', $wrappedTable, $wrappedColumn, $default);
-
-        return $statements;
-    }
-}
-''')
-          PY
-      - name: Commit fixes
-        shell: bash
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/Connection/Connection.php src/Connection/Concerns/ConnectionMonitoring.php src/Schema/SchemaColumnCompiler.php src/Schema/Concerns/CompilesColumnDefinitions.php
-          git commit -m "Reduce PHPForge complexity findings"
-          git push origin HEAD:feature/db-linup
