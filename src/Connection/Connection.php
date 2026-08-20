@@ -9,7 +9,6 @@ use Infocyph\DBLayer\Connection\Concerns\ConnectionInternals;
 use Infocyph\DBLayer\Connection\Concerns\ConnectionStreaming;
 use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
-use Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver;
 use Infocyph\DBLayer\Driver\Support\Capabilities;
 use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Events\DatabaseEvents\QueryExecuted;
@@ -254,7 +253,6 @@ final class Connection
         $this->securityChecks = $this->config->isSecurityEnabled();
         $this->queryCommentContext = $this->config->getQueryCommentContext();
 
-        // Resolve driver and compiler up front; all engines go through DriverRegistry.
         $this->driver = DriverRegistry::resolve($this->config->getDriver());
         $this->compiler = $this->driver->createCompiler();
         $this->compiler->setTablePrefix($this->tablePrefix);
@@ -475,74 +473,6 @@ final class Connection
         $isWrite = $this->isWriteQuery($sql);
 
         return $this->executeTypedStatement($sql, $bindings, $isWrite);
-    }
-
-    /**
-     * Inspect the execution plan for a SELECT statement.
-     *
-     * The returned rows retain the database-native plan representation.
-     * PostgreSQL/MySQL return JSON plans by default; SQLite returns
-     * EXPLAIN QUERY PLAN rows.
-     *
-     * @param array<int|string,mixed> $bindings
-     * @return list<array<string,mixed>>
-     */
-    public function explain(
-        string $sql,
-        array $bindings = [],
-        bool $analyze = false,
-        bool $buffers = false,
-        bool $verbose = false,
-    ): array {
-        if (SqlStatementInspector::leadingStatementKeyword($sql) !== 'SELECT') {
-            throw QueryException::invalidParameter(
-                'sql',
-                'Execution plans accept SELECT statements only.',
-            );
-        }
-
-        if ($this->driver instanceof SQLServerDriver) {
-            $preparedSql = $this->prepareSqlForExecution($sql, $bindings);
-
-            if ($this->pretending) {
-                $this->recordPretend($preparedSql, $bindings);
-
-                return [];
-            }
-
-            return $this->driver->executeExplain(
-                $this->getPdo(),
-                $preparedSql,
-                $bindings,
-                $analyze,
-                $buffers,
-                $verbose,
-            );
-        }
-
-        $serverVersion = null;
-
-        if ($analyze && $this->driver->getName() === 'mysql' && !$this->pretending) {
-            $resolvedVersion = $this->getPdo()->getAttribute(PDO::ATTR_SERVER_VERSION);
-
-            if (is_string($resolvedVersion) || is_int($resolvedVersion) || is_float($resolvedVersion)) {
-                $serverVersion = (string) $resolvedVersion;
-            }
-        }
-
-        $explainSql = $this->driver->compileExplain(
-            $sql,
-            $analyze,
-            $buffers,
-            $verbose,
-            $serverVersion,
-        );
-
-        return array_values($this->fetchAllFromKnownTypeStatement(
-            $explainSql,
-            $bindings,
-            QueryType::SELECT,
-        ));
     }
 
     /**
@@ -929,7 +859,6 @@ final class Connection
                     throw ConnectionException::maxReconnectAttemptsReached(self::MAX_RECONNECT_ATTEMPTS);
                 }
 
-                // Linear backoff with mild scaling: 100ms, 200ms, 300ms...
                 usleep(100_000 * $attempt);
             }
         }
@@ -1061,7 +990,6 @@ final class Connection
             return new DriverResult(null, $rowCount);
         }
 
-        // TRUNCATE or anything else
         $this->executeKnownType($query->sql, $query->bindings, $type, $query->origin);
 
         return new DriverResult(null, 0);
@@ -1497,7 +1425,6 @@ final class Connection
     private function assertExpectedQueryType(string $sql, QueryType $expected): void
     {
         $actual = SqlStatementInspector::leadingStatementKeyword($sql);
-
         $expectedKeyword = strtoupper($expected->value);
 
         if ($actual !== $expectedKeyword) {
