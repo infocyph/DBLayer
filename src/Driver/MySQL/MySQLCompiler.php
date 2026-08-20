@@ -18,6 +18,10 @@ final class MySQLCompiler extends AbstractMySqlCompiler
     #[\Override]
     protected function compileUpsert(string $insertSql, array $uniqueBy, array $update): string
     {
+        if ($uniqueBy === []) {
+            throw new \LogicException('MySQL UPSERT requires at least one unique key column.');
+        }
+
         if ($update === []) {
             throw new \LogicException('MySQL UPSERT requires at least one update column.');
         }
