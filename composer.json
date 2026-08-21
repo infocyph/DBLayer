@@ -11,7 +11,10 @@
         "sql",
         "mysql",
         "postgresql",
-        "sqlite"
+        "sqlite",
+        "mariadb",
+        "sql-server",
+        "mssql"
     ],
     "authors": [
         {
@@ -34,9 +37,10 @@
         "infocyph/phpforge": "dev-main@dev"
     },
     "suggest": {
-        "ext-pdo_mysql": "For MySQL database support",
+        "ext-pdo_mysql": "For MySQL or MariaDB database support",
         "ext-pdo_pgsql": "For PostgreSQL database support",
-        "ext-pdo_sqlite": "For SQLite database support"
+        "ext-pdo_sqlite": "For SQLite database support",
+        "ext-pdo_sqlsrv": "For Microsoft SQL Server database support"
     },
     "minimum-stability": "stable",
     "prefer-stable": true,

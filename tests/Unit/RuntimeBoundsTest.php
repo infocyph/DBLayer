@@ -77,8 +77,8 @@ it('purges expired rate limit buckets before enforcing capacity', function (): v
     $storage = $reflection->getProperty('storage');
     $expiresAt = $reflection->getProperty('expiresAt');
 
-    $storage->setValue($limiter, ['expired:1:1' => 1]);
-    $expiresAt->setValue($limiter, ['expired:1:1' => time() - 1]);
+    $storage->setValue($limiter, ['expired:1' => 1]);
+    $expiresAt->setValue($limiter, ['expired:1' => microtime(true) - 1]);
 
     $limiter->check('current', 10, 60);
 
@@ -86,6 +86,21 @@ it('purges expired rate limit buckets before enforcing capacity', function (): v
         'total_keys' => 1,
         'total_requests' => 1,
     ]);
+});
+
+it('anchors process-local rate-limit windows and isolates TTL values', function (): void {
+    $limiter = new RateLimiter();
+
+    $limiter->check('tenant-a', 10, 1);
+    $limiter->check('tenant-a', 10, 1);
+    $limiter->check('tenant-a', 10, 60);
+
+    expect($limiter->getCount('tenant-a', 1))->toBe(2)
+        ->and($limiter->getCount('tenant-a', 60))->toBe(1)
+        ->and($limiter->getStats())->toBe([
+            'total_keys' => 2,
+            'total_requests' => 3,
+        ]);
 });
 
 it('rejects non-positive rate limit storage capacity', function (int $capacity): void {

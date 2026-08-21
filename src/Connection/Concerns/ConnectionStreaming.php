@@ -8,6 +8,7 @@ use Generator;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use PDO;
+use Pdo\Mysql;
 use PDOException;
 use PDOStatement;
 use Throwable;
@@ -17,13 +18,17 @@ use Throwable;
  */
 trait ConnectionStreaming
 {
+    use ConnectionMonitoring;
+
     private int $postgresStreamCursorSequence = 0;
 
     /**
      * Stream without a full client-side result buffer where the driver supports it.
      *
-     * MySQL temporarily disables PDO buffered queries. PostgreSQL uses a
-     * transaction-scoped server cursor. SQLite delegates to incremental fetch().
+     * MySQL and MariaDB temporarily disable PDO-MySQL buffering. PostgreSQL uses
+     * a transaction-scoped server cursor. SQLite delegates to incremental fetch().
+     * Microsoft SQL Server uses PDO_SQLSRV's default forward-only cursor, which
+     * fetches rows incrementally without a client-side result buffer.
      *
      * @param array<int|string,mixed> $bindings
      * @return Generator<mixed>
@@ -39,9 +44,9 @@ trait ConnectionStreaming
         }
 
         yield from match ($this->getDriverName()) {
-            'mysql' => $this->mysqlUnbufferedStream($sql, $bindings, $fetchMode),
+            'mysql', 'mariadb' => $this->mysqlUnbufferedStream($sql, $bindings, $fetchMode),
             'pgsql' => $this->postgresUnbufferedStream($sql, $bindings, $fetchMode, $fetchSize),
-            'sqlite' => $this->stream($sql, $bindings, $fetchMode),
+            'mssql', 'sqlite' => $this->stream($sql, $bindings, $fetchMode),
             default => throw ConnectionException::invalidConfiguration(
                 "Driver [{$this->getDriverName()}] has no declared unbuffered streaming strategy.",
             ),
@@ -130,7 +135,7 @@ trait ConnectionStreaming
         ?int $fetchMode,
     ): Generator {
         $pdo = $this->getReadPdo();
-        $attribute = PDO::MYSQL_ATTR_USE_BUFFERED_QUERY;
+        $attribute = Mysql::ATTR_USE_BUFFERED_QUERY;
         $wasBuffered = (bool) $pdo->getAttribute($attribute);
         $pdo->setAttribute($attribute, false);
 
@@ -174,7 +179,7 @@ trait ConnectionStreaming
                     throw new PDOException('Unable to fetch from PostgreSQL server cursor.');
                 }
 
-                $rows = $statement->fetchAll($fetchMode ?? $this->fetchMode);
+                $rows = $this->fetchAllRows($statement, $fetchMode ?? $this->fetchMode);
                 $statement->closeCursor();
 
                 foreach ($rows as $row) {

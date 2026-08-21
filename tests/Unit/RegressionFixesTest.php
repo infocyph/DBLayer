@@ -1462,6 +1462,7 @@ it('supports resource bindings via bindParam for LOB values', function (string $
     $payloadType = match ($schemaDriver) {
         'mysql' => 'blob',
         'pgsql' => 'bytea',
+        'mssql' => 'varbinary(max)',
         default => 'blob',
     };
 

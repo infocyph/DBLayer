@@ -100,6 +100,16 @@ it('delegates to query builder API while preserving repository policies', functi
     expect(TableRepositoryUser::builder()->count())->toBe(2);
 })->with('dblayer_drivers');
 
+it('replaces duplicate order columns to keep generated SQL portable', function (string $driver): void {
+    setupTableRepositoryFixture($driver);
+
+    $query = TableRepositoryUser::query()->orderBy('id', 'desc');
+
+    expect($query->getComponents()['orders'])->toBe([
+        ['column' => 'id', 'direction' => 'desc'],
+    ]);
+})->with('dblayer_drivers');
+
 it('keeps infrastructure explicit while retaining raw SQL helpers', function (string $driver): void {
     setupTableRepositoryFixture($driver);
 

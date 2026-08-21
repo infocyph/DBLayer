@@ -237,6 +237,22 @@ trait QueryBuilderInternals
         return strtolower($normalized ?? $operator);
     }
 
+    /** Replace an existing column order so generated SQL remains portable. */
+    private function replaceOrAppendOrder(string $column, string $direction): void
+    {
+        foreach ($this->orders as $index => $order) {
+            if ($order['column'] !== $column) {
+                continue;
+            }
+
+            $this->orders[$index]['direction'] = $direction;
+
+            return;
+        }
+
+        $this->orders[] = ['column' => $column, 'direction' => $direction];
+    }
+
     /**
      * @return non-empty-string
      */

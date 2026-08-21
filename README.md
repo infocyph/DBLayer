@@ -20,11 +20,12 @@ multi-driver execution, and operational controls without becoming an ORM.
 - **TableRepository** - Static repository and QueryBuilder ergonomics with explicit infrastructure access
 - **Connection Manager** - Connection pooling + read replicas
 - **Replica Strategies** - `random`, `round_robin`, `least_latency`, `weighted`
-- **Multi-Driver** - MySQL, PostgreSQL, SQLite
+- **Multi-Driver** - MySQL, MariaDB, PostgreSQL, Microsoft SQL Server, SQLite
 - **Security** - Multi-layer SQL injection protection
 - **Transactions** - Nested transactions with savepoints
 - **Caching** - Opt-in CacheLayer 3 query results with tags and commit-safe invalidation
 - **Profiling** - Performance monitoring
+- **System Monitoring** - On-demand engine-native status, sessions, long queries, locks, table/index metrics, replication, and maintenance signals
 - **Events** - Lifecycle hooks
 - **Telemetry** - Query + transaction observability export
 - **Performance diagnostics** - Native execution plans and query-shape reports
@@ -103,6 +104,7 @@ with the wrong driver throws instead of being silently ignored.
 | All drivers | `database`, `prefix`, `options`, `timeout`, `persistent`, `write`, `read`, replica selection/timing, statement caching, query comments, `sticky`, and SQL `security` |
 | MySQL/MariaDB | `host`, `port`, `username`, `password`, `charset`, `collation`, `unix_socket`, `ssl_ca`, `ssl_cert`, `ssl_key`, `ssl_verify_server_cert` |
 | PostgreSQL | `host`, `port`, `username`, `password`, `charset`, `schema`, `sslmode` |
+| Microsoft SQL Server | `host`, `port`, `username`, `password`, `encrypt`, `trust_server_certificate`, `application_intent` |
 | SQLite | `database`; network, credential, schema, charset, collation, and TLS settings are rejected |
 
 MySQL TLS files are translated to `Pdo\Mysql::ATTR_SSL_*` constructor
@@ -115,10 +117,15 @@ libpq DSN as `client_encoding`, startup `search_path`, `connect_timeout`, and
 `sslmode`. Supported SSL modes are `disable`, `allow`, `prefer`, `require`,
 `verify-ca`, and `verify-full`.
 
+SQL Server uses Microsoft's PDO_SQLSRV driver. `encrypt`,
+`trust_server_certificate`, and `application_intent` are translated into its
+connection string; read-replica handles automatically request `ReadOnly`
+application intent.
+
 `timeout` maps to the native connection-time mechanism: PDO timeout attributes
-for MySQL/SQLite and `connect_timeout` for PostgreSQL. PDO and native-client
-versions may still impose driver-specific timeout and persistent-connection
-semantics.
+for MySQL/SQLite, `connect_timeout` for PostgreSQL, and `LoginTimeout` for SQL
+Server. PDO and native-client versions may still impose driver-specific timeout
+and persistent-connection semantics.
 
 ### Query Controls
 
@@ -130,7 +137,7 @@ DB::withQueryTimeout(500, function () {
 
 // Absolute deadline relative to now (seconds)
 DB::withQueryDeadline(0.25, function () {
-    DB::select('select * from users');
+    DB::select('select 1');
 });
 
 // Cooperative cancellation check
@@ -153,6 +160,27 @@ $snapshot = DB::telemetry();      // read buffer
 $exported = DB::flushTelemetry(); // read + clear
 $shapes = DB::queryShapeReport(); // grouped by parameterized SQL fingerprint
 ```
+
+### On-Demand Database Monitoring
+
+Monitoring stays under the monitor surface and uses the selected engine's
+native observational queries. It does not kill sessions, cancel queries, rebuild
+indexes, vacuum databases, or mutate configuration.
+
+```php
+$status = DB::monitor()->status();
+$snapshot = DB::monitor()->snapshot();
+
+$slow = DB::monitor()->longRunningQueries(10);
+$locks = DB::monitor()->locks();
+$indexes = DB::monitor()->indexMetrics();
+
+$analytics = DB::connection('analytics')->monitor()->status();
+```
+
+Detailed monitoring sections can require database-specific privileges. Use
+`snapshot()` when partial results are preferable: failing sections are reported
+in its `errors` map while other sections continue.
 
 ### Query Builder
 
@@ -312,25 +340,13 @@ composer ic:release:guard
 Test execution is driver-aware:
 
 - SQLite-only environments run the base test set.
-- If MySQL/PostgreSQL are available (via ``DBLAYER_MYSQL_*`` / ``DBLAYER_PGSQL_*`` env vars),
-  matrix tests automatically run for those drivers too.
+- MySQL, MariaDB, PostgreSQL, and SQL Server are enabled automatically when
+  their `DBLAYER_MYSQL_*`, `DBLAYER_MARIADB_*`, `DBLAYER_PGSQL_*`, or
+  `DBLAYER_MSSQL_*` environment variables and matching PDO extensions are available.
+  PHPForge service DSNs (`IC_MYSQL_DSN`, `IC_MARIADB_DSN`, `IC_POSTGRES_DSN`,
+  and `IC_MSSQL_DSN`) are recognized as CI fallbacks.
 
 So total test count increases when more drivers are available.
-
-## Benchmarking
-
-```bash
-composer ic:bench:run
-composer ic:bench:quick
-composer ic:bench:chart
-```
-
-## Benchmarks
-
-Use repeated runs on the same production-representative environment. The
-included PHPBench subjects compare component hot paths; they do not establish
-end-to-end application RPM. See `docs/benchmarks.rst` for interpretation and
-reporting requirements.
 
 ## Security
 
@@ -355,8 +371,9 @@ Hardening controls:
 - ext-pdo
 - Composer installs `infocyph/DBLayer ^5.1`, `infocyph/cachelayer ^3.1`, and
   `psr/log ^3.0.2`
-- ext-pdo_mysql (for MySQL)
+- ext-pdo_mysql (for MySQL and MariaDB)
 - ext-pdo_pgsql (for PostgreSQL)
+- ext-pdo_sqlsrv (for Microsoft SQL Server)
 - ext-pdo_sqlite (for SQLite)
 
 ## Security

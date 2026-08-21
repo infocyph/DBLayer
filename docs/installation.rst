@@ -10,9 +10,10 @@ Requirements
 - ``infocyph/cachelayer`` ``^3.1``
 - ``psr/log`` ``^3.0.2``
 - Optional per driver:
-  - ``ext-pdo_mysql``
-  - ``ext-pdo_pgsql``
-  - ``ext-pdo_sqlite``
+  - ``ext-pdo_mysql`` (MySQL and MariaDB)
+  - ``ext-pdo_pgsql`` (PostgreSQL)
+  - ``ext-pdo_sqlsrv`` (Microsoft SQL Server)
+  - ``ext-pdo_sqlite`` (SQLite)
 - Optional identifier generation: ``infocyph/uid``. DBLayer's ``uuid`` and
   ``ulid`` schema helpers declare storage and do not require a generator.
 
@@ -23,8 +24,11 @@ DBLayer can be installed once and used across multiple engines, but each
 runtime environment must have the extension for the active driver enabled.
 
 - Local/dev usually uses ``pdo_sqlite`` for fast setup.
-- Production MySQL requires ``pdo_mysql``.
-- Production PostgreSQL requires ``pdo_pgsql``.
+- Production MySQL requires ``pdo_mysql`` and uses DBLayer's dedicated ``mysql`` pathway.
+- Production MariaDB requires ``pdo_mysql`` but remains the independent ``mariadb`` pathway.
+- Production PostgreSQL requires ``pdo_pgsql``; ``psql``/``postgresql`` are aliases of ``pgsql``.
+- Production Microsoft SQL Server requires Microsoft's ``pdo_sqlsrv`` extension;
+  ``sqlsrv``/``sqlserver`` aliases normalize to the ``mssql`` pathway.
 
 Install
 -------

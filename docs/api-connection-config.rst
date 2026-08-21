@@ -71,6 +71,8 @@ Driver Settings
   ``unix_socket``, and MySQL TLS keys.
 - PostgreSQL: ``host``, ``port``, credentials, ``charset``, ``schema``, and
   ``sslmode``.
+- Microsoft SQL Server: ``host``, ``port``, credentials, ``encrypt``,
+  ``trust_server_certificate``, ``application_intent``, and ``login_timeout``.
 - SQLite: ``database`` only; network, credential, charset, schema, and TLS keys
   are rejected.
 

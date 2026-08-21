@@ -107,20 +107,24 @@ exports redact the signing key.
 Transport / TLS Policy
 ----------------------
 
-- ``security.require_tls = true`` enforces encrypted transport for
-  MySQL/PostgreSQL. It does not alone guarantee verified server identity.
+- ``security.require_tls = true`` enforces encrypted transport for MySQL,
+  MariaDB, PostgreSQL, and Microsoft SQL Server. It does not alone guarantee
+  verified server identity.
 - ``security.require_tls = false`` requires ``security.allow_insecure = true``.
-- ``DB::hardenProduction()`` sets ``require_tls = true`` for MySQL/PostgreSQL
+- ``DB::hardenProduction()`` sets ``require_tls = true`` for network database
   connections. SQLite receives the remaining hardening defaults without a TLS
   setting.
 
 Driver requirements:
 
-- MySQL: provide a trusted ``ssl_ca`` and enable server-certificate verification
-  when identity verification is required; client ``ssl_cert`` / ``ssl_key``
-  configure mutual TLS when applicable.
+- MySQL/MariaDB: provide a trusted ``ssl_ca`` and enable server-certificate
+  verification when identity verification is required; client ``ssl_cert`` /
+  ``ssl_key`` configure mutual TLS when applicable.
 - PostgreSQL: use ``sslmode=verify-full`` with a trusted CA for hostname and
   certificate verification. ``require`` encrypts without that identity claim.
+- Microsoft SQL Server: keep ``trust_server_certificate=false`` and use a
+  certificate with a trusted chain and matching hostname. Setting it to ``true``
+  encrypts transport but bypasses server-certificate validation.
 - SQLite: ``security.require_tls`` is rejected because SQLite has no network
   transport.
 

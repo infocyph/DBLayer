@@ -6,6 +6,7 @@ namespace Infocyph\DBLayer\Connection;
 
 use Generator;
 use Infocyph\DBLayer\Connection\Concerns\ConnectionInternals;
+use Infocyph\DBLayer\Connection\Concerns\ConnectionResultNormalization;
 use Infocyph\DBLayer\Connection\Concerns\ConnectionStreaming;
 use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
@@ -47,6 +48,7 @@ use Throwable;
 final class Connection
 {
     use ConnectionInternals;
+    use ConnectionResultNormalization;
     use ConnectionStreaming;
 
     /**
@@ -253,7 +255,6 @@ final class Connection
         $this->securityChecks = $this->config->isSecurityEnabled();
         $this->queryCommentContext = $this->config->getQueryCommentContext();
 
-        // Resolve driver and compiler up front; all engines go through DriverRegistry.
         $this->driver = DriverRegistry::resolve($this->config->getDriver());
         $this->compiler = $this->driver->createCompiler();
         $this->compiler->setTablePrefix($this->tablePrefix);
@@ -474,55 +475,6 @@ final class Connection
         $isWrite = $this->isWriteQuery($sql);
 
         return $this->executeTypedStatement($sql, $bindings, $isWrite);
-    }
-
-    /**
-     * Inspect the execution plan for a SELECT statement.
-     *
-     * The returned rows retain the database-native plan representation.
-     * PostgreSQL/MySQL return JSON plans by default; SQLite returns
-     * EXPLAIN QUERY PLAN rows.
-     *
-     * @param array<int|string,mixed> $bindings
-     * @return list<array<string,mixed>>
-     */
-    public function explain(
-        string $sql,
-        array $bindings = [],
-        bool $analyze = false,
-        bool $buffers = false,
-        bool $verbose = false,
-    ): array {
-        if (SqlStatementInspector::leadingStatementKeyword($sql) !== 'SELECT') {
-            throw QueryException::invalidParameter(
-                'sql',
-                'Execution plans accept SELECT statements only.',
-            );
-        }
-
-        $serverVersion = null;
-
-        if ($analyze && $this->driver->getName() === 'mysql' && !$this->pretending) {
-            $resolvedVersion = $this->getPdo()->getAttribute(PDO::ATTR_SERVER_VERSION);
-
-            if (is_string($resolvedVersion) || is_int($resolvedVersion) || is_float($resolvedVersion)) {
-                $serverVersion = (string) $resolvedVersion;
-            }
-        }
-
-        $explainSql = $this->driver->compileExplain(
-            $sql,
-            $analyze,
-            $buffers,
-            $verbose,
-            $serverVersion,
-        );
-
-        return array_values($this->fetchAllFromKnownTypeStatement(
-            $explainSql,
-            $bindings,
-            QueryType::SELECT,
-        ));
     }
 
     /**
@@ -909,7 +861,6 @@ final class Connection
                     throw ConnectionException::maxReconnectAttemptsReached(self::MAX_RECONNECT_ATTEMPTS);
                 }
 
-                // Linear backoff with mild scaling: 100ms, 200ms, 300ms...
                 usleep(100_000 * $attempt);
             }
         }
@@ -1006,17 +957,11 @@ final class Connection
 
             if ($statement->columnCount() > 0) {
                 /** @var list<array<string,mixed>> $returned */
-                $returned = $statement->fetchAll($this->fetchMode);
+                $returned = $this->fetchAllRows($statement, $this->fetchMode);
                 $rows = $returned;
             }
 
-            $lastId = null;
-            if ($rows === null || $rows === []) {
-                $id = $this->lastInsertId();
-                $lastId = $id !== '' ? $id : null;
-            }
-
-            return new DriverResult($rows, $rowCount, $lastId);
+            return new DriverResult($rows, $rowCount);
         }
 
         if ($type === QueryType::UPDATE) {
@@ -1041,7 +986,6 @@ final class Connection
             return new DriverResult(null, $rowCount);
         }
 
-        // TRUNCATE or anything else
         $this->executeKnownType($query->sql, $query->bindings, $type, $query->origin);
 
         return new DriverResult(null, 0);
@@ -1092,7 +1036,7 @@ final class Connection
         $statement = $this->executeKnownType($sql, $bindings, QueryType::SELECT);
 
         /** @var array<int,array<string,mixed>> $rows */
-        $rows = $statement->fetchAll($this->fetchMode);
+        $rows = $this->fetchAllRows($statement, $this->fetchMode);
 
         return $rows;
     }
@@ -1110,9 +1054,11 @@ final class Connection
         $fetchMode = $this->fetchMode;
 
         while (true) {
-            /** @var list<array<string,mixed>> $rows */
-            $rows = $statement->fetchAll($fetchMode);
-            $results[] = $rows;
+            if ($statement->columnCount() > 0) {
+                /** @var list<array<string,mixed>> $rows */
+                $rows = $this->fetchAllRows($statement, $fetchMode);
+                $results[] = $rows;
+            }
 
             try {
                 $hasMore = $statement->nextRowset();
@@ -1221,6 +1167,9 @@ final class Connection
     {
         $statement = $this->execute($sql, $bindings);
         $mode = $fetchMode ?? $this->fetchMode;
+        $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
+            ? $this->sqlServerBigIntColumns($statement)
+            : [];
 
         try {
             while (true) {
@@ -1230,7 +1179,9 @@ final class Connection
                     break;
                 }
 
-                yield $row;
+                yield $sqlServerBigIntColumns !== []
+                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
+                    : $row;
             }
         } finally {
             $statement->closeCursor();
@@ -1477,7 +1428,6 @@ final class Connection
     private function assertExpectedQueryType(string $sql, QueryType $expected): void
     {
         $actual = SqlStatementInspector::leadingStatementKeyword($sql);
-
         $expectedKeyword = strtoupper($expected->value);
 
         if ($actual !== $expectedKeyword) {
@@ -1655,7 +1605,7 @@ final class Connection
         $statement = $this->executeKnownType($sql, $bindings, $type, $origin);
 
         /** @var array<int,array<string,mixed>> $rows */
-        $rows = $statement->fetchAll($this->fetchMode);
+        $rows = $this->fetchAllRows($statement, $this->fetchMode);
 
         return $rows;
     }

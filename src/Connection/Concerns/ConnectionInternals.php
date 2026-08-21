@@ -416,7 +416,17 @@ trait ConnectionInternals
             if (is_resource($value)) {
                 $resourceBindings[] = $value;
                 $resourceIndex = \count($resourceBindings) - 1;
-                $statement->bindParam($parameter, $resourceBindings[$resourceIndex], PDO::PARAM_LOB);
+                if ($this->getDriverName() === 'mssql' && \defined('PDO::SQLSRV_ENCODING_BINARY')) {
+                    $statement->bindParam(
+                        $parameter,
+                        $resourceBindings[$resourceIndex],
+                        PDO::PARAM_LOB,
+                        0,
+                        \constant('PDO::SQLSRV_ENCODING_BINARY'),
+                    );
+                } else {
+                    $statement->bindParam($parameter, $resourceBindings[$resourceIndex], PDO::PARAM_LOB);
+                }
 
                 continue;
             }

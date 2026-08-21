@@ -8,69 +8,40 @@ use Infocyph\DBLayer\DB;
 beforeEach(function (): void {
     DB::purge();
 });
-
 afterEach(function (): void {
     DB::purge();
 });
 
-/**
- * Resolve database test connection configs that are available in this environment.
- *
- * SQLite is always available. MySQL/PostgreSQL are included only if env vars are
- * present and a short connectivity check succeeds.
- *
- * @return array<string,array<string,mixed>>
- */
+/** @return array<string,array<string,mixed>> */
 function dblayerTestConnections(): array
 {
     static $connections = null;
-
     if (is_array($connections)) {
         return $connections;
     }
-
-    $connections = [
-        'sqlite' => [
-            'driver' => 'sqlite',
-            'database' => ':memory:',
-        ],
-    ];
-
-    $mysql = dblayerMysqlConfigFromEnv();
-    if ($mysql !== null && dblayerCanConnect($mysql)) {
-        $connections['mysql'] = $mysql;
-    }
-
-    $pgsql = dblayerPgsqlConfigFromEnv();
-    if ($pgsql !== null && dblayerCanConnect($pgsql)) {
-        $connections['pgsql'] = $pgsql;
+    $connections = ['sqlite' => ['driver' => 'sqlite', 'database' => ':memory:']];
+    foreach ([
+        'mysql' => dblayerMysqlConfigFromEnv(),
+        'mariadb' => dblayerMariaDbConfigFromEnv(),
+        'pgsql' => dblayerPgsqlConfigFromEnv(),
+        'mssql' => dblayerMsSqlConfigFromEnv(),
+    ] as $name => $config) {
+        if ($config !== null && dblayerCanConnect($config)) {
+            $connections[$name] = $config;
+        }
     }
 
     return $connections;
 }
 
-/**
- * @return list<string>
- */
-function dblayerAvailableDrivers(): array
+/** @return list<string> */ function dblayerAvailableDrivers(): array
 {
     return array_keys(dblayerTestConnections());
 }
-
-/**
- * Add a connection for the requested driver and return the effective config.
- *
- * @param  array<string,mixed>  $overrides
- * @return array<string,mixed>
- */
-function dblayerAddConnectionForDriver(
-    string $driver,
-    string $name = 'default',
-    array $overrides = [],
-): array {
-    $config = dblayerRequireDriver($driver);
-    $config = array_replace_recursive($config, $overrides);
-
+/** @param array<string,mixed> $overrides @return array<string,mixed> */
+function dblayerAddConnectionForDriver(string $driver, string $name = 'default', array $overrides = []): array
+{
+    $config = array_replace_recursive(dblayerRequireDriver($driver), $overrides);
     DB::addConnection($config, $name);
     if ($name === 'default') {
         DB::setDefaultConnection($name);
@@ -78,103 +49,53 @@ function dblayerAddConnectionForDriver(
 
     return $config;
 }
-
-/**
- * Return a driver-specific auto-increment primary key column definition.
- */
 function dblayerAutoIncrementPrimaryKey(string $driver, string $column = 'id'): string
 {
     return match ($driver) {
-        'mysql' => "{$column} bigint unsigned not null auto_increment primary key",
-        'pgsql' => "{$column} bigserial primary key",
-        default => "{$column} integer primary key autoincrement",
+        'mysql', 'mariadb' => "{$column} bigint unsigned not null auto_increment primary key", 'pgsql' => "{$column} bigserial primary key", 'mssql' => "{$column} bigint identity(1,1) primary key", default => "{$column} integer primary key autoincrement",
     };
 }
-
-/**
- * Return a driver-compatible text/varchar definition.
- */
 function dblayerStringType(string $driver, int $length = 255): string
 {
     return match ($driver) {
-        'mysql', 'pgsql' => "varchar({$length})",
-        default => 'text',
+        'mysql', 'mariadb', 'pgsql' => "varchar({$length})", 'mssql' => "nvarchar({$length})", default => 'text',
     };
 }
-
-/**
- * Return a driver-compatible datetime/timestamp definition.
- */
 function dblayerDateTimeType(string $driver): string
 {
     return match ($driver) {
-        'mysql' => 'datetime',
-        'pgsql' => 'timestamp',
-        default => 'text',
+        'mysql', 'mariadb' => 'datetime', 'pgsql' => 'timestamp', 'mssql' => 'datetime2', default => 'text',
     };
 }
-
-/**
- * Return a deadlock-like message that driver profile classifies as transient.
- */
 function dblayerTransientDeadlockMessage(string $driver): string
 {
     return match ($driver) {
-        'mysql' => 'deadlock found when trying to get lock',
-        'pgsql' => 'deadlock detected',
-        default => 'database is locked',
+        'mysql' => 'deadlock found when trying to get lock', 'mariadb' => 'deadlock', 'pgsql' => 'deadlock detected', 'mssql' => 'transaction was deadlocked on lock resources and has been chosen as the deadlock victim', default => 'database is locked',
     };
 }
-
-/**
- * Return the effective driver for a configured connection.
- */
 function dblayerConnectionDriver(?string $connection = null): string
 {
     return DB::connection($connection)->getDriverName();
 }
-
-/**
- * Generate a collision-resistant test table name.
- */
 function dblayerTable(string $prefix): string
 {
     return strtolower($prefix . '_' . bin2hex(random_bytes(4)));
 }
-
-/**
- * Drop table if it exists for the given connection.
- */
 function dblayerDropTable(string $table, ?string $connection = null): void
 {
     DB::statement(sprintf('drop table if exists %s', $table), [], $connection);
 }
-
-/**
- * @return array<string,mixed>|null
- */
-function dblayerConnectionConfig(string $driver): ?array
+/** @return array<string,mixed>|null */ function dblayerConnectionConfig(string $driver): ?array
 {
-    $connections = dblayerTestConnections();
-
-    return $connections[$driver] ?? null;
+    return dblayerTestConnections()[$driver] ?? null;
 }
-
-/**
- * Mark current Pest test as skipped when a driver is unavailable.
- *
- * @return array<string,mixed>
- */
+/** @return array<string,mixed> */
 function dblayerRequireDriver(string $driver): array
 {
     $config = dblayerConnectionConfig($driver);
-
     if ($config === null) {
         DB::purge();
-        test()->markTestSkipped(sprintf(
-            'Driver [%s] is not available in this environment. Configure env vars to enable it.',
-            $driver,
-        ));
+        test()->markTestSkipped(sprintf('Driver [%s] is not available in this environment. Configure env vars to enable it.', $driver));
 
         throw new RuntimeException('Skipped');
     }
@@ -182,71 +103,190 @@ function dblayerRequireDriver(string $driver): array
     return $config;
 }
 
-/**
- * @return array<string,mixed>|null
- */
+/** @return array<string,mixed>|null */
 function dblayerMysqlConfigFromEnv(): ?array
 {
-    $host = dblayerEnvFirst(['DBLAYER_MYSQL_HOST', 'MYSQL_HOST']);
-    $database = dblayerEnvFirst(['DBLAYER_MYSQL_DATABASE', 'IC_SERVICE_DATABASE', 'MYSQL_DATABASE']);
-    $username = dblayerEnvFirst(['DBLAYER_MYSQL_USERNAME', 'IC_SERVICE_USERNAME', 'MYSQL_USERNAME', 'MYSQL_USER']);
-    $password = dblayerEnvFirst(['DBLAYER_MYSQL_PASSWORD', 'IC_SERVICE_PASSWORD', 'MYSQL_PASSWORD']) ?? '';
-
+    $dsn = dblayerDsnOptions(dblayerEnvFirst(['IC_MYSQL_DSN']));
+    $host = dblayerEnvFirst(['DBLAYER_MYSQL_HOST', 'MYSQL_HOST']) ?? ($dsn['host'] ?? null);
+    $database = dblayerEnvFirst(['DBLAYER_MYSQL_DATABASE', 'IC_SERVICE_DATABASE', 'MYSQL_DATABASE']) ?? ($dsn['dbname'] ?? null);
+    $username = dblayerEnvFirst(['DBLAYER_MYSQL_USERNAME', 'IC_MYSQL_USER', 'IC_SERVICE_USERNAME', 'MYSQL_USERNAME', 'MYSQL_USER']);
+    $password = dblayerEnvFirst(['DBLAYER_MYSQL_PASSWORD', 'IC_MYSQL_PASSWORD', 'IC_SERVICE_PASSWORD', 'MYSQL_PASSWORD']) ?? '';
     if ($host === null || $database === null || $username === null) {
         return null;
     }
 
-    $port = (int) (dblayerEnvFirst(['DBLAYER_MYSQL_PORT', 'MYSQL_PORT']) ?? '3306');
-
-    return [
-        'driver' => 'mysql',
-        'host' => $host,
-        'port' => $port,
-        'database' => $database,
-        'username' => $username,
-        'password' => $password,
-        'options' => [
-            PDO::ATTR_TIMEOUT => 1,
-        ],
-    ];
+    return ['driver' => 'mysql', 'host' => $host, 'port' => (int) (dblayerEnvFirst(['DBLAYER_MYSQL_PORT', 'MYSQL_PORT']) ?? ($dsn['port'] ?? '3306')), 'database' => $database, 'username' => $username, 'password' => $password, 'options' => [PDO::ATTR_TIMEOUT => 1]];
 }
+/** @return array<string,mixed>|null */
+function dblayerMariaDbConfigFromEnv(): ?array
+{
+    $dsn = dblayerDsnOptions(dblayerEnvFirst(['IC_MARIADB_DSN']));
+    $host = dblayerEnvFirst(['DBLAYER_MARIADB_HOST', 'MARIADB_HOST']) ?? ($dsn['host'] ?? null);
+    $database = dblayerEnvFirst(['DBLAYER_MARIADB_DATABASE', 'IC_SERVICE_DATABASE', 'MARIADB_DATABASE']) ?? ($dsn['dbname'] ?? null);
+    $username = dblayerEnvFirst(['DBLAYER_MARIADB_USERNAME', 'IC_MARIADB_USER', 'IC_SERVICE_USERNAME', 'MARIADB_USERNAME', 'MARIADB_USER']);
+    $password = dblayerEnvFirst(['DBLAYER_MARIADB_PASSWORD', 'IC_MARIADB_PASSWORD', 'IC_SERVICE_PASSWORD', 'MARIADB_PASSWORD']) ?? '';
+    if ($host === null || $database === null || $username === null) {
+        return null;
+    }
 
-/**
- * @return array<string,mixed>|null
- */
+    return ['driver' => 'mariadb', 'host' => $host, 'port' => (int) (dblayerEnvFirst(['DBLAYER_MARIADB_PORT', 'MARIADB_PORT']) ?? ($dsn['port'] ?? '3306')), 'database' => $database, 'username' => $username, 'password' => $password, 'options' => [PDO::ATTR_TIMEOUT => 1]];
+}
+/** @return array<string,mixed>|null */
 function dblayerPgsqlConfigFromEnv(): ?array
 {
-    $host = dblayerEnvFirst(['DBLAYER_PGSQL_HOST', 'PGSQL_HOST', 'POSTGRES_HOST']);
-    $database = dblayerEnvFirst(['DBLAYER_PGSQL_DATABASE', 'IC_SERVICE_DATABASE', 'PGSQL_DATABASE', 'POSTGRES_DB']);
-    $username = dblayerEnvFirst(['DBLAYER_PGSQL_USERNAME', 'IC_SERVICE_USERNAME', 'PGSQL_USERNAME', 'POSTGRES_USER']);
-    $password = dblayerEnvFirst(['DBLAYER_PGSQL_PASSWORD', 'IC_SERVICE_PASSWORD', 'PGSQL_PASSWORD', 'POSTGRES_PASSWORD']) ?? '';
-
+    $dsn = dblayerDsnOptions(dblayerEnvFirst(['IC_POSTGRES_DSN']));
+    $host = dblayerEnvFirst(['DBLAYER_PGSQL_HOST', 'PGSQL_HOST', 'POSTGRES_HOST']) ?? ($dsn['host'] ?? null);
+    $database = dblayerEnvFirst(['DBLAYER_PGSQL_DATABASE', 'IC_SERVICE_DATABASE', 'PGSQL_DATABASE', 'POSTGRES_DB']) ?? ($dsn['dbname'] ?? null);
+    $username = dblayerEnvFirst(['DBLAYER_PGSQL_USERNAME', 'IC_POSTGRES_USER', 'IC_SERVICE_USERNAME', 'PGSQL_USERNAME', 'POSTGRES_USER']);
+    $password = dblayerEnvFirst(['DBLAYER_PGSQL_PASSWORD', 'IC_POSTGRES_PASSWORD', 'IC_SERVICE_PASSWORD', 'PGSQL_PASSWORD', 'POSTGRES_PASSWORD']) ?? '';
     if ($host === null || $database === null || $username === null) {
         return null;
     }
 
-    $port = (int) (dblayerEnvFirst(['DBLAYER_PGSQL_PORT', 'PGSQL_PORT', 'POSTGRES_PORT']) ?? '5432');
+    return ['driver' => 'pgsql', 'host' => $host, 'port' => (int) (dblayerEnvFirst(['DBLAYER_PGSQL_PORT', 'PGSQL_PORT', 'POSTGRES_PORT']) ?? ($dsn['port'] ?? '5432')), 'database' => $database, 'username' => $username, 'password' => $password, 'options' => [PDO::ATTR_TIMEOUT => 1]];
+}
+/** @return array<string,mixed>|null */
+function dblayerMsSqlConfigFromEnv(): ?array
+{
+    $dsn = dblayerDsnOptions(dblayerEnvFirst(['IC_MSSQL_DSN']));
+    [$dsnHost, $dsnPort] = dblayerMsSqlServer($dsn['server'] ?? null);
+    $host = dblayerEnvFirst(['DBLAYER_MSSQL_HOST', 'MSSQL_HOST']) ?? $dsnHost;
+    $database = dblayerEnvFirst(['DBLAYER_MSSQL_DATABASE', 'IC_SERVICE_DATABASE', 'MSSQL_DATABASE']) ?? ($dsn['database'] ?? null);
+    $username = dblayerEnvFirst(['DBLAYER_MSSQL_USERNAME', 'IC_MSSQL_USER', 'IC_SERVICE_USERNAME', 'MSSQL_USERNAME', 'MSSQL_USER']);
+    $password = dblayerEnvFirst(['DBLAYER_MSSQL_PASSWORD', 'IC_MSSQL_PASSWORD', 'IC_SERVICE_PASSWORD', 'MSSQL_PASSWORD']) ?? '';
+    if ($host === null || $database === null || $username === null) {
+        return null;
+    }
 
-    return [
-        'driver' => 'pgsql',
-        'host' => $host,
-        'port' => $port,
-        'database' => $database,
-        'username' => $username,
-        'password' => $password,
-        'options' => [
-            PDO::ATTR_TIMEOUT => 1,
-        ],
-    ];
+    return ['driver' => 'mssql', 'host' => $host, 'port' => (int) (dblayerEnvFirst(['DBLAYER_MSSQL_PORT', 'MSSQL_PORT']) ?? $dsnPort ?? '1433'), 'database' => $database, 'username' => $username, 'password' => $password, 'timeout' => 1, 'encrypt' => filter_var(dblayerEnvFirst(['DBLAYER_MSSQL_ENCRYPT']) ?? ($dsn['encrypt'] ?? 'true'), FILTER_VALIDATE_BOOL), 'trust_server_certificate' => filter_var(dblayerEnvFirst(['DBLAYER_MSSQL_TRUST_SERVER_CERTIFICATE']) ?? ($dsn['trustservercertificate'] ?? 'false'), FILTER_VALIDATE_BOOL)];
+}
+
+/** @return array<string,string> */
+function dblayerDsnOptions(?string $dsn): array
+{
+    if ($dsn === null || !str_contains($dsn, ':')) {
+        return [];
+    }
+
+    [, $settings] = explode(':', $dsn, 2);
+    $options = [];
+    foreach (explode(';', $settings) as $setting) {
+        if (!str_contains($setting, '=')) {
+            continue;
+        }
+
+        [$key, $value] = explode('=', $setting, 2);
+        $key = strtolower(trim($key));
+        $value = trim($value);
+        if ($key !== '' && $value !== '') {
+            $options[$key] = $value;
+        }
+    }
+
+    return $options;
+}
+
+/** @return array{0:?string,1:?string} */
+function dblayerMsSqlServer(?string $server): array
+{
+    if ($server === null || $server === '') {
+        return [null, null];
+    }
+
+    $server = preg_replace('/\Atcp:/i', '', $server) ?? $server;
+    if (!str_contains($server, ',')) {
+        return [$server, null];
+    }
+
+    [$host, $port] = explode(',', $server, 2);
+
+    return [trim($host), trim($port)];
 }
 
 /**
- * @param  array<string,mixed>  $config
+ * @return array<string,array{primary:array<string,mixed>,replica:array<string,mixed>}>
  */
+function dblayerReplicationConnections(): array
+{
+    $connections = [];
+    foreach ([
+        'mysql' => ['IC_MYSQL_PRIMARY_DSN', 'IC_MYSQL_REPLICA_DSN'],
+        'mariadb' => ['IC_MARIADB_PRIMARY_DSN', 'IC_MARIADB_REPLICA_DSN'],
+        'pgsql' => ['IC_POSTGRES_PRIMARY_DSN', 'IC_POSTGRES_REPLICA_DSN'],
+        'mssql' => ['IC_MSSQL_PRIMARY_DSN', 'IC_MSSQL_REPLICA_DSN'],
+    ] as $driver => [$primaryVariable, $replicaVariable]) {
+        $primaryDsn = dblayerEnvFirst([$primaryVariable]);
+        $replicaDsn = dblayerEnvFirst([$replicaVariable]);
+        if ($primaryDsn === null && $replicaDsn === null) {
+            continue;
+        }
+        if ($primaryDsn === null || $replicaDsn === null) {
+            throw new RuntimeException(sprintf(
+                'Physical replication testing for [%s] requires both %s and %s.',
+                $driver,
+                $primaryVariable,
+                $replicaVariable,
+            ));
+        }
+
+        $base = dblayerConnectionConfig($driver);
+        if ($base === null) {
+            throw new RuntimeException(sprintf(
+                'Physical replication testing for [%s] cannot connect to its configured primary service.',
+                $driver,
+            ));
+        }
+
+        $primary = dblayerDsnOptions($primaryDsn);
+        $replica = dblayerDsnOptions($replicaDsn);
+
+        if ($driver === 'mssql') {
+            [$primaryHost, $primaryPort] = dblayerMsSqlServer($primary['server'] ?? null);
+            [$replicaHost, $replicaPort] = dblayerMsSqlServer($replica['server'] ?? null);
+            $primaryConfig = array_replace($base, [
+                'host' => $primaryHost,
+                'port' => (int) ($primaryPort ?? 0),
+                'database' => $primary['database'] ?? null,
+            ]);
+            $replicaConfig = array_replace($base, [
+                'host' => $replicaHost,
+                'port' => (int) ($replicaPort ?? 0),
+                'database' => $replica['database'] ?? null,
+                'application_intent' => 'ReadOnly',
+            ]);
+        } else {
+            $primaryConfig = array_replace($base, [
+                'host' => $primary['host'] ?? null,
+                'port' => (int) ($primary['port'] ?? 0),
+                'database' => $primary['dbname'] ?? null,
+            ]);
+            $replicaConfig = array_replace($base, [
+                'host' => $replica['host'] ?? null,
+                'port' => (int) ($replica['port'] ?? 0),
+                'database' => $replica['dbname'] ?? null,
+            ]);
+        }
+
+        if (!dblayerCanConnect($primaryConfig) || !dblayerCanConnect($replicaConfig)) {
+            throw new RuntimeException(sprintf(
+                'Physical replication testing for [%s] cannot connect to both configured endpoints.',
+                $driver,
+            ));
+        }
+
+        $connections[$driver] = [
+            'primary' => $primaryConfig,
+            'replica' => $replicaConfig,
+        ];
+    }
+
+    return $connections;
+}
+
+/** @param array<string,mixed> $config */
 function dblayerCanConnect(array $config): bool
 {
     $driver = (string) ($config['driver'] ?? '');
-
     if ($driver === 'sqlite') {
         return true;
     }
@@ -258,47 +298,24 @@ function dblayerCanConnect(array $config): bool
     }
 
     try {
-        if ($driver === 'mysql') {
-            $dsn = sprintf(
-                'mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4',
-                (string) ($config['host'] ?? '127.0.0.1'),
-                (int) ($config['port'] ?? 3306),
-                (string) ($config['database'] ?? ''),
-            );
-
-            $pdo = new PDO(
-                $dsn,
-                (string) ($config['username'] ?? ''),
-                (string) ($config['password'] ?? ''),
-                [
-                    PDO::ATTR_TIMEOUT => 1,
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                ],
-            );
-
+        if (in_array($driver, ['mysql', 'mariadb'], true)) {
+            $pdo = new PDO(sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $config['host'], $config['port'] ?? 3306, $config['database']), (string) ($config['username'] ?? ''), (string) ($config['password'] ?? ''), [PDO::ATTR_TIMEOUT => 1, PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
             $pdo->query('select 1');
 
             return true;
         }
-
         if ($driver === 'pgsql') {
-            $dsn = sprintf(
-                'pgsql:host=%s;port=%d;dbname=%s;connect_timeout=1',
-                (string) ($config['host'] ?? '127.0.0.1'),
-                (int) ($config['port'] ?? 5432),
-                (string) ($config['database'] ?? ''),
-            );
+            $pdo = new PDO(sprintf('pgsql:host=%s;port=%d;dbname=%s;connect_timeout=1', $config['host'], $config['port'] ?? 5432, $config['database']), (string) ($config['username'] ?? ''), (string) ($config['password'] ?? ''), [PDO::ATTR_TIMEOUT => 1, PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+            $pdo->query('select 1');
 
-            $pdo = new PDO(
-                $dsn,
-                (string) ($config['username'] ?? ''),
-                (string) ($config['password'] ?? ''),
-                [
-                    PDO::ATTR_TIMEOUT => 1,
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                ],
-            );
-
+            return true;
+        }
+        if ($driver === 'mssql') {
+            if (!in_array('sqlsrv', PDO::getAvailableDrivers(), true)) {
+                return false;
+            }
+            $dsn = sprintf('sqlsrv:Server=%s,%d;Database=%s;Encrypt=%s;TrustServerCertificate=%s;LoginTimeout=1', $config['host'], $config['port'] ?? 1433, $config['database'], !empty($config['encrypt']) ? 'yes' : 'no', !empty($config['trust_server_certificate']) ? 'yes' : 'no');
+            $pdo = new PDO($dsn, (string) ($config['username'] ?? ''), (string) ($config['password'] ?? ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
             $pdo->query('select 1');
 
             return true;
@@ -309,23 +326,13 @@ function dblayerCanConnect(array $config): bool
 
     return false;
 }
-
-/**
- * @param  list<string>  $keys
- */
+/** @param list<string> $keys */
 function dblayerEnvFirst(array $keys): ?string
 {
     foreach ($keys as $key) {
         $value = getenv($key);
-
-        if ($value === false) {
-            continue;
-        }
-
-        $trimmed = trim((string) $value);
-
-        if ($trimmed !== '') {
-            return $trimmed;
+        if ($value !== false && trim((string) $value) !== '') {
+            return trim((string) $value);
         }
     }
 

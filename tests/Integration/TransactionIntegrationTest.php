@@ -32,6 +32,7 @@ it('commits successful transactions and rolls back failed ones', function (strin
     expect(static function () use ($table): mixed {
         return DB::transaction(static function ($connection) use ($table): void {
             $connection->table($table)->insert(['ref' => 'rolled-back']);
+
             throw new \RuntimeException('force rollback');
         });
     })->toThrow(TransactionException::class);
@@ -277,6 +278,41 @@ it('preserves managed state when native commit or rollback fails', function (str
         $connection->disconnect();
     }
 })->with(['commit', 'rollback']);
+
+it('does not advance managed state when native transaction start returns false', function (): void {
+    dblayerAddConnectionForDriver('sqlite');
+    $connection = DB::connection();
+    $nativePdo = $connection->getPdo();
+    $pdo = new class extends PDO {
+        public function __construct() {}
+
+        public function beginTransaction(): bool
+        {
+            return false;
+        }
+
+        public function errorInfo(): array
+        {
+            return ['HY000', 1, 'synthetic transaction start failure'];
+        }
+
+        public function inTransaction(): bool
+        {
+            return false;
+        }
+    };
+    $pdoProperty = new ReflectionProperty($connection, 'pdo');
+    $pdoProperty->setValue($connection, $pdo);
+
+    try {
+        expect(static fn() => DB::beginTransaction())
+            ->toThrow(TransactionException::class, 'synthetic transaction start failure')
+            ->and(DB::transactionLevel())->toBe(0)
+            ->and(DB::transactionStats()['in_transaction'])->toBeFalse();
+    } finally {
+        $pdoProperty->setValue($connection, $nativePdo);
+    }
+});
 
 it('preserves nesting when releasing a savepoint fails', function (): void {
     dblayerAddConnectionForDriver('sqlite');

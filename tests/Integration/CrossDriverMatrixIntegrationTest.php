@@ -19,7 +19,7 @@ it('runs core query and transaction flow on available drivers', function (string
             id integer primary key,
             name varchar(100) not null,
             qty integer not null
-        )"
+        )",
     );
 
     expect(DB::table($table)->insert([
@@ -61,7 +61,7 @@ it('runs core query and transaction flow on available drivers', function (string
 it('applies effective vendor-specific connection configuration', function (string $driver): void {
     $config = dblayerRequireDriver($driver);
 
-    if ($driver === 'mysql') {
+    if (in_array($driver, ['mysql', 'mariadb'], true)) {
         $config['charset'] = 'utf8mb4';
         $config['collation'] = 'utf8mb4_unicode_ci';
     } elseif ($driver === 'pgsql') {
@@ -73,12 +73,20 @@ it('applies effective vendor-specific connection configuration', function (strin
     DB::addConnection($config, 'effective_config');
     $connection = DB::connection('effective_config');
 
-    if ($driver === 'mysql') {
+    if (in_array($driver, ['mysql', 'mariadb'], true)) {
         expect($connection->scalar('select @@character_set_connection'))->toBe('utf8mb4')
             ->and($connection->scalar('select @@collation_connection'))->toBe('utf8mb4_unicode_ci');
     } elseif ($driver === 'pgsql') {
-        expect($connection->scalar('show client_encoding'))->toBe('UTF8')
-            ->and($connection->scalar('show search_path'))->toBe('public');
+        expect($connection->scalar("select current_setting('client_encoding')"))->toBe('UTF8')
+            ->and($connection->scalar("select current_setting('search_path')"))->toBe('public');
+    } elseif ($driver === 'mssql') {
+        expect((int) $connection->scalar('select 1'))->toBe(1)
+            ->and($connection->getConfig()->toArray())->toMatchArray([
+                'encrypt' => (bool) ($config['encrypt'] ?? true),
+                'trust_server_certificate' => (bool) ($config['trust_server_certificate'] ?? false),
+                'application_intent' => 'ReadWrite',
+            ])
+            ->and($connection->getConfig()->toArray())->not->toHaveKey('schema');
     } else {
         expect($connection->scalar('select 1'))->toBe(1)
             ->and($connection->getConfig()->toArray())->not->toHaveKeys([
@@ -94,8 +102,12 @@ it('preserves each pdo drivers native boolean result type', function (string $dr
     DB::addConnection(dblayerRequireDriver($driver), 'native_boolean');
     $connection = DB::connection('native_boolean');
 
-    $truthy = $connection->scalar('select true');
-    $falsey = $connection->scalar('select false');
+    $truthy = $driver === 'mssql'
+        ? $connection->scalar('select cast(1 as bit)')
+        : $connection->scalar('select true');
+    $falsey = $driver === 'mssql'
+        ? $connection->scalar('select cast(0 as bit)')
+        : $connection->scalar('select false');
 
     if ($driver === 'pgsql') {
         expect($truthy)->toBeTrue()
