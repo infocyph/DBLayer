@@ -150,7 +150,9 @@ it('surfaces write-lock contention across concurrent connections', function (str
         if (in_array($schemaDriver, ['mysql', 'mariadb'], true)) {
             DB::statement('set innodb_lock_wait_timeout = 1', [], 'writer_two');
         } elseif ($schemaDriver === 'mssql') {
-            DB::statement('set lock_timeout 250', [], 'writer_two');
+            DB::unprepared('set lock_timeout 250', 'writer_two');
+
+            expect((int) DB::scalar('select @@lock_timeout', [], 'writer_two'))->toBe(250);
         } else {
             DB::statement("set lock_timeout = '250ms'", [], 'writer_two');
         }
