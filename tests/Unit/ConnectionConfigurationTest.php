@@ -243,6 +243,17 @@ it('builds SQL Server DSNs with explicit transport and routing policy', function
     );
 });
 
+it('enables native SQL Server numeric result types when the driver supports them', function (): void {
+    $method = new ReflectionMethod(SQLServerDriver::class, 'defaultPdoOptions');
+    $options = $method->invoke(new SQLServerDriver(), []);
+
+    expect($options[PDO::ATTR_STRINGIFY_FETCHES] ?? null)->toBeFalse();
+
+    if (defined('PDO::SQLSRV_ATTR_FETCHES_NUMERIC_TYPE')) {
+        expect($options[constant('PDO::SQLSRV_ATTR_FETCHES_NUMERIC_TYPE')] ?? null)->toBeTrue();
+    }
+});
+
 it('enforces SQL Server TLS and application-intent configuration', function (array $override): void {
     expect(static fn(): ConnectionConfig => ConnectionConfig::fromArray(array_replace_recursive([
         'driver' => 'mssql',

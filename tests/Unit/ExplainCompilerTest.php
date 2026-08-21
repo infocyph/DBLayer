@@ -8,6 +8,7 @@ use Infocyph\DBLayer\Driver\MariaDB\MariaDBDriver;
 use Infocyph\DBLayer\Driver\MySQL\MySQLDriver;
 use Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver;
 use Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver;
+use Infocyph\DBLayer\Driver\SQLServer\SQLServerBindingInterpolator;
 use Infocyph\DBLayer\Driver\SQLite\SQLiteDriver;
 use Infocyph\DBLayer\Exceptions\QueryException;
 
@@ -74,4 +75,13 @@ it('keeps SQL Server execution plans on the connection-scoped executor', functio
                 'bindings' => [],
             ],
         ]);
+});
+
+it('safely inlines SQL Server plan bindings without replacing quoted or commented placeholders', function (): void {
+    $pdo = new PDO('sqlite::memory:');
+    $sql = "select '?' as literal, [question?] as identifier -- ?\nwhere id = ? and name = :name /* ? */";
+
+    expect(SQLServerBindingInterpolator::interpolate($pdo, $sql, [7, 'name' => "O'Reilly"]))->toBe(
+        "select '?' as literal, [question?] as identifier -- ?\nwhere id = 7 and name = 'O''Reilly' /* ? */",
+    );
 });

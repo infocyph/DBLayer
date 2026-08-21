@@ -8,6 +8,7 @@ use Generator;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use PDO;
+use Pdo\Mysql;
 use PDOException;
 use PDOStatement;
 use Throwable;
@@ -26,8 +27,8 @@ trait ConnectionStreaming
      *
      * MySQL and MariaDB temporarily disable PDO-MySQL buffering. PostgreSQL uses
      * a transaction-scoped server cursor. SQLite delegates to incremental fetch().
-     * Microsoft SQL Server intentionally has no declared unbuffered strategy until
-     * PDO_SQLSRV bounded-memory behavior is verified by the integration/load suite.
+     * Microsoft SQL Server uses PDO_SQLSRV's default forward-only cursor, which
+     * fetches rows incrementally without a client-side result buffer.
      *
      * @param array<int|string,mixed> $bindings
      * @return Generator<mixed>
@@ -45,7 +46,7 @@ trait ConnectionStreaming
         yield from match ($this->getDriverName()) {
             'mysql', 'mariadb' => $this->mysqlUnbufferedStream($sql, $bindings, $fetchMode),
             'pgsql' => $this->postgresUnbufferedStream($sql, $bindings, $fetchMode, $fetchSize),
-            'sqlite' => $this->stream($sql, $bindings, $fetchMode),
+            'mssql', 'sqlite' => $this->stream($sql, $bindings, $fetchMode),
             default => throw ConnectionException::invalidConfiguration(
                 "Driver [{$this->getDriverName()}] has no declared unbuffered streaming strategy.",
             ),
@@ -134,7 +135,7 @@ trait ConnectionStreaming
         ?int $fetchMode,
     ): Generator {
         $pdo = $this->getReadPdo();
-        $attribute = PDO::MYSQL_ATTR_USE_BUFFERED_QUERY;
+        $attribute = Mysql::ATTR_USE_BUFFERED_QUERY;
         $wasBuffered = (bool) $pdo->getAttribute($attribute);
         $pdo->setAttribute($attribute, false);
 
@@ -178,7 +179,7 @@ trait ConnectionStreaming
                     throw new PDOException('Unable to fetch from PostgreSQL server cursor.');
                 }
 
-                $rows = $statement->fetchAll($fetchMode ?? $this->fetchMode);
+                $rows = $this->fetchAllRows($statement, $fetchMode ?? $this->fetchMode);
                 $statement->closeCursor();
 
                 foreach ($rows as $row) {

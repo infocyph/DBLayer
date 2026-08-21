@@ -6,6 +6,7 @@ namespace Infocyph\DBLayer\Connection;
 
 use Generator;
 use Infocyph\DBLayer\Connection\Concerns\ConnectionInternals;
+use Infocyph\DBLayer\Connection\Concerns\ConnectionResultNormalization;
 use Infocyph\DBLayer\Connection\Concerns\ConnectionStreaming;
 use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
@@ -47,6 +48,7 @@ use Throwable;
 final class Connection
 {
     use ConnectionInternals;
+    use ConnectionResultNormalization;
     use ConnectionStreaming;
 
     /**
@@ -955,7 +957,7 @@ final class Connection
 
             if ($statement->columnCount() > 0) {
                 /** @var list<array<string,mixed>> $returned */
-                $returned = $statement->fetchAll($this->fetchMode);
+                $returned = $this->fetchAllRows($statement, $this->fetchMode);
                 $rows = $returned;
             }
 
@@ -1034,7 +1036,7 @@ final class Connection
         $statement = $this->executeKnownType($sql, $bindings, QueryType::SELECT);
 
         /** @var array<int,array<string,mixed>> $rows */
-        $rows = $statement->fetchAll($this->fetchMode);
+        $rows = $this->fetchAllRows($statement, $this->fetchMode);
 
         return $rows;
     }
@@ -1052,9 +1054,11 @@ final class Connection
         $fetchMode = $this->fetchMode;
 
         while (true) {
-            /** @var list<array<string,mixed>> $rows */
-            $rows = $statement->fetchAll($fetchMode);
-            $results[] = $rows;
+            if ($statement->columnCount() > 0) {
+                /** @var list<array<string,mixed>> $rows */
+                $rows = $this->fetchAllRows($statement, $fetchMode);
+                $results[] = $rows;
+            }
 
             try {
                 $hasMore = $statement->nextRowset();
@@ -1163,6 +1167,9 @@ final class Connection
     {
         $statement = $this->execute($sql, $bindings);
         $mode = $fetchMode ?? $this->fetchMode;
+        $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
+            ? $this->sqlServerBigIntColumns($statement)
+            : [];
 
         try {
             while (true) {
@@ -1172,7 +1179,9 @@ final class Connection
                     break;
                 }
 
-                yield $row;
+                yield $sqlServerBigIntColumns !== []
+                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
+                    : $row;
             }
         } finally {
             $statement->closeCursor();
@@ -1596,7 +1605,7 @@ final class Connection
         $statement = $this->executeKnownType($sql, $bindings, $type, $origin);
 
         /** @var array<int,array<string,mixed>> $rows */
-        $rows = $statement->fetchAll($this->fetchMode);
+        $rows = $this->fetchAllRows($statement, $this->fetchMode);
 
         return $rows;
     }

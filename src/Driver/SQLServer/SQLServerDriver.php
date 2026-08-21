@@ -99,20 +99,21 @@ final class SQLServerDriver extends AbstractPdoDriver
         }
 
         $mode = $analyze ? 'STATISTICS XML' : 'SHOWPLAN_XML';
-        $pdo->exec('SET ' . $mode . ' ON');
+        if (!\defined('PDO::SQLSRV_ATTR_DIRECT_QUERY')) {
+            throw ConnectionException::invalidConfiguration('PDO_SQLSRV direct-query support is required for SQL Server execution plans.');
+        }
+
+        /** @var int $directQueryAttribute */
+        $directQueryAttribute = \constant('PDO::SQLSRV_ATTR_DIRECT_QUERY');
+        $wasDirectQuery = (bool) $pdo->getAttribute($directQueryAttribute);
+        $pdo->setAttribute($directQueryAttribute, true);
 
         try {
-            $statement = $pdo->prepare($sql);
+            $pdo->exec('SET ' . $mode . ' ON');
+            $statement = $pdo->query(SQLServerBindingInterpolator::interpolate($pdo, $sql, $bindings));
             if (!$statement instanceof PDOStatement) {
-                throw ConnectionException::invalidConfiguration('Unable to prepare SQL Server execution-plan statement.');
+                throw ConnectionException::invalidConfiguration('Unable to execute SQL Server execution-plan statement.');
             }
-
-            foreach ($bindings as $key => $value) {
-                $parameter = is_int($key) ? $key + 1 : $key;
-                $statement->bindValue($parameter, $value, $this->parameterType($value));
-            }
-
-            $statement->execute();
 
             return $this->collectExplainRows($statement);
         } finally {
@@ -120,6 +121,7 @@ final class SQLServerDriver extends AbstractPdoDriver
                 $pdo->exec('SET ' . $mode . ' OFF');
             } catch (PDOException) {
             }
+            $pdo->setAttribute($directQueryAttribute, $wasDirectQuery);
         }
     }
 
@@ -185,6 +187,21 @@ final class SQLServerDriver extends AbstractPdoDriver
         return 'sqlsrv:' . implode(';', $parts);
     }
 
+    /** @param array<string,mixed> $config */
+    #[\Override]
+    protected function defaultPdoOptions(array $config): array
+    {
+        $options = parent::defaultPdoOptions($config);
+
+        if (\defined('PDO::SQLSRV_ATTR_FETCHES_NUMERIC_TYPE')) {
+            /** @var int $attribute */
+            $attribute = \constant('PDO::SQLSRV_ATTR_FETCHES_NUMERIC_TYPE');
+            $options[$attribute] = true;
+        }
+
+        return $options;
+    }
+
     #[\Override]
     protected function hasRequiredTlsConfiguration(array $config): bool
     {
@@ -202,19 +219,25 @@ final class SQLServerDriver extends AbstractPdoDriver
     {
         $planRows = [];
 
-        do {
-            while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
-                if (!is_array($row)) {
+        try {
+            do {
+                if ($statement->columnCount() === 0) {
                     continue;
                 }
-                /** @var array<string,mixed> $row */
-                if ($this->containsShowplanXml($row)) {
-                    $planRows[] = $row;
-                }
-            }
-        } while ($statement->nextRowset());
 
-        $statement->closeCursor();
+                while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    /** @var array<string,mixed> $row */
+                    if ($this->containsShowplanXml($row)) {
+                        $planRows[] = $row;
+                    }
+                }
+            } while ($statement->nextRowset());
+        } finally {
+            $statement->closeCursor();
+        }
 
         return $planRows;
     }
@@ -228,16 +251,5 @@ final class SQLServerDriver extends AbstractPdoDriver
     private function normalizeApplicationIntent(mixed $intent): string
     {
         return is_string($intent) && strtolower($intent) === 'readonly' ? 'ReadOnly' : 'ReadWrite';
-    }
-
-    private function parameterType(mixed $value): int
-    {
-        return match (true) {
-            is_int($value) => PDO::PARAM_INT,
-            is_bool($value) => PDO::PARAM_BOOL,
-            $value === null => PDO::PARAM_NULL,
-            is_resource($value) => PDO::PARAM_LOB,
-            default => PDO::PARAM_STR,
-        };
     }
 }

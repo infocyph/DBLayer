@@ -1051,10 +1051,7 @@ class QueryBuilder
             throw QueryException::invalidOrderDirection($direction);
         }
 
-        $this->orders[] = [
-            'column' => $column,
-            'direction' => $direction,
-        ];
+        $this->replaceOrAppendOrder($column, $direction);
 
         return $this;
     }
