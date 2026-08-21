@@ -8,9 +8,9 @@ use Infocyph\DBLayer\Driver\MariaDB\MariaDBDriver;
 use Infocyph\DBLayer\Driver\MySQL\MySQLCompiler;
 use Infocyph\DBLayer\Driver\MySQL\MySQLDriver;
 use Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver;
+use Infocyph\DBLayer\Driver\SQLite\SQLiteDriver;
 use Infocyph\DBLayer\Driver\SQLServer\SQLServerCompiler;
 use Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver;
-use Infocyph\DBLayer\Driver\SQLite\SQLiteDriver;
 use Infocyph\DBLayer\Driver\Support\DriverProfile;
 use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Query\Core\QueryPayload;
@@ -71,6 +71,22 @@ it('declares SQL Server parameter and savepoint semantics explicitly', function 
         ->and(DriverProfile::createSavepointSql('mssql', 'trans_1'))->toBe('SAVE TRANSACTION trans_1')
         ->and(DriverProfile::releaseSavepointSql('mssql', 'trans_1'))->toBeNull()
         ->and(DriverProfile::rollbackToSavepointSql('mssql', 'trans_1'))->toBe('ROLLBACK TRANSACTION trans_1');
+});
+
+it('parses PHPForge service DSNs without collapsing database identities', function (): void {
+    expect(dblayerDsnOptions('mysql:host=127.0.0.1;port=3308;dbname=dblayer;charset=utf8mb4'))
+        ->toMatchArray([
+            'host' => '127.0.0.1',
+            'port' => '3308',
+            'dbname' => 'dblayer',
+        ])
+        ->and(dblayerDsnOptions('sqlsrv:Server=tcp:127.0.0.1,1433;TrustServerCertificate=1'))
+        ->toMatchArray([
+            'server' => 'tcp:127.0.0.1,1433',
+            'trustservercertificate' => '1',
+        ])
+        ->and(dblayerMsSqlServer('tcp:127.0.0.1,1433'))
+        ->toBe(['127.0.0.1', '1433']);
 });
 
 it('uses separate schema dialects for all five engines', function (): void {

@@ -244,7 +244,16 @@ final class Executor
             throw QueryException::invalidParameter('insertReturning', 'Bulk INSERT RETURNING requires native driver support.');
         }
 
-        return $this->runCompiledObserved($this->connection->getCompiler()->compile($query->toInsertPayload($rows)));
+        $result = $this->runCompiledObserved(
+            $this->connection->getCompiler()->compile($query->toInsertPayload($rows)),
+        );
+        $lastInsertId = $this->connection->lastInsertId();
+
+        return new DriverResult(
+            $result->rows,
+            $result->rowCount,
+            $lastInsertId !== '' ? $lastInsertId : null,
+        );
     }
 
     /**

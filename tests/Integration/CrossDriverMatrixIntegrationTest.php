@@ -19,7 +19,7 @@ it('runs core query and transaction flow on available drivers', function (string
             id integer primary key,
             name varchar(100) not null,
             qty integer not null
-        )"
+        )",
     );
 
     expect(DB::table($table)->insert([
@@ -77,8 +77,8 @@ it('applies effective vendor-specific connection configuration', function (strin
         expect($connection->scalar('select @@character_set_connection'))->toBe('utf8mb4')
             ->and($connection->scalar('select @@collation_connection'))->toBe('utf8mb4_unicode_ci');
     } elseif ($driver === 'pgsql') {
-        expect($connection->scalar('show client_encoding'))->toBe('UTF8')
-            ->and($connection->scalar('show search_path'))->toBe('public');
+        expect($connection->scalar("select current_setting('client_encoding')"))->toBe('UTF8')
+            ->and($connection->scalar("select current_setting('search_path')"))->toBe('public');
     } elseif ($driver === 'mssql') {
         expect((int) $connection->scalar('select 1'))->toBe(1)
             ->and($connection->getConfig()->toArray())->toMatchArray([

@@ -9,6 +9,7 @@ use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
 use Infocyph\DBLayer\Driver\MySQL\MySQLDriver;
 use Infocyph\DBLayer\Driver\PostgreSQL\PostgreSQLDriver;
 use Infocyph\DBLayer\Driver\SQLite\SQLiteDriver;
+use Infocyph\DBLayer\Driver\SQLServer\SQLServerDriver;
 use Infocyph\DBLayer\Driver\Support\Capabilities;
 use Infocyph\DBLayer\Driver\Support\DriverRegistry;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
@@ -215,6 +216,48 @@ it('builds an effective PostgreSQL DSN for every accepted connection option', fu
         . ";options='-csearch_path=tenant_42';sslmode=verify-full",
     );
 });
+
+it('builds SQL Server DSNs with explicit transport and routing policy', function (): void {
+    $config = ConnectionConfig::fromArray([
+        'driver' => 'mssql',
+        'host' => 'sql.internal',
+        'port' => 1444,
+        'database' => 'billing',
+        'username' => 'app',
+        'timeout' => 7,
+        'encrypt' => true,
+        'trust_server_certificate' => false,
+        'application_intent' => 'ReadWrite',
+        'security' => [
+            'require_tls' => true,
+        ],
+    ]);
+
+    $method = new ReflectionMethod(SQLServerDriver::class, 'buildDsn');
+    $driver = new SQLServerDriver();
+
+    expect($method->invoke($driver, $config->toArray(), false))->toBe(
+        'sqlsrv:Server=sql.internal,1444;Database=billing;Encrypt=yes;TrustServerCertificate=no;ApplicationIntent=ReadWrite;LoginTimeout=7',
+    )->and($method->invoke($driver, $config->toArray(), true))->toContain(
+        'ApplicationIntent=ReadOnly',
+    );
+});
+
+it('enforces SQL Server TLS and application-intent configuration', function (array $override): void {
+    expect(static fn(): ConnectionConfig => ConnectionConfig::fromArray(array_replace_recursive([
+        'driver' => 'mssql',
+        'database' => 'app',
+        'username' => 'app',
+    ], $override)))->toThrow(ConnectionException::class);
+})->with([
+    'unencrypted required transport' => [[
+        'encrypt' => false,
+        'security' => ['require_tls' => true],
+    ]],
+    'unknown application intent' => [[
+        'application_intent' => 'NearestReplica',
+    ]],
+]);
 
 it('validates PostgreSQL DSN tokens before interpolation', function (
     string $key,

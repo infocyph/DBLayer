@@ -343,23 +343,10 @@ Test execution is driver-aware:
 - MySQL, MariaDB, PostgreSQL, and SQL Server are enabled automatically when
   their `DBLAYER_MYSQL_*`, `DBLAYER_MARIADB_*`, `DBLAYER_PGSQL_*`, or
   `DBLAYER_MSSQL_*` environment variables and matching PDO extensions are available.
+  PHPForge service DSNs (`IC_MYSQL_DSN`, `IC_MARIADB_DSN`, `IC_POSTGRES_DSN`,
+  and `IC_MSSQL_DSN`) are recognized as CI fallbacks.
 
 So total test count increases when more drivers are available.
-
-## Benchmarking
-
-```bash
-composer ic:bench:run
-composer ic:bench:quick
-composer ic:bench:chart
-```
-
-## Benchmarks
-
-Use repeated runs on the same production-representative environment. The
-included PHPBench subjects compare component hot paths; they do not establish
-end-to-end application RPM. See `docs/benchmarks.rst` for interpretation and
-reporting requirements.
 
 ## Security
 

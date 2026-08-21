@@ -34,8 +34,9 @@ Connection and Consistency Notes
 - Read-replica consistency is not guaranteed by default. For read-after-write
   behavior, use sticky mode, transactions, or force reads to write PDO.
 - Read-only transaction mode is best-effort and driver-dependent.
-  SQLite is effectively a no-op for transaction read-only flags, while
-  MySQL/PostgreSQL use best-effort session/transaction commands.
+  SQLite and Microsoft SQL Server are effectively no-ops for transaction
+  read-only flags, while MySQL, MariaDB, and PostgreSQL use best-effort
+  session/transaction commands.
 
 Performance Notes
 -----------------

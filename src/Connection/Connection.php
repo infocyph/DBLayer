@@ -959,13 +959,7 @@ final class Connection
                 $rows = $returned;
             }
 
-            $lastId = null;
-            if ($rows === null || $rows === []) {
-                $id = $this->lastInsertId();
-                $lastId = $id !== '' ? $id : null;
-            }
-
-            return new DriverResult($rows, $rowCount, $lastId);
+            return new DriverResult($rows, $rowCount);
         }
 
         if ($type === QueryType::UPDATE) {
