@@ -6,18 +6,20 @@ namespace Infocyph\DBLayer\Repository;
 
 use BadMethodCallException;
 use Infocyph\ArrayKit\Collection\Collection;
+use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository;
+use InvalidArgumentException;
 
 /**
  * Repository-aware fluent query wrapper.
  *
  * Fluent QueryBuilder calls are recorded and replayed through Repository
- * terminal operations. This preserves repository casts and result processing
- * without copying mutable QueryBuilder state or widening Repository internals.
+ * terminal operations. Explicit eager relations are projected after the base
+ * repository read through the existing bounded RelationLoader.
  */
 final class RepositoryQuery
 {
@@ -26,9 +28,19 @@ final class RepositoryQuery
      */
     private array $operations = [];
 
+    /**
+     * @var array<string,null|callable(QueryBuilder):void>
+     */
+    private array $requestedRelations = [];
+
+    /**
+     * @param array<string,RelationDefinition> $relations
+     */
     public function __construct(
         private readonly Repository $repository,
         private readonly QueryBuilder $builder,
+        private readonly Connection $connection,
+        private readonly array $relations = [],
     ) {}
 
     /**
@@ -88,11 +100,18 @@ final class RepositoryQuery
     /**
      * Get the first repository-processed row.
      *
+     * @param list<\Infocyph\DBLayer\Query\Expression|string> $columns
      * @return array<string,mixed>|null
      */
     public function first(array $columns = ['*']): ?array
     {
-        return $this->repository->first($this->scope(), $columns);
+        $row = $this->repository->first($this->scope(), $columns);
+
+        if ($row === null || $this->requestedRelations === []) {
+            return $row;
+        }
+
+        return $this->loadRelations([$row])[0] ?? $row;
     }
 
     /**
@@ -102,7 +121,13 @@ final class RepositoryQuery
      */
     public function get(array $columns = ['*']): Collection
     {
-        return $this->repository->get($this->scope(), $columns);
+        $rows = $this->repository->get($this->scope(), $columns);
+
+        if ($this->requestedRelations === []) {
+            return $rows;
+        }
+
+        return new Collection($this->loadRelations($rows->toArray()));
     }
 
     public function paginate(int $perPage = 15, ?int $page = null): LengthAwarePaginator
@@ -134,6 +159,149 @@ final class RepositoryQuery
     public function value(string $column): mixed
     {
         return $this->repository->value($column, $this->scope());
+    }
+
+    /**
+     * Explicitly eager-load one or more declared relations.
+     *
+     * Examples:
+     *   ->with('user', 'comments')
+     *   ->with(['comments' => fn ($q) => $q->where('approved', 1)])
+     *
+     * @param string|array<string|int,string|callable(QueryBuilder):void> ...$relations
+     */
+    public function with(string|array ...$relations): self
+    {
+        foreach ($relations as $relation) {
+            if (is_string($relation)) {
+                $this->requestedRelations[$relation] = null;
+
+                continue;
+            }
+
+            foreach ($relation as $name => $constraint) {
+                if (is_int($name)) {
+                    if (!is_string($constraint)) {
+                        throw new InvalidArgumentException('Numeric relation entries must contain relation names.');
+                    }
+
+                    $this->requestedRelations[$constraint] = null;
+
+                    continue;
+                }
+
+                if (!is_callable($constraint)) {
+                    throw new InvalidArgumentException(sprintf(
+                        'Relation constraint for [%s] must be callable.',
+                        $name,
+                    ));
+                }
+
+                $this->requestedRelations[$name] = $constraint;
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function loadRelations(array $rows): array
+    {
+        if ($rows === []) {
+            return $rows;
+        }
+
+        $loader = new RelationLoader($this->connection);
+
+        foreach ($this->requestedRelations as $name => $constraint) {
+            $definition = $this->relations[$name] ?? null;
+            if (!$definition instanceof RelationDefinition) {
+                throw new InvalidArgumentException(sprintf(
+                    'Relation [%s] is not defined for this repository.',
+                    $name,
+                ));
+            }
+
+            $related = $definition->related;
+            if (!is_a($related, TableRepository::class, true)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Related repository [%s] must extend %s.',
+                    $related,
+                    TableRepository::class,
+                ));
+            }
+
+            $scope = $this->relationScope($definition, $constraint);
+            $table = $related::table();
+
+            $rows = match ($definition->type) {
+                RelationDefinition::BELONGS_TO,
+                RelationDefinition::HAS_ONE => $loader->one(
+                    $rows,
+                    $definition->parentKey,
+                    $table,
+                    $definition->relatedKey,
+                    $name,
+                    $definition->columns,
+                    $scope,
+                ),
+                RelationDefinition::HAS_MANY => $loader->many(
+                    $rows,
+                    $definition->parentKey,
+                    $table,
+                    $definition->relatedKey,
+                    $name,
+                    $definition->columns,
+                    $scope,
+                ),
+                RelationDefinition::BELONGS_TO_MANY => $loader->manyToMany(
+                    $rows,
+                    $definition->parentKey,
+                    $definition->pivotTable
+                        ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot table.'),
+                    $definition->pivotParentKey
+                        ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot parent key.'),
+                    $definition->pivotRelatedKey
+                        ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.'),
+                    $table,
+                    $definition->relatedKey,
+                    $name,
+                    $definition->columns,
+                    $scope,
+                ),
+                default => throw new InvalidArgumentException(sprintf(
+                    'Unsupported relation type [%s].',
+                    $definition->type,
+                )),
+            };
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return null|callable(QueryBuilder):void
+     */
+    private function relationScope(RelationDefinition $definition, ?callable $constraint): ?callable
+    {
+        if ($definition->scope === null) {
+            return $constraint;
+        }
+
+        if ($constraint === null) {
+            return $definition->scope;
+        }
+
+        $base = $definition->scope;
+
+        return static function (QueryBuilder $query) use ($base, $constraint): void {
+            $base($query);
+            $constraint($query);
+        };
     }
 
     /**
