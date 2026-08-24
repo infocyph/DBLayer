@@ -10,6 +10,7 @@ use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
+use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository;
 use InvalidArgumentException;
@@ -103,12 +104,12 @@ final class RepositoryQuery
     }
 
     /**
-     * @param list<\Infocyph\DBLayer\Query\Expression|string> $columns
+     * @param list<Expression|string> $columns
      * @return array<string,mixed>|null
      */
     public function first(array $columns = ['*']): ?array
     {
-        $row = $this->repository->first($this->scope(), $columns);
+        $row = $this->repository->first($this->scope(), $this->projectionColumns($columns));
 
         if ($row === null) {
             return null;
@@ -117,10 +118,12 @@ final class RepositoryQuery
         return $this->projectRows([$row])[0] ?? $row;
     }
 
-    /** @param list<\Infocyph\DBLayer\Query\Expression|string> $columns */
+    /** @param list<Expression|string> $columns */
     public function get(array $columns = ['*']): Collection
     {
-        $rows = $this->repository->get($this->scope(), $columns)->toArray();
+        $rows = $this->repository
+            ->get($this->scope(), $this->projectionColumns($columns))
+            ->toArray();
 
         return new Collection($this->projectRows($rows));
     }
@@ -303,6 +306,38 @@ final class RepositoryQuery
         }
 
         return $rows;
+    }
+
+    /**
+     * Add relation-local parent keys to narrow selections so eager projections
+     * remain correct without forcing callers to know relation plumbing columns.
+     *
+     * @param list<Expression|string> $columns
+     * @return list<Expression|string>
+     */
+    private function projectionColumns(array $columns): array
+    {
+        if ($columns === [] || in_array('*', $columns, true)) {
+            return $columns;
+        }
+
+        $required = [];
+
+        foreach (array_keys($this->requestedRelations) as $name) {
+            $required[$this->relationDefinition($name)->parentKey] = true;
+        }
+
+        foreach ($this->requestedCounts as $request) {
+            $required[$this->relationDefinition($request['relation'])->parentKey] = true;
+        }
+
+        foreach (array_keys($required) as $column) {
+            if (!in_array($column, $columns, true)) {
+                $columns[] = $column;
+            }
+        }
+
+        return $columns;
     }
 
     /**
