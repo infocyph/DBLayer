@@ -50,9 +50,9 @@
         }
     },
     "autoload-dev": {
-        "psr-4": {
-            "Infocyph\\DBLayer\\Tests\\": "tests/"
-        }
+        "classmap": [
+            "tests/"
+        ]
     },
     "config": {
         "allow-plugins": {
