@@ -23,29 +23,19 @@ use InvalidArgumentException;
  */
 final class RepositoryQuery
 {
-    /**
-     * @var list<array{method:string,arguments:array<int,mixed>}>
-     */
+    /** @var list<array{method:string,arguments:array<int,mixed>}> */
     private array $operations = [];
 
-    /**
-     * @var list<callable(QueryBuilder):void>
-     */
+    /** @var list<callable(QueryBuilder):void> */
     private array $queryScopes = [];
 
-    /**
-     * @var array<string,array{relation:string,constraint:null|callable(QueryBuilder):void}>
-     */
+    /** @var array<string,array{relation:string,constraint:null|callable(QueryBuilder):void}> */
     private array $requestedCounts = [];
 
-    /**
-     * @var array<string,null|callable(QueryBuilder):void>
-     */
+    /** @var array<string,null|callable(QueryBuilder):void> */
     private array $requestedRelations = [];
 
-    /**
-     * @param array<string,RelationDefinition> $relations
-     */
+    /** @param array<string,RelationDefinition> $relations */
     public function __construct(
         private readonly Repository $repository,
         private QueryBuilder $builder,
@@ -53,11 +43,7 @@ final class RepositoryQuery
         private readonly array $relations = [],
     ) {}
 
-    /**
-     * Delegate QueryBuilder operations while retaining replayable fluent state.
-     *
-     * @param array<int,mixed> $arguments
-     */
+    /** @param array<int,mixed> $arguments */
     public function __call(string $method, array $arguments): mixed
     {
         if (!method_exists($this->builder, $method)) {
@@ -82,12 +68,7 @@ final class RepositoryQuery
         return $result;
     }
 
-    /**
-     * Apply an explicit QueryBuilder scope while retaining repository terminal
-     * processing and raw-builder parity.
-     *
-     * @param callable(QueryBuilder):void $scope
-     */
+    /** @param callable(QueryBuilder):void $scope */
     public function apply(callable $scope): self
     {
         $scope($this->builder);
@@ -122,8 +103,6 @@ final class RepositoryQuery
     }
 
     /**
-     * Get the first repository-processed row.
-     *
      * @param list<\Infocyph\DBLayer\Query\Expression|string> $columns
      * @return array<string,mixed>|null
      */
@@ -138,11 +117,7 @@ final class RepositoryQuery
         return $this->projectRows([$row])[0] ?? $row;
     }
 
-    /**
-     * Get repository-processed rows as a Collection.
-     *
-     * @param list<\Infocyph\DBLayer\Query\Expression|string> $columns
-     */
+    /** @param list<\Infocyph\DBLayer\Query\Expression|string> $columns */
     public function get(array $columns = ['*']): Collection
     {
         $rows = $this->repository->get($this->scope(), $columns)->toArray();
@@ -162,17 +137,11 @@ final class RepositoryQuery
         );
     }
 
-    /**
-     * Access the intentionally raw, already-shaped QueryBuilder.
-     */
     public function raw(): QueryBuilder
     {
         return $this->builder;
     }
 
-    /**
-     * Access the underlying repository instance.
-     */
     public function repository(): Repository
     {
         return $this->repository;
@@ -195,11 +164,7 @@ final class RepositoryQuery
         return $this->repository->value($column, $this->scope());
     }
 
-    /**
-     * Explicitly eager-load one or more declared relations.
-     *
-     * @param string|array<string|int,string|callable(QueryBuilder):void> ...$relations
-     */
+    /** @param string|array<string|int,string|callable(QueryBuilder):void> ...$relations */
     public function with(string|array ...$relations): self
     {
         foreach ($relations as $relation) {
@@ -216,7 +181,6 @@ final class RepositoryQuery
                     }
 
                     $this->requestedRelations[$constraint] = null;
-
                     continue;
                 }
 
@@ -234,21 +198,12 @@ final class RepositoryQuery
         return $this;
     }
 
-    /**
-     * Add relation counts without hydrating related rows.
-     *
-     * Supports aliases such as:
-     *   ->withCount('comments')
-     *   ->withCount(['comments as pending_comments_count' => fn ($q) => ...])
-     *
-     * @param string|array<string|int,string|callable(QueryBuilder):void> ...$relations
-     */
+    /** @param string|array<string|int,string|callable(QueryBuilder):void> ...$relations */
     public function withCount(string|array ...$relations): self
     {
         foreach ($relations as $relation) {
             if (is_string($relation)) {
                 $this->registerCount($relation, null);
-
                 continue;
             }
 
@@ -259,7 +214,6 @@ final class RepositoryQuery
                     }
 
                     $this->registerCount($constraint, null);
-
                     continue;
                 }
 
@@ -277,41 +231,32 @@ final class RepositoryQuery
         return $this;
     }
 
-    /**
-     * Disable one named global scope for this query only.
-     */
     public function withoutGlobalScope(string $name): self
     {
         if (!$this->repository instanceof TableQueryRepository) {
             return $this;
         }
 
-        $this->repository->withoutGlobalScope($name);
+        $this->repository->disableNamedGlobalScope($name);
         $this->rebuildBuilder();
 
         return $this;
     }
 
-    /**
-     * Disable selected named global scopes, or all named scopes when omitted.
-     *
-     * @param list<string>|null $names
-     */
+    /** @param list<string>|null $names */
     public function withoutGlobalScopes(?array $names = null): self
     {
         if (!$this->repository instanceof TableQueryRepository) {
             return $this;
         }
 
-        $this->repository->withoutGlobalScopes($names);
+        $this->repository->disableNamedGlobalScopes($names);
         $this->rebuildBuilder();
 
         return $this;
     }
 
     /**
-     * Attach requested relation counts to parent rows.
-     *
      * @param list<array<string,mixed>> $rows
      * @return list<array<string,mixed>>
      */
@@ -369,10 +314,6 @@ final class RepositoryQuery
         return $this->loadCounts($this->loadRelations($rows));
     }
 
-    /**
-     * Rebuild the raw builder after repository-scope state changes and replay
-     * already-recorded fluent operations and explicit query scopes.
-     */
     private function rebuildBuilder(): void
     {
         $this->builder = $this->repository->builder();
@@ -386,9 +327,7 @@ final class RepositoryQuery
         }
     }
 
-    /**
-     * @param null|callable(QueryBuilder):void $constraint
-     */
+    /** @param null|callable(QueryBuilder):void $constraint */
     private function registerCount(string $expression, ?callable $constraint): void
     {
         $parts = preg_split('/\s+as\s+/i', trim($expression), 2);
@@ -438,9 +377,6 @@ final class RepositoryQuery
         };
     }
 
-    /**
-     * Build a replay closure for Repository terminal operations.
-     */
     private function scope(): callable
     {
         $operations = $this->operations;
