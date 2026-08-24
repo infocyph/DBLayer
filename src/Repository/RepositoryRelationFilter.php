@@ -5,14 +5,16 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Repository;
 
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Driver\Support\TablePrefixMapper;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use InvalidArgumentException;
 
 /**
  * Apply relation-existence constraints without loading relation graphs.
  *
- * Matching keys are selected through related repositories so related scopes,
- * tenancy, soft-delete policy and other repository constraints remain active.
+ * Same-connection direct relations compile to correlated EXISTS queries.
+ * Cross-connection and pivot/polymorphic variants use bounded key projection
+ * while preserving related repository scopes and policies.
  */
 final class RepositoryRelationFilter
 {
@@ -25,9 +27,7 @@ final class RepositoryRelationFilter
         }
     }
 
-    /**
-     * @param null|callable(QueryBuilder):void $constraint
-     */
+    /** @param null|callable(QueryBuilder):void $constraint */
     public function apply(
         RepositoryQuery $parentQuery,
         RelationDefinition $definition,
@@ -36,6 +36,12 @@ final class RepositoryRelationFilter
     ): void {
         if ($definition->type === RelationDefinition::MORPH_TO) {
             $this->applyMorphTo($parentQuery, $definition, $constraint, $not);
+
+            return;
+        }
+
+        if ($this->canUseCorrelatedExists($definition)) {
+            $this->applyDirectExists($parentQuery, $definition, $constraint, $not);
 
             return;
         }
@@ -49,9 +55,53 @@ final class RepositoryRelationFilter
         $this->applyValues($parentQuery, $definition->parentKey, $matching, $not);
     }
 
-    /**
-     * @param null|callable(QueryBuilder):void $constraint
-     */
+    /** @param null|callable(QueryBuilder):void $constraint */
+    private function applyDirectExists(
+        RepositoryQuery $parentQuery,
+        RelationDefinition $definition,
+        ?callable $constraint,
+        bool $not,
+    ): void {
+        $related = $definition->related
+            ?? throw new InvalidArgumentException('Direct relation requires a related repository.');
+        $relatedQuery = $this->relatedQuery($related, $definition, $constraint);
+        $relatedBuilder = $relatedQuery->raw();
+        $components = $parentQuery->raw()->getComponents();
+        $parentSource = $components['from'] ?? null;
+
+        if (!is_string($parentSource) || trim($parentSource) === '') {
+            throw new InvalidArgumentException('Repository relation filters require a concrete parent table source.');
+        }
+
+        $parentAlias = $components['fromAlias'] ?? null;
+        $outer = is_string($parentAlias) && $parentAlias !== ''
+            ? $parentAlias
+            : TablePrefixMapper::physicalTable($parentSource, $this->parentConnection->getTablePrefix());
+
+        $parentQuery->apply(static function (QueryBuilder $parent) use (
+            $relatedBuilder,
+            $definition,
+            $outer,
+            $not,
+        ): void {
+            $parent->whereExists(
+                static function (QueryBuilder $exists) use ($relatedBuilder, $definition, $outer): void {
+                    $alias = '__repo_relation';
+                    $exists
+                        ->fromSub($relatedBuilder, $alias)
+                        ->select($alias . '.' . $definition->relatedKey)
+                        ->whereColumn(
+                            $alias . '.' . $definition->relatedKey,
+                            '=',
+                            $outer . '.' . $definition->parentKey,
+                        );
+                },
+                not: $not,
+            );
+        });
+    }
+
+    /** @param null|callable(QueryBuilder):void $constraint */
     private function applyMorphTo(
         RepositoryQuery $parentQuery,
         RelationDefinition $definition,
@@ -76,16 +126,24 @@ final class RepositoryRelationFilter
             $groups[$alias] = $this->distinctColumnValues($query, $definition->relatedKey);
         }
 
-        $parentQuery->apply(function (QueryBuilder $query) use ($groups, $typeColumn, $idColumn, $not): void {
+        $batchSize = $this->parentConnection->safeBatchSize(requested: $this->batchSize);
+
+        $parentQuery->apply(function (QueryBuilder $query) use (
+            $groups,
+            $typeColumn,
+            $idColumn,
+            $not,
+            $batchSize,
+        ): void {
             if ($not) {
                 foreach ($groups as $alias => $ids) {
-                    $this->applyNegatedMorphGroup($query, $typeColumn, $idColumn, $alias, $ids);
+                    $this->applyNegatedMorphGroup($query, $typeColumn, $idColumn, $alias, $ids, $batchSize);
                 }
 
                 return;
             }
 
-            $query->where(function (QueryBuilder $nested) use ($groups, $typeColumn, $idColumn): void {
+            $query->where(function (QueryBuilder $nested) use ($groups, $typeColumn, $idColumn, $batchSize): void {
                 $first = true;
                 foreach ($groups as $alias => $ids) {
                     if ($ids === []) {
@@ -93,9 +151,9 @@ final class RepositoryRelationFilter
                     }
 
                     $nested->where(
-                        static function (QueryBuilder $group) use ($typeColumn, $idColumn, $alias, $ids): void {
+                        static function (QueryBuilder $group) use ($typeColumn, $idColumn, $alias, $ids, $batchSize): void {
                             $group->where($typeColumn, '=', $alias);
-                            self::applyChunkedIn($group, $idColumn, $ids, false);
+                            self::applyChunkedIn($group, $idColumn, $ids, false, $batchSize);
                         },
                         boolean: $first ? 'and' : 'or',
                     );
@@ -116,15 +174,40 @@ final class RepositoryRelationFilter
         string $idColumn,
         string $alias,
         array $ids,
+        int $batchSize,
     ): void {
         if ($ids === []) {
             return;
         }
 
-        $query->where(static function (QueryBuilder $nested) use ($typeColumn, $idColumn, $alias, $ids): void {
+        $query->where(static function (QueryBuilder $nested) use (
+            $typeColumn,
+            $idColumn,
+            $alias,
+            $ids,
+            $batchSize,
+        ): void {
             $nested->where($typeColumn, '!=', $alias);
-            self::applyChunkedIn($nested, $idColumn, $ids, true, 'or');
+            self::applyChunkedIn($nested, $idColumn, $ids, true, $batchSize, 'or');
         });
+    }
+
+    private function canUseCorrelatedExists(RelationDefinition $definition): bool
+    {
+        if (in_array($definition->type, [
+            RelationDefinition::BELONGS_TO_MANY,
+            RelationDefinition::MORPH_TO,
+            RelationDefinition::MORPH_TO_MANY,
+        ], true)) {
+            return false;
+        }
+
+        $related = $definition->related;
+        if ($related === null) {
+            return false;
+        }
+
+        return $related::connection() === $this->parentConnection;
     }
 
     /**
@@ -137,6 +220,22 @@ final class RepositoryRelationFilter
     ): array {
         $related = $definition->related
             ?? throw new InvalidArgumentException('Direct relation requires a related repository.');
+
+        return $this->distinctColumnValues(
+            $this->relatedQuery($related, $definition, $constraint),
+            $definition->relatedKey,
+        );
+    }
+
+    /**
+     * @param class-string<TableRepository> $related
+     * @param null|callable(QueryBuilder):void $constraint
+     */
+    private function relatedQuery(
+        string $related,
+        RelationDefinition $definition,
+        ?callable $constraint,
+    ): RepositoryQuery {
         $query = $related::query();
 
         if (
@@ -144,13 +243,13 @@ final class RepositoryRelationFilter
             && $definition->morphTypeColumn !== null
             && $definition->morphAlias !== null
         ) {
-            $query->apply(
-                static fn(QueryBuilder $builder): mixed => $builder->where(
+            $query->apply(static function (QueryBuilder $builder) use ($definition): void {
+                $builder->where(
                     $definition->morphTypeColumn,
                     '=',
                     $definition->morphAlias,
-                ),
-            );
+                );
+            });
         }
 
         if ($definition->scope !== null) {
@@ -160,7 +259,7 @@ final class RepositoryRelationFilter
             $query->apply($constraint);
         }
 
-        return $this->distinctColumnValues($query, $definition->relatedKey);
+        return $query;
     }
 
     /**
@@ -230,9 +329,7 @@ final class RepositoryRelationFilter
         return $values;
     }
 
-    /**
-     * @return list<mixed>
-     */
+    /** @return list<mixed> */
     private function distinctColumnValues(RepositoryQuery $query, string $column): array
     {
         $values = [];
@@ -272,9 +369,6 @@ final class RepositoryRelationFilter
 
         $query->apply(static function (QueryBuilder $builder) use ($column, $chunks, $not): void {
             if ($not) {
-                if ($chunks === []) {
-                    return;
-                }
                 foreach ($chunks as $chunk) {
                     $builder->whereNotIn($column, $chunk);
                 }
@@ -296,26 +390,28 @@ final class RepositoryRelationFilter
         });
     }
 
-    /**
-     * @param list<mixed> $values
-     */
+    /** @param list<mixed> $values */
     private static function applyChunkedIn(
         QueryBuilder $query,
         string $column,
         array $values,
         bool $not,
+        int $batchSize,
         string $firstBoolean = 'and',
     ): void {
-        if ($values === []) {
+        $chunks = array_chunk($values, $batchSize);
+        if ($chunks === []) {
             $query->whereIn($column, [], $firstBoolean, $not);
 
             return;
         }
 
-        // Nested morph groups are already bounded by the relation query's
-        // distinct key projection. Keep one logical predicate here; the caller
-        // uses the parent connection's batching for ordinary relations.
-        $query->whereIn($column, $values, $firstBoolean, $not);
+        foreach ($chunks as $index => $chunk) {
+            $boolean = $index === 0
+                ? $firstBoolean
+                : ($not ? 'and' : 'or');
+            $query->whereIn($column, $chunk, $boolean, $not);
+        }
     }
 
     private function key(mixed $value): string
@@ -324,7 +420,8 @@ final class RepositoryRelationFilter
             is_int($value), is_string($value) => 'scalar:' . $value,
             is_float($value) => 'float:' . serialize($value),
             is_bool($value) => 'bool:' . ($value ? '1' : '0'),
-            default => serialize($value),
+            $value === null => 'null:',
+            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
         };
     }
 }
