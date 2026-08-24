@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+namespace Infocyph\DBLayer\Tests\Unit;
+
+use DateTimeImmutable;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Repository\Casts\AttributeCast;
 use Infocyph\DBLayer\Repository\TableRepository;
