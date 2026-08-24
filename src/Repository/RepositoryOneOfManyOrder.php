@@ -4,16 +4,12 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Repository;
 
-use Infocyph\DBLayer\Query\QueryBuilder;
-
 /**
  * Resolve and compare deterministic one-of-many ordering criteria.
  */
 final class RepositoryOneOfManyOrder
 {
-    /**
-     * @return array<string,'asc'|'desc'>
-     */
+    /** @return array<string,'asc'|'desc'> */
     public static function resolve(
         RelationDefinition $definition,
         RepositoryDefinition $related,
@@ -35,14 +31,6 @@ final class RepositoryOneOfManyOrder
         }
 
         return $orders;
-    }
-
-    /** @param array<string,'asc'|'desc'> $orders */
-    public static function apply(QueryBuilder $query, array $orders): void
-    {
-        foreach ($orders as $column => $direction) {
-            $query->orderBy($column, $direction);
-        }
     }
 
     /**
@@ -103,7 +91,7 @@ final class RepositoryOneOfManyOrder
             return strcmp((string) $left, (string) $right) <=> 0;
         }
 
-        return serialize($left) <=> serialize($right);
+        return strcmp(serialize($left), serialize($right)) <=> 0;
     }
 
     private static function isNumericValue(mixed $value): bool
