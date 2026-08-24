@@ -41,10 +41,7 @@ final class RepositoryRelationLoader
             return $parents;
         }
 
-        if (in_array($definition->type, [
-            RelationDefinition::HAS_ONE_THROUGH,
-            RelationDefinition::HAS_MANY_THROUGH,
-        ], true)) {
+        if ($definition->through !== null) {
             return (new RepositoryThroughRelation($this->parentConnection, $this->batchSize))
                 ->load($parents, $as, $definition, $constraint);
         }
