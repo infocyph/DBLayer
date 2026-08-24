@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Query\Concerns;
 
+use BackedEnum;
 use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Repository\Casts\AttributeCast;
 use InvalidArgumentException;
 use ReflectionClass;
 use ReflectionParameter;
@@ -60,7 +62,7 @@ trait RepositoryInternals
                 continue;
             }
 
-            $row[$column] = $this->castValue($row[$column], $cast, false);
+            $row[$column] = $this->castValue($row[$column], $cast, false, $row);
         }
 
         return $row;
@@ -149,7 +151,7 @@ trait RepositoryInternals
                 continue;
             }
 
-            $attributes[$column] = $this->castValue($attributes[$column], $cast, true);
+            $attributes[$column] = $this->castValue($attributes[$column], $cast, true, $attributes);
         }
 
         return $attributes;
@@ -266,10 +268,39 @@ trait RepositoryInternals
     /**
      * Apply cast rules for one value.
      *
-     * @param string|callable(mixed):mixed $cast
+     * Backed-enum class names are directional automatically: repository reads
+     * hydrate enum cases and writes persist their backed scalar values.
+     *
+     * @param string|callable(mixed):mixed|AttributeCast $cast
+     * @param array<string,mixed> $context
      */
-    private function castValue(mixed $value, string|callable $cast, bool $forWrite): mixed
-    {
+    private function castValue(
+        mixed $value,
+        string|callable|AttributeCast $cast,
+        bool $forWrite,
+        array $context = [],
+    ): mixed {
+        if ($cast instanceof AttributeCast) {
+            return $forWrite
+                ? $cast->set($value, $context)
+                : $cast->get($value, $context);
+        }
+
+        if (is_string($cast) && enum_exists($cast) && is_subclass_of($cast, BackedEnum::class)) {
+            if ($value === null) {
+                return null;
+            }
+
+            if ($value instanceof $cast) {
+                return $forWrite ? $value->value : $value;
+            }
+
+            /** @var class-string<BackedEnum> $cast */
+            $case = $cast::from($value);
+
+            return $forWrite ? $case->value : $case;
+        }
+
         if (\is_callable($cast)) {
             return $cast($value);
         }
@@ -287,6 +318,12 @@ trait RepositoryInternals
             'datetime' => $forWrite
                 ? $this->normalizeDateTimeForWrite($value)
                 : $value,
+            'immutable_datetime', 'datetime_immutable' => $forWrite
+                ? $this->normalizeDateTimeForWrite($value)
+                : $this->immutableDateTime($value),
+            'date' => $forWrite
+                ? $this->normalizeDateForWrite($value)
+                : $this->immutableDate($value),
             default => $value,
         };
     }
@@ -310,6 +347,40 @@ trait RepositoryInternals
     private function freshTimestamp(): string
     {
         return new \DateTimeImmutable('now')->format($this->connection->getDriver()->dateFormat());
+    }
+
+    private function immutableDate(mixed $value): mixed
+    {
+        if ($value === null || $value instanceof \DateTimeImmutable) {
+            return $value;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return \DateTimeImmutable::createFromInterface($value)->setTime(0, 0);
+        }
+
+        if (!is_string($value) || trim($value) === '') {
+            return $value;
+        }
+
+        return (new \DateTimeImmutable($value))->setTime(0, 0);
+    }
+
+    private function immutableDateTime(mixed $value): mixed
+    {
+        if ($value === null || $value instanceof \DateTimeImmutable) {
+            return $value;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return \DateTimeImmutable::createFromInterface($value);
+        }
+
+        if (!is_string($value) || trim($value) === '') {
+            return $value;
+        }
+
+        return new \DateTimeImmutable($value);
     }
 
     /**
@@ -411,6 +482,15 @@ trait RepositoryInternals
         }
 
         return $normalized;
+    }
+
+    private function normalizeDateForWrite(mixed $value): mixed
+    {
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d');
+        }
+
+        return $value;
     }
 
     /**
