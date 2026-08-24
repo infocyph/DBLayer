@@ -324,7 +324,7 @@ final class RepositoryRelationAggregator
     private function aggregateExpression(string $function, string $column): Expression
     {
         $function = strtoupper($function);
-        $column = strtolower($function) === 'COUNT' ? '*' : $column;
+        $column = $function === 'COUNT' ? '*' : $column;
 
         return Expression::make(sprintf('%s(%s) AS aggregate', $function, $column));
     }
