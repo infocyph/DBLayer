@@ -186,21 +186,18 @@ final class RepositoryRelationLoader
         }
 
         $related = $definition->related;
-        if (!is_a($related, TableRepository::class, true)) {
-            throw new InvalidArgumentException(sprintf(
-                'Related repository [%s] must extend %s.',
-                $related,
-                TableRepository::class,
-            ));
-        }
-
         $columns = $this->ensureKeySelected($definition->columns, $definition->relatedKey);
         $connection = $related::connection();
         $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
         $rows = [];
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::query()->whereIn($definition->relatedKey, $chunk);
+            $query = $related::query()->apply(
+                static function (QueryBuilder $query) use ($definition, $chunk): void {
+                    $query->whereIn($definition->relatedKey, $chunk);
+                },
+            );
+
             if ($definition->scope !== null) {
                 $query->apply($definition->scope);
             }
@@ -208,7 +205,7 @@ final class RepositoryRelationLoader
                 $query->apply($constraint);
             }
 
-            array_push($rows, ...$query->get($columns)->toArray());
+            array_push($rows, ...$this->normalizeRows($query->get($columns)->toArray()));
         }
 
         return $rows;
@@ -253,6 +250,32 @@ final class RepositoryRelationLoader
             $value === null => 'null:',
             default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
         };
+    }
+
+    /**
+     * @param array<mixed> $values
+     * @return list<array<string,mixed>>
+     */
+    private function normalizeRows(array $values): array
+    {
+        $rows = [];
+
+        foreach ($values as $value) {
+            if (!is_array($value)) {
+                continue;
+            }
+
+            $row = [];
+            foreach ($value as $key => $item) {
+                if (is_string($key)) {
+                    $row[$key] = $item;
+                }
+            }
+
+            $rows[] = $row;
+        }
+
+        return $rows;
     }
 
     /**
