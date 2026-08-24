@@ -130,7 +130,7 @@ final readonly class RepositoryOneOfManyRelation
         $rows = [];
 
         foreach (array_chunk($ids, $batchSize) as $chunk) {
-            $query = $related::repositoryQuery()->apply(
+            $query = $related::query()->apply(
                 static function (QueryBuilder $builder) use ($primaryKey, $chunk): void {
                     $builder->whereIn($primaryKey, $chunk);
                 },

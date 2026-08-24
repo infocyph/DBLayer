@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Repository;
 
 use BadMethodCallException;
+use Generator;
 use Infocyph\ArrayKit\Collection\Collection;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
@@ -88,7 +89,17 @@ final class RepositoryQuery
             return $this;
         }
 
-        return $result;
+        throw new BadMethodCallException(sprintf(
+            'Terminal %s::%s() is not repository-aware. Use raw() or builder() for an explicit policy bypass.',
+            self::class,
+            $method,
+        ));
+    }
+
+    /** @param list<Expression|string> $columns */
+    public function all(array $columns = ['*']): Collection
+    {
+        return $this->get($columns);
     }
 
     /** @param callable(QueryBuilder):void $scope */
@@ -100,9 +111,47 @@ final class RepositoryQuery
         return $this;
     }
 
+    /**
+     * @param callable(list<array<string,mixed>>,int):bool $callback
+     */
+    public function chunk(int $count, callable $callback): bool
+    {
+        return $this->repository->chunk(
+            $count,
+            fn(array $rows, int $page): bool => $callback($this->projectRows($rows), $page),
+            $this->scope(),
+        );
+    }
+
+    /**
+     * @param callable(list<array<string,mixed>>,int):bool $callback
+     */
+    public function chunkById(
+        int $count,
+        callable $callback,
+        ?string $column = null,
+        mixed $fromId = null,
+        string $direction = 'asc',
+    ): bool {
+        return $this->repository->chunkById(
+            $count,
+            fn(array $rows, int $page): bool => $callback($this->projectRows($rows), $page),
+            $column ?? $this->definition->primaryKey,
+            $fromId,
+            $direction,
+            $this->scope(),
+        );
+    }
+
     public function count(): int
     {
         return $this->repository->count($this->scope());
+    }
+
+    /** @return Generator<mixed> */
+    public function cursor(?int $fetchMode = null): Generator
+    {
+        return $this->projectStream($this->repository->cursor($this->scope(), $fetchMode));
     }
 
     public function cursorPaginate(
@@ -139,11 +188,91 @@ final class RepositoryQuery
      * @param list<Expression|string> $columns
      * @return array<string,mixed>|null
      */
+    public function find(mixed $id, array $columns = ['*']): ?array
+    {
+        $primaryKey = RepositorySupport::column($this->definition->primaryKey);
+        $row = $this->repository->first(
+            $this->scoped(static function (QueryBuilder $query) use ($id, $primaryKey): void {
+                $query->where($primaryKey, '=', $id);
+            }),
+            $this->projectionColumns($columns),
+        );
+
+        return $row === null ? null : $this->projectRows([$row])[0];
+    }
+
+    /**
+     * @param list<mixed> $ids
+     * @param list<Expression|string> $columns
+     */
+    public function findMany(array $ids, array $columns = ['*']): Collection
+    {
+        $ids = RepositorySupport::uniqueValues($ids);
+        if ($ids === []) {
+            return new Collection([]);
+        }
+
+        $primaryKey = $this->definition->primaryKey;
+        $selected = $this->projectionColumns($columns);
+        $internalPrimaryKey = !in_array('*', $selected, true) && !in_array($primaryKey, $selected, true);
+        if ($internalPrimaryKey) {
+            $selected[] = $primaryKey;
+        }
+
+        $rows = $this->normalizeRows($this->repository->get(
+            $this->scoped(static function (QueryBuilder $query) use ($ids, $primaryKey): void {
+                $query->whereIn($primaryKey, $ids);
+            }),
+            $selected,
+        )->toArray());
+        $indexed = [];
+        foreach ($rows as $row) {
+            $indexed[RepositorySupport::key($row[$primaryKey] ?? null)] = $row;
+        }
+
+        $ordered = [];
+        foreach ($ids as $id) {
+            $row = $indexed[RepositorySupport::key($id)] ?? null;
+            if ($row !== null) {
+                if ($internalPrimaryKey) {
+                    unset($row[$primaryKey]);
+                }
+                $ordered[] = $row;
+            }
+        }
+
+        return new Collection($this->projectRows($ordered));
+    }
+
+    /**
+     * @param list<Expression|string> $columns
+     * @return array<string,mixed>|null
+     */
     public function first(array $columns = ['*']): ?array
     {
         $row = $this->repository->first($this->scope(), $this->projectionColumns($columns));
 
         return $row === null ? null : $this->projectRows([$row])[0];
+    }
+
+    /**
+     * @param class-string $className
+     * @param list<Expression|string> $columns
+     */
+    public function firstInto(string $className, array $columns = ['*']): ?object
+    {
+        return $this->repository->firstInto($className, $this->scope(), $this->projectionColumns($columns));
+    }
+
+    /**
+     * @param callable(array<string,mixed>):mixed $mapper
+     * @param list<Expression|string> $columns
+     */
+    public function firstMap(callable $mapper, array $columns = ['*']): mixed
+    {
+        $row = $this->first($columns);
+
+        return $row === null ? null : $mapper($row);
     }
 
     /** @param list<Expression|string> $columns */
@@ -154,6 +283,70 @@ final class RepositoryQuery
             ->toArray());
 
         return new Collection($this->projectRows($rows));
+    }
+
+    /** @return array<string|int,list<array<string,mixed>>> */
+    public function groupByKey(string $column): array
+    {
+        return $this->repository->groupByKey($column, $this->scope());
+    }
+
+    /** @return Generator<mixed> */
+    public function lazy(
+        int $chunkSize = 1000,
+        ?string $column = null,
+        mixed $fromId = null,
+        string $direction = 'asc',
+    ): Generator {
+        return $this->projectStream($this->repository->lazy(
+            $chunkSize,
+            $this->scope(),
+            $column ?? $this->definition->primaryKey,
+            $fromId,
+            $direction,
+        ));
+    }
+
+    /** @return Generator<mixed> */
+    public function lazyById(
+        int $chunkSize = 1000,
+        ?string $column = null,
+        mixed $fromId = null,
+        string $direction = 'asc',
+    ): Generator {
+        return $this->projectStream($this->repository->lazyById(
+            $chunkSize,
+            $this->scope(),
+            $column ?? $this->definition->primaryKey,
+            $fromId,
+            $direction,
+        ));
+    }
+
+    /**
+     * @param callable(array<string,mixed>):mixed $mapper
+     * @param list<Expression|string> $columns
+     */
+    public function map(callable $mapper, array $columns = ['*']): Collection
+    {
+        $mapped = [];
+        foreach ($this->get($columns) as $value) {
+            $row = RepositorySupport::row($value);
+            if ($row !== null) {
+                $mapped[] = $mapper($row);
+            }
+        }
+
+        return new Collection($mapped);
+    }
+
+    /**
+     * @param class-string $className
+     * @param list<Expression|string> $columns
+     */
+    public function mapInto(string $className, array $columns = ['*']): Collection
+    {
+        return $this->repository->mapInto($className, $this->scope(), $this->projectionColumns($columns));
     }
 
     public function paginate(?int $perPage = null, ?int $page = null): LengthAwarePaginator
@@ -170,6 +363,12 @@ final class RepositoryQuery
             $paginator->perPage(),
             $paginator->currentPage(),
         );
+    }
+
+    /** @return array<int|string,mixed> */
+    public function pluck(string $column, ?string $keyColumn = null): array
+    {
+        return $this->repository->pluck($column, $keyColumn, $this->scope());
     }
 
     /**
@@ -205,6 +404,18 @@ final class RepositoryQuery
             $paginator->currentPage(),
             $paginator->hasMorePages(),
         );
+    }
+
+    /** @return Generator<mixed> */
+    public function stream(?int $fetchMode = null): Generator
+    {
+        return $this->projectStream($this->repository->stream($this->scope(), $fetchMode));
+    }
+
+    /** @return Generator<mixed> */
+    public function unbufferedStream(?int $fetchMode = null, int $fetchSize = 1000): Generator
+    {
+        return $this->projectStream($this->repository->unbufferedStream($this->scope(), $fetchMode, $fetchSize));
     }
 
     public function value(string $column): mixed
@@ -297,6 +508,35 @@ final class RepositoryQuery
         return $this->loadAggregates($this->loadRelations($rows));
     }
 
+    /**
+     * @param iterable<mixed> $rows
+     * @return Generator<mixed>
+     */
+    private function projectStream(iterable $rows): Generator
+    {
+        $batch = [];
+        foreach ($rows as $value) {
+            $row = RepositorySupport::row($value);
+            if ($row === null) {
+                yield $value;
+
+                continue;
+            }
+
+            $batch[] = $row;
+            if (count($batch) < 500) {
+                continue;
+            }
+
+            yield from $this->projectRows($batch);
+            $batch = [];
+        }
+
+        if ($batch !== []) {
+            yield from $this->projectRows($batch);
+        }
+    }
+
     private function rebuildBuilder(): void
     {
         $this->builder = $this->repository->builder();
@@ -335,6 +575,17 @@ final class RepositoryQuery
             foreach ($scopes as $scope) {
                 $scope($query);
             }
+        };
+    }
+
+    /** @param callable(QueryBuilder):void $additional */
+    private function scoped(callable $additional): callable
+    {
+        $scope = $this->scope();
+
+        return static function (QueryBuilder $query) use ($additional, $scope): void {
+            $scope($query);
+            $additional($query);
         };
     }
 }

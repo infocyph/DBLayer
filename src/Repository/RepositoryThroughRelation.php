@@ -77,7 +77,7 @@ final readonly class RepositoryThroughRelation
         $throughKey = RepositorySupport::column($this->requireThroughKey($definition));
         $related = $this->requireRelated($definition);
 
-        $relatedQuery = $related::repositoryQuery();
+        $relatedQuery = $related::query();
         $this->applyRelatedScopes($relatedQuery, $definition, $constraint);
         $throughValues = $this->distinctValues($relatedQuery, $definition->relatedKey);
         if ($throughValues === []) {
@@ -87,7 +87,7 @@ final readonly class RepositoryThroughRelation
         $values = [];
         $batchSize = max(1, $through::connection()->safeBatchSize(requested: $this->batchSize));
         foreach (array_chunk($throughValues, $batchSize) as $chunk) {
-            $query = $through::repositoryQuery()->apply(static function (QueryBuilder $builder) use ($throughKey, $chunk): void {
+            $query = $through::query()->apply(static function (QueryBuilder $builder) use ($throughKey, $chunk): void {
                 $builder->whereIn($throughKey, $chunk);
             });
 
@@ -272,7 +272,7 @@ final readonly class RepositoryThroughRelation
         $rows = [];
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::repositoryQuery()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
+            $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
                 $builder->whereIn($relatedKey, $chunk);
             });
             $this->applyRelatedScopes($query, $definition, $constraint);
@@ -322,7 +322,7 @@ final readonly class RepositoryThroughRelation
         $rows = [];
 
         foreach (array_chunk($parentValues, $batchSize) as $chunk) {
-            $query = $through::repositoryQuery()->apply(static function (QueryBuilder $builder) use ($throughParentKey, $chunk): void {
+            $query = $through::query()->apply(static function (QueryBuilder $builder) use ($throughParentKey, $chunk): void {
                 $builder->whereIn($throughParentKey, $chunk);
             });
             array_push($rows, ...$this->normalizeRows($query->get([$throughParentKey, $throughKey])->toArray()));

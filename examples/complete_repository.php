@@ -283,7 +283,7 @@ DB::table('example_post_tag', 'repository_example')->insert([
     'priority' => 1,
 ]);
 
-$posts = PostRepository::repositoryQuery()
+$posts = PostRepository::query()
     ->with('author', 'latest_comment', 'tags')
     ->withCount('comments')
     ->whereRelation('comments', 'approved', '=', 1)
@@ -298,14 +298,14 @@ $optimisticUpdate = PostRepository::updateByIdWithVersion(
 PostRepository::transaction(static function (Connection $connection) use ($postId): void {
     unset($connection);
 
-    PostRepository::repositoryQuery()
+    PostRepository::query()
         ->where('post_id', '=', $postId)
         ->update(['title' => 'Repository policies, finalized']);
 });
 
-PostRepository::repositoryQuery()->where('post_id', '=', $postId)->delete();
-$trashed = PostRepository::repositoryQuery()->onlyTrashed()->count();
-PostRepository::repositoryQuery()->onlyTrashed()->where('post_id', '=', $postId)->restore();
+PostRepository::query()->where('post_id', '=', $postId)->delete();
+$trashed = PostRepository::query()->onlyTrashed()->count();
+PostRepository::query()->onlyTrashed()->where('post_id', '=', $postId)->restore();
 
 PostRepository::create([
     'author_id' => 1,
@@ -320,10 +320,10 @@ $pruned = PostRepository::pruner()->prune(
     force: true,
 );
 
-$page = PostRepository::repositoryQuery()->paginate(page: 1);
+$page = PostRepository::query()->paginate(page: 1);
 
-// query()/builder()/rawQuery() deliberately expose the raw QueryBuilder boundary.
-$rawCount = PostRepository::query()->count();
+// builder()/rawQuery() deliberately expose the raw QueryBuilder boundary.
+$rawCount = PostRepository::builder()->count();
 
 $summary = [
     'created_post_id' => $postId,

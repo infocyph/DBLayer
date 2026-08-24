@@ -137,7 +137,7 @@ final readonly class RepositoryRelationLoader
         $rows = [];
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::repositoryQuery()->apply(
+            $query = $related::query()->apply(
                 static function (QueryBuilder $builder) use ($relatedKey, $chunk, $morphTypeColumn, $morphAlias): void {
                     $builder->whereIn($relatedKey, $chunk);
                     if ($morphTypeColumn !== null && $morphAlias !== null) {

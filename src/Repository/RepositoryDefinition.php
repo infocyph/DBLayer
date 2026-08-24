@@ -6,7 +6,9 @@ namespace Infocyph\DBLayer\Repository;
 
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Repository\Casts\AttributeCast;
-use Infocyph\DBLayer\Repository\Casts\CastFactory;
+use Infocyph\DBLayer\Repository\Casts\DecimalCast;
+use Infocyph\DBLayer\Repository\Casts\ImmutableDateCast;
+use Infocyph\DBLayer\Repository\Casts\JsonObjectCast;
 use InvalidArgumentException;
 
 /** Immutable, validated metadata compiled once per TableRepository class. */
@@ -39,6 +41,7 @@ final readonly class RepositoryDefinition
     public function __construct(
         public string $repositoryClass,
         public string $table,
+        public ?string $connection,
         public string $primaryKey,
         public int $perPage,
         public int $maxRelationDepth = 3,
@@ -112,6 +115,21 @@ final readonly class RepositoryDefinition
         }
     }
 
+    private function compileCast(string $cast): string|AttributeCast
+    {
+        $normalized = strtolower(trim($cast));
+
+        if (preg_match('/^decimal:(\d+)$/D', $normalized, $matches) === 1) {
+            return new DecimalCast((int) $matches[1]);
+        }
+
+        return match ($normalized) {
+            'object' => new JsonObjectCast(),
+            'immutable_date', 'date_immutable' => new ImmutableDateCast(),
+            default => $cast,
+        };
+    }
+
     /**
      * @param array<array-key,mixed> $casts
      * @return array<string,string|callable(mixed):mixed|AttributeCast>
@@ -144,7 +162,7 @@ final readonly class RepositoryDefinition
                 ));
             }
 
-            $normalized[$column] = is_string($cast) ? CastFactory::compile($cast) : $cast;
+            $normalized[$column] = is_string($cast) ? $this->compileCast($cast) : $cast;
         }
 
         return $normalized;

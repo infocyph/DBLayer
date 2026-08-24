@@ -285,7 +285,10 @@ abstract class Repository
             $scope,
         );
 
-        return $query->chunk($count, $callback);
+        return $query->chunk(
+            $count,
+            fn(array $rows, int $page): bool => $callback($this->applyReadCastsToRows($rows), $page),
+        );
     }
 
     /**
@@ -309,7 +312,7 @@ abstract class Repository
 
         return $query->chunkById(
             $count,
-            $callback,
+            fn(array $rows, int $page): bool => $callback($this->applyReadCastsToRows($rows), $page),
             $this->normalizeColumnName($column ?? $this->primaryKey(), 'id'),
             $fromId,
             $this->normalizeDirection($direction),
@@ -372,12 +375,12 @@ abstract class Repository
             $scope,
         );
 
-        return $query->cursor($fetchMode);
+        return $this->castRows($query->cursor($fetchMode));
     }
 
     /** @param callable(QueryBuilder):void|null $scope */
     public function cursorPaginate(
-        int $perPage = 15,
+        ?int $perPage = null,
         ?string $cursor = null,
         ?string $uniqueColumn = null,
         ?string $direction = null,
@@ -389,7 +392,7 @@ abstract class Repository
         );
 
         return $query->cursorPaginate(
-            $perPage,
+            $this->resolvePerPage($perPage),
             $cursor,
             $this->normalizeColumnName($uniqueColumn ?? $this->primaryKey(), 'id'),
             $direction === null ? null : $this->normalizeDirection($direction),
@@ -691,12 +694,14 @@ abstract class Repository
             $scope,
         );
 
-        yield from $query->lazyById(
+        foreach ($query->lazyById(
             $chunkSize,
             $this->normalizeColumnName($column ?? $this->primaryKey(), 'id'),
             $fromId,
             $this->normalizeDirection($direction),
-        );
+        ) as $row) {
+            yield $this->applyReadCastsToRow($row) ?? $row;
+        }
     }
 
     /**
@@ -769,8 +774,9 @@ abstract class Repository
     }
 
     /** @param callable(QueryBuilder):void|null $scope */
-    public function paginate(int $perPage = 15, ?int $page = null, ?callable $scope = null): LengthAwarePaginator
+    public function paginate(?int $perPage = null, ?int $page = null, ?callable $scope = null): LengthAwarePaginator
     {
+        $perPage = $this->resolvePerPage($perPage);
         $query = $this->applyScope(
             $this->query(),
             $scope,
@@ -840,8 +846,9 @@ abstract class Repository
     }
 
     /** @param callable(QueryBuilder):void|null $scope */
-    public function simplePaginate(int $perPage = 15, ?int $page = null, ?callable $scope = null): SimplePaginator
+    public function simplePaginate(?int $perPage = null, ?int $page = null, ?callable $scope = null): SimplePaginator
     {
+        $perPage = $this->resolvePerPage($perPage);
         $query = $this->applyScope(
             $this->query(),
             $scope,
@@ -861,7 +868,7 @@ abstract class Repository
             $scope,
         );
 
-        return $query->stream($fetchMode);
+        return $this->castRows($query->stream($fetchMode));
     }
 
     /**
@@ -878,7 +885,7 @@ abstract class Repository
             $scope,
         );
 
-        return $query->unbufferedStream($fetchMode, $fetchSize);
+        return $this->castRows($query->unbufferedStream($fetchMode, $fetchSize));
     }
 
     /** @param array<string,mixed> $values */
@@ -1065,6 +1072,11 @@ abstract class Repository
         return $query;
     }
 
+    protected function defaultPerPage(): int
+    {
+        return 15;
+    }
+
     protected function newQuery(): QueryBuilder
     {
         return new QueryBuilder($this->connection, $this->executor);
@@ -1103,6 +1115,24 @@ abstract class Repository
     private function canOrderFindManyRows(array $columns, string $key): bool
     {
         return in_array('*', $columns, true) || in_array($key, $columns, true);
+    }
+
+    /**
+     * @param iterable<mixed> $rows
+     * @return Generator<mixed>
+     */
+    private function castRows(iterable $rows): Generator
+    {
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                yield $row;
+
+                continue;
+            }
+
+            $normalized = self::normalizeAttributeArray($row);
+            yield $this->applyReadCastsToRow($normalized) ?? $normalized;
+        }
     }
 
     /**
@@ -1157,6 +1187,17 @@ abstract class Repository
         }
 
         return $ordered;
+    }
+
+    private function resolvePerPage(?int $perPage): int
+    {
+        $perPage ??= $this->defaultPerPage();
+
+        if ($perPage < 1) {
+            throw new InvalidArgumentException('Pagination size must be at least one.');
+        }
+
+        return $perPage;
     }
 
     private function typedCacheKey(int|string $value): string

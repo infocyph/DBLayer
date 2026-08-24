@@ -102,7 +102,7 @@ final readonly class RepositoryPruner
     private function query(?callable $scope): RepositoryQuery
     {
         $class = $this->repositoryClass;
-        $query = $class::repositoryQuery($this->connection);
+        $query = $class::query($this->connection);
 
         if ($scope !== null) {
             $scope($query);

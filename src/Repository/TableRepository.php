@@ -21,12 +21,6 @@ use LogicException;
  */
 abstract class TableRepository
 {
-    private const array QUERY_SCOPED_STATIC_METHODS = [
-        'onlyTrashed',
-        'withoutTrashed',
-        'withTrashed',
-    ];
-
     protected static ?string $connection = null;
 
     /** @var list<string> */
@@ -58,16 +52,7 @@ abstract class TableRepository
     /** @param array<int,mixed> $arguments */
     public static function __callStatic(string $method, array $arguments): mixed
     {
-        if (in_array($method, self::QUERY_SCOPED_STATIC_METHODS, true)) {
-            return static::repositoryQuery()->$method(...$arguments);
-        }
-
-        $repository = static::repository();
-        if (method_exists($repository, $method)) {
-            return $repository->$method(...$arguments);
-        }
-
-        $query = static::repositoryQuery();
+        $query = static::query();
         if (method_exists($query, $method) || method_exists($query->raw(), $method)) {
             return $query->$method(...$arguments);
         }
@@ -81,7 +66,7 @@ abstract class TableRepository
 
     public static function builder(?string $connection = null): QueryBuilder
     {
-        return static::query($connection);
+        return static::repository($connection)->builder();
     }
 
     public static function connection(?string $connection = null): Connection
@@ -107,6 +92,7 @@ abstract class TableRepository
         return self::$definitionCache[$class] = new RepositoryDefinition(
             repositoryClass: $class,
             table: static::tableName(),
+            connection: static::connectionName(),
             primaryKey: static::primaryKeyName(),
             perPage: static::$perPage,
             maxRelationDepth: static::$maxRelationDepth,
@@ -132,19 +118,22 @@ abstract class TableRepository
         return new RepositoryPruner(static::class, $connection);
     }
 
-    public static function query(?string $connection = null): QueryBuilder
+    public static function query(?string $connection = null): RepositoryQuery
     {
-        return static::repository($connection)->builder();
+        $definition = static::definition();
+        $repository = static::repository($connection);
+
+        return new RepositoryQuery(
+            $repository,
+            $repository->builder(),
+            static::connection($connection),
+            $definition,
+        );
     }
 
     public static function rawQuery(?string $connection = null): QueryBuilder
     {
-        return static::query($connection);
-    }
-
-    public static function repo(?string $connection = null): QueryRepository
-    {
-        return static::repository($connection);
+        return static::builder($connection);
     }
 
     public static function repository(?string $connection = null): QueryRepository
@@ -161,20 +150,6 @@ abstract class TableRepository
         }
 
         return static::configureRepository($repository);
-    }
-
-    public static function repositoryQuery(?string $connection = null): RepositoryQuery
-    {
-        $definition = static::definition();
-        $repository = static::repository($connection);
-        $resolvedConnection = static::connection($connection);
-
-        return new RepositoryQuery(
-            $repository,
-            $repository->builder(),
-            $resolvedConnection,
-            $definition,
-        );
     }
 
     /** @param array<int,mixed> $bindings */

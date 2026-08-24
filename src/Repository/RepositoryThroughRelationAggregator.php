@@ -112,7 +112,7 @@ final readonly class RepositoryThroughRelationAggregator
         $batchSize = max(1, $related::connection()->safeBatchSize(requested: $this->batchSize));
 
         foreach (array_chunk($relatedValues, $batchSize) as $chunk) {
-            $query = $related::repositoryQuery()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
+            $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
                 $builder->whereIn($relatedKey, $chunk);
             });
             $this->applyScopes($query, $definition, $constraint);
@@ -235,7 +235,7 @@ final readonly class RepositoryThroughRelationAggregator
         $rows = [];
         $batchSize = max(1, $through::connection()->safeBatchSize(requested: $this->batchSize));
         foreach (array_chunk($parentValues, $batchSize) as $chunk) {
-            $query = $through::repositoryQuery()->apply(static function (QueryBuilder $builder) use ($parentKey, $chunk): void {
+            $query = $through::query()->apply(static function (QueryBuilder $builder) use ($parentKey, $chunk): void {
                 $builder->whereIn($parentKey, $chunk);
             });
             foreach ($query->get([$parentKey, $throughKey]) as $candidateRow) {

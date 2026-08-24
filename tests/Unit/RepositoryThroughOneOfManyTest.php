@@ -231,7 +231,7 @@ afterEach(function (): void {
 });
 
 it('loads has-many-through relations through repository-aware intermediate keys', function (): void {
-    $countries = RepositoryThroughCountry::repositoryQuery()
+    $countries = RepositoryThroughCountry::query()
         ->with('posts')
         ->orderBy('id')
         ->get()
@@ -246,7 +246,7 @@ it('loads has-many-through relations through repository-aware intermediate keys'
 });
 
 it('loads nested relations beneath a through relation', function (): void {
-    $country = RepositoryThroughCountry::repositoryQuery()
+    $country = RepositoryThroughCountry::query()
         ->with('posts.author')
         ->where('id', '=', 1)
         ->first();
@@ -257,7 +257,7 @@ it('loads nested relations beneath a through relation', function (): void {
 });
 
 it('loads has-one-through relations without introducing entity state', function (): void {
-    $country = RepositoryThroughCountry::repositoryQuery()
+    $country = RepositoryThroughCountry::query()
         ->with('profile')
         ->where('id', '=', 2)
         ->first();
@@ -267,7 +267,7 @@ it('loads has-one-through relations without introducing entity state', function 
 });
 
 it('supports aggregates and existence filters on through relations', function (): void {
-    $country = RepositoryThroughCountry::repositoryQuery()
+    $country = RepositoryThroughCountry::query()
         ->withCount('posts')
         ->withSum('posts', 'score')
         ->withAvg('posts', 'score')
@@ -282,11 +282,11 @@ it('supports aggregates and existence filters on through relations', function ()
         ->and((int) $country['posts_min_score'])->toBe(5)
         ->and((int) $country['posts_max_score'])->toBe(30);
 
-    $matching = RepositoryThroughCountry::repositoryQuery()
+    $matching = RepositoryThroughCountry::query()
         ->whereRelation('posts', 'title', '=', 'Latest U2')
         ->get()
         ->toArray();
-    $missing = RepositoryThroughCountry::repositoryQuery()
+    $missing = RepositoryThroughCountry::query()
         ->whereDoesntHave('posts')
         ->get()
         ->toArray();
@@ -296,7 +296,7 @@ it('supports aggregates and existence filters on through relations', function ()
 });
 
 it('selects latest oldest and custom one-of-many rows deterministically', function (): void {
-    $user = RepositoryThroughUser::repositoryQuery()
+    $user = RepositoryThroughUser::query()
         ->with('latest_post', 'oldest_post', 'top_post_via_one', 'top_active_post')
         ->where('id', '=', 1)
         ->first();
@@ -316,7 +316,7 @@ it('uses primary key as a deterministic one-of-many tie breaker', function (): v
         'created_at' => '2026-01-03 00:00:00',
     ]);
 
-    $user = RepositoryThroughUser::repositoryQuery()
+    $user = RepositoryThroughUser::query()
         ->with('latest_post')
         ->where('id', '=', 1)
         ->first();
@@ -325,7 +325,7 @@ it('uses primary key as a deterministic one-of-many tie breaker', function (): v
 });
 
 it('supports polymorphic one-of-many selection with explicit morph aliases', function (): void {
-    $user = RepositoryThroughUser::repositoryQuery()
+    $user = RepositoryThroughUser::query()
         ->with('latest_image')
         ->where('id', '=', 1)
         ->first();
@@ -334,7 +334,7 @@ it('supports polymorphic one-of-many selection with explicit morph aliases', fun
 });
 
 it('selects one-of-many winners across a through relation', function (): void {
-    $country = RepositoryThroughCountry::repositoryQuery()
+    $country = RepositoryThroughCountry::query()
         ->with('latest_post', 'top_post')
         ->where('id', '=', 1)
         ->first();
@@ -344,7 +344,7 @@ it('selects one-of-many winners across a through relation', function (): void {
 });
 
 it('aggregates a through one-of-many relation as the selected row only', function (): void {
-    $country = RepositoryThroughCountry::repositoryQuery()
+    $country = RepositoryThroughCountry::query()
         ->withCount('latest_post')
         ->withSum('latest_post', 'score')
         ->where('id', '=', 1)
@@ -355,15 +355,15 @@ it('aggregates a through one-of-many relation as the selected row only', functio
 });
 
 it('applies whereRelation to the selected one-of-many winner rather than older rows', function (): void {
-    $latestMatch = RepositoryThroughUser::repositoryQuery()
+    $latestMatch = RepositoryThroughUser::query()
         ->whereRelation('latest_post', 'title', '=', 'Latest U1')
         ->get()
         ->toArray();
-    $olderMatch = RepositoryThroughUser::repositoryQuery()
+    $olderMatch = RepositoryThroughUser::query()
         ->whereRelation('latest_post', 'title', '=', 'Older U1')
         ->get()
         ->toArray();
-    $throughOlderMatch = RepositoryThroughCountry::repositoryQuery()
+    $throughOlderMatch = RepositoryThroughCountry::query()
         ->whereRelation('latest_post', 'title', '=', 'Older U2')
         ->get()
         ->toArray();
@@ -374,11 +374,11 @@ it('applies whereRelation to the selected one-of-many winner rather than older r
 });
 
 it('keeps one-of-many ordering keys internal for narrow projections', function (): void {
-    $user = RepositoryThroughUser::repositoryQuery()
+    $user = RepositoryThroughUser::query()
         ->with('projected_latest_post')
         ->where('id', '=', 1)
         ->first();
-    $country = RepositoryThroughCountry::repositoryQuery()
+    $country = RepositoryThroughCountry::query()
         ->with('projected_latest_post')
         ->where('id', '=', 1)
         ->first();

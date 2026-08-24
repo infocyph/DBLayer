@@ -196,13 +196,13 @@ it('compiles declarative repository metadata once per class', function (): void 
 
 it('uses repository page-size metadata across pagination entry points', function (): void {
     $direct = RepositoryEvolutionPagedUser::paginate();
-    $fluent = RepositoryEvolutionPagedUser::repositoryQuery()
+    $fluent = RepositoryEvolutionPagedUser::query()
         ->orderBy('user_key')
         ->paginate();
-    $simple = RepositoryEvolutionPagedUser::repositoryQuery()
+    $simple = RepositoryEvolutionPagedUser::query()
         ->orderBy('user_key')
         ->simplePaginate();
-    $cursor = RepositoryEvolutionPagedUser::repositoryQuery()->cursorPaginate();
+    $cursor = RepositoryEvolutionPagedUser::query()->cursorPaginate();
 
     expect($direct->perPage())->toBe(2)
         ->and($direct->count())->toBe(2)
@@ -241,18 +241,18 @@ it('keeps raw builder access explicit', function (): void {
 });
 
 it('removes named global scopes only for the current repository query', function (): void {
-    $scoped = RepositoryEvolutionScopedUser::repositoryQuery()
+    $scoped = RepositoryEvolutionScopedUser::query()
         ->orderBy('user_key')
         ->get()
         ->toArray();
 
-    $unscoped = RepositoryEvolutionScopedUser::repositoryQuery()
+    $unscoped = RepositoryEvolutionScopedUser::query()
         ->orderBy('user_key')
         ->withoutGlobalScope('active')
         ->get()
         ->toArray();
 
-    $freshScoped = RepositoryEvolutionScopedUser::repositoryQuery()
+    $freshScoped = RepositoryEvolutionScopedUser::query()
         ->orderBy('user_key')
         ->get()
         ->toArray();
@@ -272,7 +272,7 @@ it('routes static named scope removal to the repository query wrapper', function
 });
 
 it('rebuilds the raw builder after named global scope removal', function (): void {
-    $count = RepositoryEvolutionScopedUser::repositoryQuery()
+    $count = RepositoryEvolutionScopedUser::query()
         ->where('user_key', '>', 0)
         ->withoutGlobalScope('active')
         ->raw()
@@ -331,7 +331,7 @@ it('eager loads declared has-many relations in bounded batches', function (): vo
         ['parent_id' => 2, 'name' => 'C', 'active' => 1],
     ]);
 
-    $parents = RepositoryEvolutionParent::repositoryQuery()
+    $parents = RepositoryEvolutionParent::query()
         ->with('children')
         ->orderBy('id')
         ->get()
@@ -348,7 +348,7 @@ it('supports constrained eager relation loading', function (): void {
         ['parent_id' => 1, 'name' => 'B', 'active' => 0],
     ]);
 
-    $parent = RepositoryEvolutionParent::repositoryQuery()
+    $parent = RepositoryEvolutionParent::query()
         ->with([
             'children' => static fn(QueryBuilder $query) => $query->where('active', '=', 1),
         ])
@@ -363,7 +363,7 @@ it('keeps relation projections correct when base columns are narrowed', function
         ['parent_id' => 1, 'name' => 'A', 'active' => 1],
     ]);
 
-    $parent = RepositoryEvolutionParent::repositoryQuery()
+    $parent = RepositoryEvolutionParent::query()
         ->with('children')
         ->first(['name']);
 

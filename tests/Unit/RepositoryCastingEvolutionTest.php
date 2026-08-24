@@ -180,7 +180,7 @@ it('applies repository write casts to set-based fluent updates', function (): vo
         'payload' => (object) ['stage' => 'before'],
     ]);
 
-    $affected = RepositoryCastingRecord::repositoryQuery()
+    $affected = RepositoryCastingRecord::query()
         ->where('id', '=', $record['id'])
         ->update([
             'status' => RepositoryCastingStatus::Published,

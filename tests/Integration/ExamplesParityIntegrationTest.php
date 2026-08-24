@@ -459,7 +459,10 @@ it('keeps examples and integration coverage in sync', function (): void {
     $coverageMap = [
         'bootstrap.php' => ['ExamplesParityIntegrationTest.php'],
         'chunking.php' => ['ExamplesParityIntegrationTest.php'],
-        'complete_repository.php' => ['ExamplesParityIntegrationTest.php'],
+        'complete_repository.php' => [
+            'ExamplesParityIntegrationTest.php',
+            'RepositoryEvolutionIntegrationTest.php',
+        ],
         'crud.php' => [
             'CrudIntegrationTest.php',
             'AdvancedQueryFeaturesIntegrationTest.php',

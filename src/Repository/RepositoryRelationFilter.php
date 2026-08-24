@@ -29,7 +29,7 @@ final readonly class RepositoryRelationFilter
         bool $not = false,
     ): void {
         if ($definition->oneOfManyAggregate !== null) {
-            $matching = new RepositoryOneOfManyFilter($this->batchSize)->matchingParentKeys($definition, $constraint);
+            $matching = $this->matchingOneOfManyParentKeys($definition, $constraint);
             $this->applyValues(
                 $parentQuery,
                 $definition->parentKey,
@@ -293,6 +293,74 @@ final readonly class RepositoryRelationFilter
 
     /**
      * @param null|callable(QueryBuilder):void $constraint
+     * @return list<mixed>
+     */
+    private function matchingOneOfManyParentKeys(
+        RelationDefinition $definition,
+        ?callable $constraint,
+    ): array {
+        $related = $definition->related
+            ?? throw new InvalidArgumentException('One-of-many relation requires a related repository.');
+        $primaryKey = $related::definition()->primaryKey;
+        $winners = new RepositoryOneOfManySelector($this->batchSize)->select($definition);
+
+        if ($winners === []) {
+            return [];
+        }
+
+        if ($constraint === null) {
+            return array_values(array_map(
+                static fn(array $winner): mixed => $winner['parent'],
+                $winners,
+            ));
+        }
+
+        $parentById = [];
+        foreach ($winners as $winner) {
+            $parentById[RepositorySupport::key($winner['id'])] = $winner['parent'];
+        }
+
+        $ids = array_values(array_map(
+            static fn(array $winner): mixed => $winner['id'],
+            $winners,
+        ));
+        $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
+        $matches = [];
+        $seen = [];
+
+        foreach (array_chunk($ids, $batchSize) as $chunk) {
+            $query = $related::query()->apply(
+                static function (QueryBuilder $builder) use ($primaryKey, $chunk): void {
+                    $builder->whereIn($primaryKey, $chunk);
+                },
+            );
+            $query->apply($constraint);
+
+            foreach ($query->raw()->select($primaryKey)->cursor() as $row) {
+                if (!is_array($row) || !array_key_exists($primaryKey, $row)) {
+                    continue;
+                }
+
+                $parent = $parentById[RepositorySupport::key($row[$primaryKey])] ?? null;
+                if ($parent === null) {
+                    continue;
+                }
+
+                $identity = RepositorySupport::key($parent);
+                if (isset($seen[$identity])) {
+                    continue;
+                }
+
+                $seen[$identity] = true;
+                $matches[] = $parent;
+            }
+        }
+
+        return $matches;
+    }
+
+    /**
+     * @param null|callable(QueryBuilder):void $constraint
      * @return list<int|float|string|bool>
      */
     private function matchingPivotParentKeys(RelationDefinition $definition, ?callable $constraint): array
@@ -305,7 +373,7 @@ final readonly class RepositoryRelationFilter
             ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.'));
         $related = $definition->related
             ?? throw new InvalidArgumentException('Many-to-many relation requires a related repository.');
-        $relatedQuery = $related::repositoryQuery();
+        $relatedQuery = $related::query();
         $this->applyRelatedScopes($relatedQuery, $definition, $constraint);
         $relatedIds = $this->distinctColumnValues($relatedQuery, $definition->relatedKey);
         if ($relatedIds === []) {
@@ -339,7 +407,7 @@ final readonly class RepositoryRelationFilter
     {
         $groups = [];
         foreach ($definition->morphMap as $alias => $related) {
-            $query = $related::repositoryQuery();
+            $query = $related::query();
             $this->applyRelatedScopes($query, $definition, $constraint);
             $groups[$alias] = $this->distinctColumnValues($query, $definition->relatedKey);
         }
@@ -356,7 +424,7 @@ final readonly class RepositoryRelationFilter
         RelationDefinition $definition,
         ?callable $constraint,
     ): RepositoryQuery {
-        $query = $related::repositoryQuery();
+        $query = $related::query();
         if (
             in_array($definition->type, [RelationDefinition::MORPH_ONE, RelationDefinition::MORPH_MANY], true)
             && $definition->morphTypeColumn !== null

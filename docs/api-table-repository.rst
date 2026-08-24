@@ -18,20 +18,19 @@ explicit ``connection()``, ``transaction()``, and raw SQL helpers instead.
 Repository-Aware Query Boundary
 -------------------------------
 
-``repositoryQuery()`` returns ``RepositoryQuery``. Fluent QueryBuilder
+``query()`` returns ``RepositoryQuery``. Fluent QueryBuilder
 operations are recorded and replayed through repository terminals so repository
 constraints, casts, tenancy, soft-delete policy, timestamps, write policy,
 lifecycle hooks, and relation projection stay consistent.
 
-``query()`` preserves the established ``QueryBuilder`` contract. ``builder()``
-and ``rawQuery()`` are aliases for that explicit raw boundary. They receive the
-repository constraints present when the builder is created, but their terminal
-result and mutation behavior is QueryBuilder behavior and does not provide
-repository result projection or write-policy guarantees.
+``builder()`` and ``rawQuery()`` are aliases for the explicit raw boundary. They
+receive the repository constraints present when the builder is created, but
+their terminal result and mutation behavior is QueryBuilder behavior and does
+not provide repository result projection or write-policy guarantees.
 
 .. code-block:: php
 
-   $rows = User::repositoryQuery()
+   $rows = User::query()
        ->where('active', '=', 1)
        ->get();                       // repository-processed Collection
 
@@ -39,14 +38,14 @@ repository result projection or write-policy guarantees.
        ->where('active', '=', 1)
        ->get();                       // raw QueryBuilder rows
 
-Use ``query()`` / ``builder()`` / ``rawQuery()`` when bypassing repository
-semantics is deliberate, not as the normal repository workflow.
+Use ``builder()`` or ``rawQuery()`` only when bypassing repository semantics is
+deliberate. ``query()`` is the normal fluent repository workflow.
 
 Compiled Definition Metadata
 ----------------------------
 
 ``TableRepository`` compiles immutable declarative metadata into one
-``RepositoryDefinition`` per repository class. Repeated ``repositoryQuery()``
+``RepositoryDefinition`` per repository class. Repeated ``query()``
 and ``repository()`` calls reuse that definition instead of rebuilding casts,
 scopes, and relation declarations on every call.
 
@@ -111,9 +110,9 @@ The default is shared across direct and fluent repository entry points:
 .. code-block:: php
 
    $page = Post::paginate();
-   $page = Post::repositoryQuery()->paginate();
-   $page = Post::repositoryQuery()->simplePaginate();
-   $page = Post::repositoryQuery()->cursorPaginate();
+   $page = Post::query()->paginate();
+   $page = Post::query()->simplePaginate();
+   $page = Post::query()->cursorPaginate();
 
 Normal, simple, and cursor paginator items preserve repository casts and explicit
 relation projections. An explicit page size always overrides ``$perPage``.
@@ -180,11 +179,11 @@ Query-local removal never mutates class/global state:
 
 .. code-block:: php
 
-   $all = Post::repositoryQuery()
+   $all = Post::query()
        ->withoutGlobalScope('published')
        ->get();
 
-   $all = Post::repositoryQuery()
+   $all = Post::query()
        ->withoutGlobalScopes()
        ->get();
 
@@ -241,7 +240,7 @@ value is never interpreted as an arbitrary PHP class name.
        ];
    }
 
-   $posts = Post::repositoryQuery()
+   $posts = Post::query()
        ->with('user', 'comments', 'tags', 'images')
        ->get();
 
@@ -253,7 +252,7 @@ Constrained Eager Loading
 
 .. code-block:: php
 
-   $posts = Post::repositoryQuery()
+   $posts = Post::query()
        ->with([
            'comments' => static function (QueryBuilder $query): void {
                $query->where('approved', '=', 1);
@@ -272,7 +271,7 @@ Nested eager relation paths are explicit and depth-bounded:
 
 .. code-block:: php
 
-   $posts = Post::repositoryQuery()
+   $posts = Post::query()
        ->with('comments.author')
        ->get();
 
@@ -333,7 +332,7 @@ Repository queries can project aggregates without hydrating relation graphs:
 
 .. code-block:: php
 
-   $posts = Post::repositoryQuery()
+   $posts = Post::query()
        ->withCount('comments', 'tags')
        ->withExists('comments')
        ->withSum('comments', 'score')
@@ -364,11 +363,11 @@ Direct declared relations support:
 
 .. code-block:: php
 
-   $posts = Post::repositoryQuery()
+   $posts = Post::query()
        ->whereRelation('comments', 'score', '>=', 10)
        ->get();
 
-   $posts = Post::repositoryQuery()
+   $posts = Post::query()
        ->whereHas('comments', static function (QueryBuilder $query): void {
            $query->where('approved', '=', 1);
        })
@@ -398,11 +397,11 @@ Repository-Aware Fluent Mutations
 
 .. code-block:: php
 
-   Post::repositoryQuery()
+   Post::query()
        ->where('status', '=', 'draft')
        ->update(['status' => 'published']);
 
-   Post::repositoryQuery()
+   Post::query()
        ->where('published_at', '<', $cutoff)
        ->delete();
 
@@ -422,9 +421,9 @@ Repository queries provide query-local soft-delete visibility controls:
 
 .. code-block:: php
 
-   Post::repositoryQuery()->withTrashed()->get();
-   Post::repositoryQuery()->onlyTrashed()->get();
-   Post::repositoryQuery()->withoutTrashed()->get();
+   Post::query()->withTrashed()->get();
+   Post::query()->onlyTrashed()->get();
+   Post::query()->withoutTrashed()->get();
 
 ``restore()`` and ``forceDelete()`` operate through repository semantics rather
 than falling through to raw builder mutations.
@@ -495,9 +494,9 @@ Core Methods
 ------------
 
 - ``definition()`` / ``flushDefinition()``
-- ``repository(?string $connection = null)`` / ``repo(...)``
-- ``repositoryQuery(?string $connection = null)``
-- ``query(?string $connection = null)`` / ``builder(...)`` / ``rawQuery(...)``
+- ``repository(?string $connection = null)``
+- ``query(?string $connection = null)``
+- ``builder(?string $connection = null)`` / ``rawQuery(...)``
 - ``connection(?string $connection = null)``
 - ``pruner(?string $connection = null)``
 - ``transaction(callable $callback, int $attempts = 1, ?string $connection = null)``
@@ -536,8 +535,8 @@ Set a class default connection and override it explicitly per call when needed:
        protected static ?string $connection = 'main';
    }
 
-   $defaultRows = User::repositoryQuery()->get();
-   $reportRows = User::repositoryQuery('reporting')->get();
+   $defaultRows = User::query()->get();
+   $reportRows = User::query('reporting')->get();
    $reportCount = User::sqlScalar('select count(*) from users', [], 'reporting');
 
 Infrastructure Access

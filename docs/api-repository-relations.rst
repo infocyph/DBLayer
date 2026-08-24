@@ -45,7 +45,7 @@ Through relations support the normal eager projection surface:
 
 .. code-block:: php
 
-   $countries = Country::repositoryQuery()
+   $countries = Country::query()
        ->with('posts')
        ->get();
 
@@ -53,7 +53,7 @@ Nested eager loading continues from the final repository:
 
 .. code-block:: php
 
-   $countries = Country::repositoryQuery()
+   $countries = Country::query()
        ->with('posts.author')
        ->get();
 
@@ -65,7 +65,7 @@ operations:
 
 .. code-block:: php
 
-   $countries = Country::repositoryQuery()
+   $countries = Country::query()
        ->withCount('posts')
        ->withSum('posts', 'score')
        ->withAvg('posts', 'score')
@@ -73,7 +73,7 @@ operations:
        ->withMax('posts', 'score')
        ->get();
 
-   $countries = Country::repositoryQuery()
+   $countries = Country::query()
        ->whereHas('posts')
        ->whereRelation('posts', 'published', '=', 1)
        ->get();
@@ -184,7 +184,7 @@ constraints:
 
    'latest_order' => $orders->latestOfMany('created_at');
 
-   $users = User::repositoryQuery()
+   $users = User::query()
        ->with([
            'latest_order' => static function (QueryBuilder $query): void {
                $query->where('status', '=', 'paid');
@@ -204,7 +204,7 @@ selected winner, not against every historical related row.
 
 .. code-block:: php
 
-   $users = User::repositoryQuery()
+   $users = User::query()
        ->whereRelation('latest_order', 'status', '=', 'paid')
        ->get();
 
@@ -215,7 +215,7 @@ One-of-many aggregate projections likewise operate on the selected row only:
 
 .. code-block:: php
 
-   $users = User::repositoryQuery()
+   $users = User::query()
        ->withCount('latest_order')
        ->withSum('latest_order', 'amount')
        ->get();

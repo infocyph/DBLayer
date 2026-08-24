@@ -162,7 +162,7 @@ afterEach(function (): void {
 });
 
 it('does not promote an older direct row for constrained eager loading', function (): void {
-    $parent = RepositoryWinnerParent::repositoryQuery()
+    $parent = RepositoryWinnerParent::query()
         ->with([
             'latest_child' => static function (QueryBuilder $query): void {
                 $query->where('active', '=', 1);
@@ -174,7 +174,7 @@ it('does not promote an older direct row for constrained eager loading', functio
 });
 
 it('filters the selected direct winner for constrained aggregates', function (): void {
-    $parent = RepositoryWinnerParent::repositoryQuery()
+    $parent = RepositoryWinnerParent::query()
         ->withCount([
             'latest_child' => static function (QueryBuilder $query): void {
                 $query->where('active', '=', 1);
@@ -196,7 +196,7 @@ it('filters the selected direct winner for constrained aggregates', function ():
 });
 
 it('does not promote an older through row for constrained eager loading', function (): void {
-    $country = RepositoryWinnerCountry::repositoryQuery()
+    $country = RepositoryWinnerCountry::query()
         ->with([
             'latest_post' => static function (QueryBuilder $query): void {
                 $query->where('active', '=', 1);
@@ -208,7 +208,7 @@ it('does not promote an older through row for constrained eager loading', functi
 });
 
 it('filters the selected through winner for constrained aggregates', function (): void {
-    $country = RepositoryWinnerCountry::repositoryQuery()
+    $country = RepositoryWinnerCountry::query()
         ->withCount([
             'latest_post' => static function (QueryBuilder $query): void {
                 $query->where('active', '=', 1);

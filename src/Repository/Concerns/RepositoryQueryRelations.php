@@ -177,7 +177,7 @@ trait RepositoryQueryRelations
             return $rows;
         }
 
-        $projected = $related::repositoryQuery()
+        $projected = $related::query()
             ->with($this->relationRequestArray($nested))
             ->project($flat);
 
@@ -211,7 +211,7 @@ trait RepositoryQueryRelations
 
         foreach ($groups as $type => $entries) {
             $related = $definition->morphMap[$type];
-            $projected = $related::repositoryQuery()
+            $projected = $related::query()
                 ->with($this->relationRequestArray($nested))
                 ->project(array_map(
                     static fn(array $entry): array => $entry['row'],

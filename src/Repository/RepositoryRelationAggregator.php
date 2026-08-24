@@ -48,8 +48,7 @@ final readonly class RepositoryRelationAggregator
         }
 
         if ($definition->oneOfManyAggregate !== null) {
-            return new RepositoryOneOfManyAggregator($this->parentConnection, $this->batchSize)
-                ->aggregate($parents, $definition, $function, $column, $constraint);
+            return $this->aggregateOneOfMany($parents, $definition, $function, $column, $constraint);
         }
         if ($definition->through !== null) {
             return new RepositoryThroughRelationAggregator($this->batchSize)
@@ -127,7 +126,7 @@ final readonly class RepositoryRelationAggregator
         $aggregateExpression = $this->aggregateExpression($function, $column);
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::repositoryQuery()->apply(static function (QueryBuilder $query) use ($definition, $relatedKey, $chunk): void {
+            $query = $related::query()->apply(static function (QueryBuilder $query) use ($definition, $relatedKey, $chunk): void {
                 $query->whereIn($relatedKey, $chunk);
                 if (
                     in_array($definition->type, [RelationDefinition::MORPH_ONE, RelationDefinition::MORPH_MANY], true)
@@ -177,7 +176,7 @@ final readonly class RepositoryRelationAggregator
         $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::repositoryQuery()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
+            $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
                 $builder->whereIn($relatedKey, $chunk);
             });
             $this->applyConstraints($query, $definition, $constraint);
@@ -211,6 +210,45 @@ final readonly class RepositoryRelationAggregator
 
         foreach ($groups as $type => $values) {
             $this->aggregateMorphGroup($result, $type, array_values($values), $definition, $function, $column, $constraint);
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,mixed>
+     */
+    private function aggregateOneOfMany(
+        array $parents,
+        RelationDefinition $definition,
+        string $function,
+        string $column,
+        ?callable $constraint,
+    ): array {
+        $projection = $function === 'count'
+            ? [$definition->relatedKey]
+            : [$definition->relatedKey, $column];
+        $selectedDefinition = $definition->select(array_values(array_unique($projection)));
+        $alias = '__one_of_many_aggregate';
+        $rows = new RepositoryRelationLoader($this->parentConnection, $this->batchSize)
+            ->load($parents, $alias, $selectedDefinition, $constraint);
+        $result = [];
+
+        foreach ($rows as $parent) {
+            $related = $parent[$alias] ?? null;
+            if (!is_array($related)) {
+                continue;
+            }
+
+            $identity = RepositorySupport::key($parent[$definition->parentKey] ?? null);
+            $result[$identity] = match ($function) {
+                'count' => 1,
+                'sum', 'avg' => is_numeric($related[$column] ?? null) ? ($related[$column] + 0) : 0,
+                'min', 'max' => $related[$column] ?? null,
+                default => null,
+            };
         }
 
         return $result;
@@ -355,7 +393,7 @@ final readonly class RepositoryRelationAggregator
         $values = [];
 
         foreach (array_chunk($relatedIds, $batchSize) as $chunk) {
-            $query = $related::repositoryQuery()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
+            $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
                 $builder->whereIn($relatedKey, $chunk);
             });
             $this->applyConstraints($query, $definition, $constraint);

@@ -6,8 +6,8 @@ namespace Infocyph\DBLayer\Repository;
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Exceptions\UnwritableAttributeException;
-use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Query\Repository;
 use Infocyph\DBLayer\Query\ResultProcessor;
 use Infocyph\DBLayer\Repository\Casts\AttributeCast;
 use Infocyph\DBLayer\Repository\Casts\RepositoryWriteCaster;
@@ -20,7 +20,7 @@ use InvalidArgumentException;
  * Keeps table-definition policy in the repository layer without introducing
  * entity state or Active Record behavior.
  */
-final class TableQueryRepository extends RepositoryPagination
+final class TableQueryRepository extends Repository
 {
     use RepositoryOperationLifecycle;
 
@@ -76,23 +76,6 @@ final class TableQueryRepository extends RepositoryPagination
         $this->scheduleAfterCommit('create', ['row' => $created]);
 
         return $created;
-    }
-
-    #[\Override]
-    public function cursorPaginate(
-        ?int $perPage = null,
-        ?string $cursor = null,
-        ?string $uniqueColumn = null,
-        ?string $direction = null,
-        ?callable $scope = null,
-    ): CursorPaginator {
-        return parent::cursorPaginate(
-            $perPage ?? $this->defaultPerPage(),
-            $cursor,
-            $uniqueColumn,
-            $direction,
-            $scope,
-        );
     }
 
     /** Delete one row by primary key while preserving repository lifecycle. */

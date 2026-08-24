@@ -123,7 +123,7 @@ final readonly class RepositoryOneOfManySelector
     ): void {
         $relatedDefinition = $related::definition();
         $relatedKey = RepositorySupport::column($definition->relatedKey);
-        $query = $related::repositoryQuery();
+        $query = $related::query();
 
         if ($parentValues !== null) {
             $query->apply(static function (QueryBuilder $builder) use ($relatedKey, $parentValues): void {
@@ -170,7 +170,7 @@ final readonly class RepositoryOneOfManySelector
         array &$parentByThrough,
         array &$throughValues,
     ): void {
-        $query = $through::repositoryQuery();
+        $query = $through::query();
         if ($parentValues !== null) {
             $query->apply(static function (QueryBuilder $builder) use ($throughParentKey, $parentValues): void {
                 $builder->whereIn($throughParentKey, $parentValues);
@@ -215,7 +215,7 @@ final readonly class RepositoryOneOfManySelector
         array &$winners,
     ): void {
         $relatedDefinition = $related::definition();
-        $query = $related::repositoryQuery()->apply(static function (QueryBuilder $builder) use ($relatedKey, $values): void {
+        $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $values): void {
             $builder->whereIn($relatedKey, $values);
         });
         $this->applyCandidateScopes($query, $definition);
