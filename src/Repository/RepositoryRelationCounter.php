@@ -1,0 +1,250 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Infocyph\DBLayer\Repository;
+
+use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Query\QueryBuilder;
+use InvalidArgumentException;
+
+/**
+ * Count declared relations without hydrating related rows.
+ */
+final class RepositoryRelationCounter
+{
+    public function __construct(
+        private readonly Connection $parentConnection,
+        private readonly int $batchSize = 500,
+    ) {
+        if ($batchSize < 1) {
+            throw new InvalidArgumentException('Relation batch size must be at least one.');
+        }
+    }
+
+    /**
+     * Return counts keyed by normalized parent-key identity.
+     *
+     * @param list<array<string,mixed>> $parents
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,int>
+     */
+    public function count(
+        array $parents,
+        RelationDefinition $definition,
+        ?callable $constraint = null,
+    ): array {
+        if ($parents === []) {
+            return [];
+        }
+
+        return $definition->type === RelationDefinition::BELONGS_TO_MANY
+            ? $this->countManyToMany($parents, $definition, $constraint)
+            : $this->countDirect($parents, $definition, $constraint);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,int>
+     */
+    private function countDirect(
+        array $parents,
+        RelationDefinition $definition,
+        ?callable $constraint,
+    ): array {
+        $values = $this->values($parents, $definition->parentKey);
+        if ($values === []) {
+            return [];
+        }
+
+        $related = $this->relatedClass($definition);
+        $connection = $related::connection();
+        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+        $counts = [];
+
+        foreach (array_chunk($values, $batchSize) as $chunk) {
+            $query = $related::query()->whereIn($definition->relatedKey, $chunk);
+            $this->applyConstraints($query, $definition, $constraint);
+
+            $rows = $query->raw()
+                ->select($definition->relatedKey)
+                ->selectRaw('COUNT(*) AS aggregate')
+                ->groupBy($definition->relatedKey)
+                ->get();
+
+            foreach ($rows as $row) {
+                $counts[$this->key($row[$definition->relatedKey] ?? null)] = (int) ($row['aggregate'] ?? 0);
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,int>
+     */
+    private function countManyToMany(
+        array $parents,
+        RelationDefinition $definition,
+        ?callable $constraint,
+    ): array {
+        $pivotTable = $definition->pivotTable
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot table.');
+        $pivotParentKey = $definition->pivotParentKey
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot parent key.');
+        $pivotRelatedKey = $definition->pivotRelatedKey
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.');
+
+        $parentValues = $this->values($parents, $definition->parentKey);
+        $batchSize = $this->parentConnection->safeBatchSize(requested: $this->batchSize);
+        $pivotRows = [];
+
+        foreach (array_chunk($parentValues, $batchSize) as $chunk) {
+            array_push(
+                $pivotRows,
+                ...$this->parentConnection
+                    ->table($pivotTable)
+                    ->select([$pivotParentKey, $pivotRelatedKey])
+                    ->whereIn($pivotParentKey, $chunk)
+                    ->get(),
+            );
+        }
+
+        if ($pivotRows === []) {
+            return [];
+        }
+
+        $allowed = $this->allowedRelatedKeys(
+            $this->values($pivotRows, $pivotRelatedKey),
+            $definition,
+            $constraint,
+        );
+        $counts = [];
+
+        foreach ($pivotRows as $pivot) {
+            $relatedKey = $this->key($pivot[$pivotRelatedKey] ?? null);
+            if (!isset($allowed[$relatedKey])) {
+                continue;
+            }
+
+            $parentKey = $this->key($pivot[$pivotParentKey] ?? null);
+            $counts[$parentKey] = ($counts[$parentKey] ?? 0) + 1;
+        }
+
+        return $counts;
+    }
+
+    /**
+     * @param list<mixed> $values
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,true>
+     */
+    private function allowedRelatedKeys(
+        array $values,
+        RelationDefinition $definition,
+        ?callable $constraint,
+    ): array {
+        if ($values === []) {
+            return [];
+        }
+
+        $related = $this->relatedClass($definition);
+        $connection = $related::connection();
+        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+        $allowed = [];
+
+        foreach (array_chunk($values, $batchSize) as $chunk) {
+            $query = $related::query()->whereIn($definition->relatedKey, $chunk);
+            $this->applyConstraints($query, $definition, $constraint);
+
+            foreach ($query->get([$definition->relatedKey]) as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $allowed[$this->key($row[$definition->relatedKey] ?? null)] = true;
+            }
+        }
+
+        return $allowed;
+    }
+
+    /**
+     * @param null|callable(QueryBuilder):void $constraint
+     */
+    private function applyConstraints(
+        RepositoryQuery $query,
+        RelationDefinition $definition,
+        ?callable $constraint,
+    ): void {
+        if ($definition->scope !== null) {
+            if (!is_callable($definition->scope)) {
+                throw new InvalidArgumentException('Relation scope must be callable.');
+            }
+
+            $query->apply($definition->scope);
+        }
+
+        if ($constraint !== null) {
+            $query->apply($constraint);
+        }
+    }
+
+    /**
+     * @return class-string<TableRepository>
+     */
+    private function relatedClass(RelationDefinition $definition): string
+    {
+        $related = $definition->related;
+
+        if (!is_a($related, TableRepository::class, true)) {
+            throw new InvalidArgumentException(sprintf(
+                'Related repository [%s] must extend %s.',
+                $related,
+                TableRepository::class,
+            ));
+        }
+
+        return $related;
+    }
+
+    private function key(mixed $value): string
+    {
+        return match (true) {
+            is_int($value), is_string($value) => 'scalar:' . $value,
+            is_float($value) => 'float:' . serialize($value),
+            is_bool($value) => 'bool:' . ($value ? '1' : '0'),
+            $value === null => 'null:',
+            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
+        };
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<mixed>
+     */
+    private function values(array $rows, string $column): array
+    {
+        $values = [];
+        $seen = [];
+
+        foreach ($rows as $row) {
+            if (!array_key_exists($column, $row) || $row[$column] === null) {
+                continue;
+            }
+
+            $key = $this->key($row[$column]);
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $values[] = $row[$column];
+        }
+
+        return $values;
+    }
+}
