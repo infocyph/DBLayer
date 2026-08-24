@@ -22,23 +22,35 @@ final class RepositorySupport
 
     public static function key(mixed $value): string
     {
+        $value = self::value($value);
+
         return match (true) {
             is_int($value), is_string($value) => 'scalar:' . $value,
             is_float($value) => 'float:' . serialize($value),
             is_bool($value) => 'bool:' . ($value ? '1' : '0'),
             $value === null => 'null:',
-            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
         };
+    }
+
+    /** @return int|float|string|bool|null */
+    public static function value(mixed $value): int|float|string|bool|null
+    {
+        if ($value === null || is_int($value) || is_float($value) || is_string($value) || is_bool($value)) {
+            return $value;
+        }
+
+        throw new InvalidArgumentException('Relation keys must be scalar or null.');
     }
 
     /**
      * @param list<mixed> $values
-     * @return list<mixed>
+     * @return list<int|float|string|bool>
      */
     public static function uniqueValues(array $values): array
     {
         $unique = [];
         foreach ($values as $value) {
+            $value = self::value($value);
             if ($value !== null) {
                 $unique[self::key($value)] = $value;
             }
