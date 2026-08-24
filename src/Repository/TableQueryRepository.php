@@ -9,6 +9,7 @@ use Infocyph\DBLayer\Exceptions\UnwritableAttributeException;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\ResultProcessor;
+use Infocyph\DBLayer\Repository\Casts\AttributeCast;
 use Infocyph\DBLayer\Repository\Casts\RepositoryWriteCaster;
 use Infocyph\DBLayer\Repository\Concerns\RepositoryOperationLifecycle;
 use InvalidArgumentException;
@@ -36,6 +37,15 @@ final class TableQueryRepository extends RepositoryPagination
             $connection->getExecutorInstance(),
             $results,
         );
+    }
+
+    /** @param array<string,string|callable(mixed):mixed|AttributeCast> $casts */
+    #[\Override]
+    public function setCasts(array $casts): static
+    {
+        $this->casts = $casts;
+
+        return $this;
     }
 
     public function disableNamedGlobalScope(string $name): static
@@ -250,7 +260,11 @@ final class TableQueryRepository extends RepositoryPagination
         return $affected;
     }
 
-    /** Update all rows matching a repository-aware scope. */
+    /**
+     * Update all rows matching a repository-aware scope.
+     *
+     * @param array<string,mixed> $values
+     */
     public function updateWhere(array $values, ?callable $scope = null): int
     {
         if ($values === []) {
