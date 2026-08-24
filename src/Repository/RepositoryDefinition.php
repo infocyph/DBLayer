@@ -215,14 +215,6 @@ final readonly class RepositoryDefinition
                 ));
             }
 
-            if (!is_a($relation->related, TableRepository::class, true)) {
-                throw new InvalidArgumentException(sprintf(
-                    '%s relation [%s] must target a TableRepository class.',
-                    $this->repositoryClass,
-                    $name,
-                ));
-            }
-
             $normalized[$name] = $relation;
         }
 
