@@ -178,13 +178,14 @@ final class RepositoryThroughRelation
         $values = $this->values($throughRows, $throughKey);
         $connection = $related::connection();
         $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
-        [$orderColumn, $direction] = $this->oneOfManyOrder($definition, $related);
-        $primaryKey = $related::definition()->primaryKey;
+        $relatedDefinition = $related::definition();
+        $orders = $definition->oneOfManyAggregate === null
+            ? []
+            : RepositoryOneOfManyOrder::resolve($definition, $relatedDefinition);
         [$columns, $internalColumns] = $this->projection(
             $definition->columns,
             $definition->relatedKey,
-            $orderColumn,
-            $primaryKey,
+            RepositoryOneOfManyOrder::columns($orders),
         );
         $rows = [];
 
@@ -194,27 +195,24 @@ final class RepositoryThroughRelation
             );
             $this->applyRelatedScopes($query, $definition, $constraint);
 
-            if ($orderColumn !== null && $direction !== null) {
-                $query->apply(static function (QueryBuilder $builder) use ($orderColumn, $direction, $primaryKey): void {
-                    $builder->orderBy($orderColumn, $direction);
-                    if ($primaryKey !== $orderColumn) {
-                        $builder->orderBy($primaryKey, $direction);
-                    }
+            if ($orders !== []) {
+                $query->apply(static function (QueryBuilder $builder) use ($orders): void {
+                    RepositoryOneOfManyOrder::apply($builder, $orders);
                 });
             }
 
             array_push($rows, ...$this->normalizeRows($query->get($columns)->toArray()));
         }
 
-        if ($orderColumn !== null && count($rows) > 1) {
-            usort($rows, static function (array $left, array $right) use ($orderColumn, $direction, $primaryKey): int {
-                $comparison = ($left[$orderColumn] ?? null) <=> ($right[$orderColumn] ?? null);
-                if ($comparison === 0 && $primaryKey !== $orderColumn) {
-                    $comparison = ($left[$primaryKey] ?? null) <=> ($right[$primaryKey] ?? null);
-                }
-
-                return $direction === 'desc' ? -$comparison : $comparison;
-            });
+        if ($orders !== [] && count($rows) > 1) {
+            usort(
+                $rows,
+                static fn(array $left, array $right): int => RepositoryOneOfManyOrder::compare(
+                    $left,
+                    $right,
+                    $orders,
+                ),
+            );
         }
 
         return [$rows, $internalColumns];
@@ -238,43 +236,20 @@ final class RepositoryThroughRelation
     }
 
     /**
-     * @param class-string<TableRepository> $related
-     * @return array{0:?string,1:?string}
-     */
-    private function oneOfManyOrder(RelationDefinition $definition, string $related): array
-    {
-        if ($definition->oneOfManyAggregate === null) {
-            return [null, null];
-        }
-
-        $column = $definition->oneOfManyColumn ?? $related::definition()->primaryKey;
-
-        return [$column, $definition->oneOfManyAggregate === 'max' ? 'desc' : 'asc'];
-    }
-
-    /**
      * @param list<string> $requested
+     * @param list<string> $required
      * @return array{0:list<string>,1:list<string>}
      */
-    private function projection(
-        array $requested,
-        string $relatedKey,
-        ?string $orderColumn,
-        string $primaryKey,
-    ): array {
+    private function projection(array $requested, string $relatedKey, array $required): array
+    {
         if ($requested === ['*'] || in_array('*', $requested, true)) {
             return [$requested, []];
         }
 
         $columns = $requested;
         $internal = [];
-        $required = [$relatedKey];
-        if ($orderColumn !== null) {
-            $required[] = $orderColumn;
-            $required[] = $primaryKey;
-        }
 
-        foreach (array_unique($required) as $column) {
+        foreach (array_unique([$relatedKey, ...$required]) as $column) {
             if (in_array($column, $columns, true)) {
                 continue;
             }
