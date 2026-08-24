@@ -12,7 +12,9 @@ final readonly class RelationDefinition
     public const string BELONGS_TO = 'belongs_to';
     public const string BELONGS_TO_MANY = 'belongs_to_many';
     public const string HAS_MANY = 'has_many';
+    public const string HAS_MANY_THROUGH = 'has_many_through';
     public const string HAS_ONE = 'has_one';
+    public const string HAS_ONE_THROUGH = 'has_one_through';
     public const string MORPH_MANY = 'morph_many';
     public const string MORPH_ONE = 'morph_one';
     public const string MORPH_TO = 'morph_to';
@@ -24,6 +26,8 @@ final readonly class RelationDefinition
      * @param null|callable(QueryBuilder):void $scope
      * @param list<string> $pivotColumns
      * @param array<string,class-string<TableRepository>> $morphMap
+     * @param class-string<TableRepository>|null $through
+     * @param null|callable(QueryBuilder):void $oneOfManyScope
      */
     public function __construct(
         public string $type,
@@ -41,11 +45,15 @@ final readonly class RelationDefinition
         public ?string $morphIdColumn = null,
         public ?string $morphAlias = null,
         public array $morphMap = [],
+        public ?string $through = null,
+        public ?string $throughParentKey = null,
+        public ?string $throughKey = null,
+        public ?string $oneOfManyColumn = null,
+        public ?string $oneOfManyAggregate = null,
+        public mixed $oneOfManyScope = null,
     ) {}
 
-    /**
-     * Return a copy with an alternate pivot projection key.
-     */
+    /** Return a copy with an alternate pivot projection key. */
     public function asPivot(string $accessor): self
     {
         $accessor = trim($accessor);
@@ -64,6 +72,57 @@ final readonly class RelationDefinition
     public function constrain(callable $scope): self
     {
         return $this->copy(scope: $scope);
+    }
+
+    /**
+     * Choose the maximum/minimum related row for each parent relation key.
+     *
+     * When $column is null the related repository primary key is used.
+     * The optional scope participates in candidate selection before the winner
+     * is chosen.
+     *
+     * @param null|callable(QueryBuilder):void $scope
+     */
+    public function ofMany(
+        ?string $column = null,
+        string $aggregate = 'max',
+        ?callable $scope = null,
+    ): self {
+        $type = $this->toOneType();
+        $aggregate = strtolower(trim($aggregate));
+
+        if (!in_array($aggregate, ['max', 'min'], true)) {
+            throw new InvalidArgumentException('One-of-many aggregate must be max or min.');
+        }
+
+        if ($column !== null && trim($column) === '') {
+            throw new InvalidArgumentException('One-of-many column must not be empty.');
+        }
+
+        return $this->copy(
+            type: $type,
+            oneOfManyColumn: $column === null ? null : trim($column),
+            oneOfManyAggregate: $aggregate,
+            oneOfManyScope: $scope,
+        );
+    }
+
+    public function latestOfMany(?string $column = null): self
+    {
+        return $this->ofMany($column, 'max');
+    }
+
+    public function oldestOfMany(?string $column = null): self
+    {
+        return $this->ofMany($column, 'min');
+    }
+
+    /**
+     * Convert a many relation into its one-relation equivalent.
+     */
+    public function one(): self
+    {
+        return $this->copy(type: $this->toOneType());
     }
 
     /**
@@ -105,15 +164,20 @@ final readonly class RelationDefinition
      * @param list<string>|null $columns
      * @param null|callable(QueryBuilder):void $scope
      * @param list<string>|null $pivotColumns
+     * @param null|callable(QueryBuilder):void $oneOfManyScope
      */
     private function copy(
+        ?string $type = null,
         ?array $columns = null,
         mixed $scope = null,
         ?array $pivotColumns = null,
         ?string $pivotAccessor = null,
+        ?string $oneOfManyColumn = null,
+        ?string $oneOfManyAggregate = null,
+        mixed $oneOfManyScope = null,
     ): self {
         return new self(
-            $this->type,
+            $type ?? $this->type,
             $this->related,
             $this->parentKey,
             $this->relatedKey,
@@ -128,6 +192,26 @@ final readonly class RelationDefinition
             $this->morphIdColumn,
             $this->morphAlias,
             $this->morphMap,
+            $this->through,
+            $this->throughParentKey,
+            $this->throughKey,
+            $oneOfManyColumn ?? $this->oneOfManyColumn,
+            $oneOfManyAggregate ?? $this->oneOfManyAggregate,
+            $oneOfManyScope ?? $this->oneOfManyScope,
         );
+    }
+
+    private function toOneType(): string
+    {
+        return match ($this->type) {
+            self::HAS_MANY => self::HAS_ONE,
+            self::HAS_MANY_THROUGH => self::HAS_ONE_THROUGH,
+            self::MORPH_MANY => self::MORPH_ONE,
+            self::HAS_ONE, self::HAS_ONE_THROUGH, self::MORPH_ONE => $this->type,
+            default => throw new InvalidArgumentException(sprintf(
+                'Relation type [%s] cannot be converted to a one-of-many relation.',
+                $this->type,
+            )),
+        };
     }
 }
