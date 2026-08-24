@@ -21,12 +21,16 @@ final readonly class SeedRunner
     {
         $resolved = $this->resolve($seeders);
         $executed = 0;
-        $execute = static fn(iterable $children): int => throw new \LogicException(
-            sprintf('Seed execution context is not initialized for %s.', get_debug_type($children)),
-        );
+
+        /** @var callable(iterable<mixed>):int|null $execute */
+        $execute = null;
         $context = new SeedContext(
             $this->connection,
             static function (iterable $children) use (&$execute): int {
+                if ($execute === null) {
+                    throw new \LogicException('Seed execution context is not initialized.');
+                }
+
                 return $execute($children);
             },
         );

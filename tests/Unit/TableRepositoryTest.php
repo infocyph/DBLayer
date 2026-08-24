@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use Infocyph\ArrayKit\Collection\Collection;
 use Infocyph\DBLayer\DB;
-use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Repository\RepositoryQuery;
 use Infocyph\DBLayer\Tests\Fixtures\BrokenTableRepository;
 use Infocyph\DBLayer\Tests\Fixtures\TableRepositoryUser;
 
@@ -82,7 +82,7 @@ it('delegates to repository API with class-level repository defaults', function 
     expect(TableRepositoryUser::count())->toBe(2);
 })->with('dblayer_drivers');
 
-it('delegates to query builder API while preserving repository policies', function (string $driver): void {
+it('delegates fluent reads through the repository-aware query boundary', function (string $driver): void {
     setupTableRepositoryFixture($driver);
 
     DB::table('users', 'table_repository_conn')->insert([
@@ -96,14 +96,14 @@ it('delegates to query builder API while preserving repository policies', functi
         ->pluck('email');
 
     expect($emails)->toBe(['a@example.test']);
-    expect(TableRepositoryUser::query())->toBeInstanceOf(QueryBuilder::class);
+    expect(TableRepositoryUser::query())->toBeInstanceOf(RepositoryQuery::class);
     expect(TableRepositoryUser::builder()->count())->toBe(2);
 })->with('dblayer_drivers');
 
 it('replaces duplicate order columns to keep generated SQL portable', function (string $driver): void {
     setupTableRepositoryFixture($driver);
 
-    $query = TableRepositoryUser::query()->orderBy('id', 'desc');
+    $query = TableRepositoryUser::query()->orderBy('id', 'desc')->raw();
 
     expect($query->getComponents()['orders'])->toBe([
         ['column' => 'id', 'direction' => 'desc'],
@@ -161,6 +161,6 @@ it('supports per-call connection override for repository, query, and raw SQL hel
 })->with('dblayer_drivers');
 
 it('throws a clear exception when table is not configured', function (): void {
-    expect(static fn(): QueryBuilder => BrokenTableRepository::query())
+    expect(static fn(): RepositoryQuery => BrokenTableRepository::query())
         ->toThrow(InvalidArgumentException::class, 'must define a non-empty static $table value');
 });

@@ -301,7 +301,7 @@ final class User extends TableRepository
 }
 
 $one = User::find(1);                              // Repository method
-$rows = User::where('active', '=', 1)->get();     // QueryBuilder method
+$rows = User::where('active', '=', 1)->get();     // Repository-aware query
 $stats = DB::stats('main');                        // Infrastructure stays explicit
 $reportRows = User::query('reporting')->get();     // Per-call connection override
 ```

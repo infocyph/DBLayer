@@ -9,6 +9,7 @@ use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\SecurityException;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Security\QueryValidator;
+use Symfony\Component\Process\Process;
 
 it('matches bootstrap example connection setup flow', function (string $driver): void {
     dblayerAddConnectionForDriver($driver, 'primary', [
@@ -423,6 +424,30 @@ it('matches helpers and security example flow', function (string $driver): void 
     })->toThrow(SecurityException::class);
 })->with('dblayer_drivers');
 
+it('runs the complete table repository example', function (): void {
+    $process = new Process([
+        PHP_BINARY,
+        __DIR__ . '/../../examples/complete_repository.php',
+    ]);
+    $process->mustRun();
+
+    /** @var array<string,mixed> $summary */
+    $summary = json_decode($process->getOutput(), true, flags: JSON_THROW_ON_ERROR);
+
+    expect($summary)
+        ->created_post_id->toBe(1)
+        ->eager_loaded_posts->toBe(1)
+        ->optimistic_update->toBeTrue()
+        ->page_items->toBe(1)
+        ->temporarily_trashed->toBe(1)
+        ->pruned_stale_rows->toBe(1)
+        ->raw_count->toBe(1)
+        ->and($summary['events'] ?? [])->toContain(
+            'bulk-update-finished',
+            'committed:bulk_update',
+        );
+});
+
 it('keeps examples and integration coverage in sync', function (): void {
     $exampleFiles = glob(__DIR__ . '/../../examples/*.php') ?: [];
     $exampleNames = array_map(
@@ -434,6 +459,10 @@ it('keeps examples and integration coverage in sync', function (): void {
     $coverageMap = [
         'bootstrap.php' => ['ExamplesParityIntegrationTest.php'],
         'chunking.php' => ['ExamplesParityIntegrationTest.php'],
+        'complete_repository.php' => [
+            'ExamplesParityIntegrationTest.php',
+            'RepositoryEvolutionIntegrationTest.php',
+        ],
         'crud.php' => [
             'CrudIntegrationTest.php',
             'AdvancedQueryFeaturesIntegrationTest.php',

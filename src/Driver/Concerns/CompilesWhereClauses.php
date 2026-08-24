@@ -41,6 +41,23 @@ trait CompilesWhereClauses
     }
 
     /** @param array<string,mixed> $where */
+    protected function compileWhereColumn(array $where): string
+    {
+        $first = $this->arrayString($where, 'first');
+        $second = $this->arrayString($where, 'second');
+        if ($first === '' || $second === '') {
+            return '';
+        }
+
+        return sprintf(
+            '%s %s %s',
+            $this->wrapColumnIdentifier($first),
+            $this->arrayString($where, 'operator', '='),
+            $this->wrapColumnIdentifier($second),
+        );
+    }
+
+    /** @param array<string,mixed> $where */
     protected function compileWhereIn(array $where): string
     {
         $column = $this->arrayString($where, 'column');
@@ -106,6 +123,7 @@ trait CompilesWhereClauses
     {
         return match ($type) {
             'basic' => $this->compileWhereBasic($where),
+            'column' => $this->compileWhereColumn($where),
             'in' => $this->compileWhereIn($where),
             'between' => $this->compileWhereBetween($where),
             'null' => $this->compileWhereNull($where),

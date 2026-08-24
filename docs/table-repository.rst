@@ -45,7 +45,7 @@ Minimal Setup
    }
 
    $one = User::find(1);                  // Repository dispatch
-   $rows = User::query()->limit(20)->get(); // QueryBuilder dispatch
+   $rows = User::query()->limit(20)->get(); // Repository-aware query
    $stats = DB::stats('main');             // Infrastructure remains explicit
 
 Dispatch Rules
@@ -54,7 +54,7 @@ Dispatch Rules
 Unknown static calls resolve by priority:
 
 1. Repository method
-2. QueryBuilder method
+2. Repository-aware query method
 
 Infrastructure methods are deliberately not forwarded through static magic.
 Use ``DB`` or ``connection()`` explicitly. Raw SQL convenience remains

@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Query\Concerns;
 
+use BackedEnum;
 use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Repository\Casts\AttributeCast;
 use InvalidArgumentException;
 use ReflectionClass;
 use ReflectionParameter;
@@ -60,7 +62,7 @@ trait RepositoryInternals
                 continue;
             }
 
-            $row[$column] = $this->castValue($row[$column], $cast, false);
+            $row[$column] = $this->castValue($row[$column], $cast, false, $row);
         }
 
         return $row;
@@ -149,7 +151,7 @@ trait RepositoryInternals
                 continue;
             }
 
-            $attributes[$column] = $this->castValue($attributes[$column], $cast, true);
+            $attributes[$column] = $this->castValue($attributes[$column], $cast, true, $attributes);
         }
 
         return $attributes;
@@ -189,6 +191,62 @@ trait RepositoryInternals
         $reflection = new \ReflectionFunction(\Closure::fromCallable($callable));
 
         return $reflection->getNumberOfParameters();
+    }
+
+    /**
+     * @param class-string<BackedEnum> $enumClass
+     */
+    private function castBackedEnumValue(mixed $value, string $enumClass, bool $forWrite): mixed
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if ($value instanceof $enumClass) {
+            return $forWrite ? $value->value : $value;
+        }
+
+        if (!is_int($value) && !is_string($value)) {
+            throw new InvalidArgumentException(sprintf(
+                'Backed enum [%s] expects an int or string value, %s given.',
+                $enumClass,
+                get_debug_type($value),
+            ));
+        }
+
+        $case = $enumClass::from($value);
+
+        return $forWrite ? $case->value : $case;
+    }
+
+    private function castJsonValue(mixed $value, bool $forWrite): mixed
+    {
+        if ($forWrite) {
+            return is_array($value) || is_object($value)
+                ? json_encode($value, JSON_THROW_ON_ERROR)
+                : $value;
+        }
+
+        return is_string($value) ? (json_decode($value, true) ?? $value) : $value;
+    }
+
+    private function castNamedValue(mixed $value, string $type, bool $forWrite): mixed
+    {
+        return match (strtolower($type)) {
+            'int', 'integer' => $value === null ? null : $this->castToInt($value),
+            'float', 'double', 'real' => $value === null ? null : $this->castToFloat($value),
+            'bool', 'boolean' => $value === null ? null : $this->castToBool($value),
+            'string' => $value === null ? null : $this->castToString($value),
+            'json', 'array' => $this->castJsonValue($value, $forWrite),
+            'datetime' => $forWrite ? $this->normalizeDateTimeForWrite($value) : $value,
+            'immutable_datetime', 'datetime_immutable' => $forWrite
+                ? $this->normalizeDateTimeForWrite($value)
+                : $this->immutableDateTime($value),
+            'date' => $forWrite
+                ? $this->normalizeDateForWrite($value)
+                : $this->immutableDate($value),
+            default => $value,
+        };
     }
 
     /**
@@ -266,29 +324,31 @@ trait RepositoryInternals
     /**
      * Apply cast rules for one value.
      *
-     * @param string|callable(mixed):mixed $cast
+     * @param string|callable(mixed):mixed|AttributeCast $cast
+     * @param array<string,mixed> $context
      */
-    private function castValue(mixed $value, string|callable $cast, bool $forWrite): mixed
-    {
+    private function castValue(
+        mixed $value,
+        string|callable|AttributeCast $cast,
+        bool $forWrite,
+        array $context = [],
+    ): mixed {
+        if ($cast instanceof AttributeCast) {
+            return $forWrite
+                ? $cast->set($value, $context)
+                : $cast->get($value, $context);
+        }
+
+        if (is_string($cast) && enum_exists($cast) && is_subclass_of($cast, BackedEnum::class)) {
+            /** @var class-string<BackedEnum> $cast */
+            return $this->castBackedEnumValue($value, $cast, $forWrite);
+        }
+
         if (\is_callable($cast)) {
             return $cast($value);
         }
 
-        $type = strtolower($cast);
-
-        return match ($type) {
-            'int', 'integer' => $value === null ? null : $this->castToInt($value),
-            'float', 'double', 'real' => $value === null ? null : $this->castToFloat($value),
-            'bool', 'boolean' => $value === null ? null : $this->castToBool($value),
-            'string' => $value === null ? null : $this->castToString($value),
-            'json', 'array' => $forWrite
-                ? (is_array($value) || is_object($value) ? json_encode($value, JSON_THROW_ON_ERROR) : $value)
-                : (is_string($value) ? (json_decode($value, true) ?? $value) : $value),
-            'datetime' => $forWrite
-                ? $this->normalizeDateTimeForWrite($value)
-                : $value,
-            default => $value,
-        };
+        return $this->castNamedValue($value, $cast, $forWrite);
     }
 
     /**
@@ -330,6 +390,40 @@ trait RepositoryInternals
 
             $property->setValue($instance, $value);
         }
+    }
+
+    private function immutableDate(mixed $value): mixed
+    {
+        if ($value === null || $value instanceof \DateTimeImmutable) {
+            return $value;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return \DateTimeImmutable::createFromInterface($value)->setTime(0, 0);
+        }
+
+        if (!is_string($value) || trim($value) === '') {
+            return $value;
+        }
+
+        return new \DateTimeImmutable($value)->setTime(0, 0);
+    }
+
+    private function immutableDateTime(mixed $value): mixed
+    {
+        if ($value === null || $value instanceof \DateTimeImmutable) {
+            return $value;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return \DateTimeImmutable::createFromInterface($value);
+        }
+
+        if (!is_string($value) || trim($value) === '') {
+            return $value;
+        }
+
+        return new \DateTimeImmutable($value);
     }
 
     /**
@@ -411,6 +505,15 @@ trait RepositoryInternals
         }
 
         return $normalized;
+    }
+
+    private function normalizeDateForWrite(mixed $value): mixed
+    {
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d');
+        }
+
+        return $value;
     }
 
     /**

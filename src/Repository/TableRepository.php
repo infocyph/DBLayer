@@ -10,47 +10,50 @@ use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository as QueryRepository;
 use InvalidArgumentException;
+use LogicException;
 
 /**
- * TableRepository
+ * Repository-oriented static API for one database table.
  *
- * Repository-oriented static API on top of Repository + QueryBuilder + DB facade.
- *
- * This class is intentionally NOT an ORM:
- * - no identity map
- * - no dirty tracking
- * - no relationship loader
- *
- * It is a convenience delegation layer for table-centric repository workflows.
+ * This remains intentionally non-ORM: rows are arrays/DTOs, there is no
+ * identity map, dirty tracking, unit-of-work, or implicit lazy relationship
+ * loading.
  */
 abstract class TableRepository
 {
-    /**
-     * Optional named connection.
-     */
     protected static ?string $connection = null;
 
-    /**
-     * Backing table name.
-     */
+    /** @var list<string> */
+    protected static array $creatable = [];
+
+    protected static string $createdAt = 'created_at';
+
+    /** @var array<string,mixed> */
+    protected static array $defaults = [];
+
+    protected static int $maxRelationDepth = 3;
+
+    protected static int $perPage = 15;
+
+    protected static string $primaryKey = 'id';
+
     protected static string $table = '';
 
-    /**
-     * Forward unknown static calls by priority:
-     * 1) Repository API
-     * 2) QueryBuilder API
-     *
-     * @param array<int,mixed> $arguments
-     */
+    protected static bool $timestamps = false;
+
+    /** @var list<string> */
+    protected static array $updatable = [];
+
+    protected static string $updatedAt = 'updated_at';
+
+    /** @var array<class-string,RepositoryDefinition> */
+    private static array $definitionCache = [];
+
+    /** @param array<int,mixed> $arguments */
     public static function __callStatic(string $method, array $arguments): mixed
     {
-        $repository = static::repository();
-        if (method_exists($repository, $method)) {
-            return $repository->$method(...$arguments);
-        }
-
         $query = static::query();
-        if (method_exists($query, $method)) {
+        if (method_exists($query, $method) || method_exists($query->raw(), $method)) {
             return $query->$method(...$arguments);
         }
 
@@ -61,64 +64,101 @@ abstract class TableRepository
         ));
     }
 
-    /**
-     * Alias for query().
-     */
     public static function builder(?string $connection = null): QueryBuilder
     {
-        return static::query($connection);
+        return static::repository($connection)->builder();
     }
 
-    /**
-     * Get the connection instance used by this repository class.
-     */
     public static function connection(?string $connection = null): Connection
     {
         return DB::connection(static::resolveConnectionName($connection));
     }
 
-    /**
-     * Build a query builder for this repository class.
-     *
-     * Uses repository->builder() so repository-level policy can be applied
-     * before returning the builder instance.
-     */
-    public static function query(?string $connection = null): QueryBuilder
+    public static function definition(): RepositoryDefinition
     {
-        return static::configureQuery(static::repository($connection)->builder());
+        $class = static::class;
+
+        if (isset(self::$definitionCache[$class])) {
+            return self::$definitionCache[$class];
+        }
+
+        $scopes = static::globalScopes();
+        $scopes['__configure_query'] = static function (QueryBuilder $query): void {
+            if (static::configureQuery($query) !== $query) {
+                throw new LogicException('configureQuery() must configure and return the provided QueryBuilder instance.');
+            }
+        };
+
+        return self::$definitionCache[$class] = new RepositoryDefinition(
+            repositoryClass: $class,
+            table: static::tableName(),
+            connection: static::connectionName(),
+            primaryKey: static::primaryKeyName(),
+            perPage: static::$perPage,
+            maxRelationDepth: static::$maxRelationDepth,
+            defaults: static::$defaults,
+            creatable: static::$creatable,
+            updatable: static::$updatable,
+            timestamps: static::$timestamps,
+            createdAt: self::timestampColumn(static::$createdAt, 'created_at'),
+            updatedAt: self::timestampColumn(static::$updatedAt, 'updated_at'),
+            casts: static::casts(),
+            globalScopes: $scopes,
+            relations: static::relations(),
+        );
     }
 
-    /**
-     * Alias for repository() to match common naming preference.
-     */
-    public static function repo(?string $connection = null): QueryRepository
+    public static function flushDefinition(): void
     {
-        return static::repository($connection);
+        unset(self::$definitionCache[static::class]);
     }
 
-    /**
-     * Build a repository for this repository class.
-     */
+    public static function pruner(?string $connection = null): RepositoryPruner
+    {
+        return new RepositoryPruner(static::class, $connection);
+    }
+
+    public static function query(?string $connection = null): RepositoryQuery
+    {
+        $definition = static::definition();
+        $repository = static::repository($connection);
+
+        return new RepositoryQuery(
+            $repository,
+            $repository->builder(),
+            static::connection($connection),
+            $definition,
+        );
+    }
+
+    public static function rawQuery(?string $connection = null): QueryBuilder
+    {
+        return static::builder($connection);
+    }
+
     public static function repository(?string $connection = null): QueryRepository
     {
-        $repository = DB::repository(static::tableName(), static::resolveConnectionName($connection));
+        $definition = static::definition();
+        $repository = new TableQueryRepository(
+            static::connection($connection),
+            $definition,
+            DB::resultProcessor(),
+        );
+
+        if ($definition->casts !== []) {
+            $repository->setCasts($definition->casts);
+        }
 
         return static::configureRepository($repository);
     }
 
-    /**
-     * Execute a raw scalar query on this repository class configured connection.
-     *
-     * @param array<int,mixed> $bindings
-     */
+    /** @param array<int,mixed> $bindings */
     public static function sqlScalar(string $query, array $bindings = [], ?string $connection = null): mixed
     {
         return DB::scalar($query, $bindings, static::resolveConnectionName($connection));
     }
 
     /**
-     * Execute a raw select query on this repository class configured connection.
-     *
      * @param array<int,mixed> $bindings
      * @return list<array<string,mixed>>
      */
@@ -127,59 +167,74 @@ abstract class TableRepository
         return DB::select($query, $bindings, static::resolveConnectionName($connection));
     }
 
-    /**
-     * Execute a raw statement on this repository class configured connection.
-     *
-     * @param array<int,mixed> $bindings
-     */
+    /** @param array<int,mixed> $bindings */
     public static function sqlStatement(string $query, array $bindings = [], ?string $connection = null): bool
     {
         return DB::statement($query, $bindings, static::resolveConnectionName($connection));
     }
 
-    /**
-     * Run a transaction on this repository class configured connection.
-     */
+    public static function table(): string
+    {
+        return static::definition()->table;
+    }
+
     public static function transaction(callable $callback, int $attempts = 1, ?string $connection = null): mixed
     {
         return DB::transaction($callback, $attempts, static::resolveConnectionName($connection));
     }
 
-    /**
-     * Override in subclasses to apply reusable query defaults.
-     */
+    /** @return array<string,string|callable(mixed):mixed|\Infocyph\DBLayer\Repository\Casts\AttributeCast> */
+    protected static function casts(): array
+    {
+        return [];
+    }
+
     protected static function configureQuery(QueryBuilder $query): QueryBuilder
     {
         return $query;
     }
 
-    /**
-     * Override in subclasses to apply reusable repository defaults.
-     */
     protected static function configureRepository(QueryRepository $repository): QueryRepository
     {
         return $repository;
     }
 
-    /**
-     * Resolve configured connection name.
-     */
     protected static function connectionName(): ?string
     {
         return static::$connection;
     }
 
-    /**
-     * Resolve explicit connection override or repository-class default.
-     */
+    /** @return array<array-key,callable(QueryBuilder):void> */
+    protected static function globalScopes(): array
+    {
+        return [];
+    }
+
+    protected static function primaryKeyName(): string
+    {
+        $primaryKey = trim(static::$primaryKey);
+
+        if ($primaryKey === '') {
+            throw new InvalidArgumentException(sprintf(
+                '%s must define a non-empty static $primaryKey value.',
+                static::class,
+            ));
+        }
+
+        return $primaryKey;
+    }
+
+    /** @return array<string,RelationDefinition> */
+    protected static function relations(): array
+    {
+        return [];
+    }
+
     protected static function resolveConnectionName(?string $connection = null): ?string
     {
         return $connection ?? static::connectionName();
     }
 
-    /**
-     * Resolve and validate configured table name.
-     */
     protected static function tableName(): string
     {
         $table = trim(static::$table);
@@ -192,5 +247,12 @@ abstract class TableRepository
         }
 
         return $table;
+    }
+
+    private static function timestampColumn(string $column, string $fallback): string
+    {
+        $column = trim($column);
+
+        return $column === '' ? $fallback : $column;
     }
 }

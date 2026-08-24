@@ -14,6 +14,12 @@ use Infocyph\DBLayer\Support\Numeric;
 
 trait QueryBuilderInternals
 {
+    /** Compare two columns with an OR boolean. */
+    public function orWhereColumn(string $first, string $operator, string $second): self
+    {
+        return $this->whereColumn($first, $operator, $second, 'or');
+    }
+
     /**
      * Set the columns to select.
      *
@@ -55,6 +61,34 @@ trait QueryBuilderInternals
         $this->columns = $resolvedColumns;
 
         return $this;
+    }
+
+    /**
+     * Compare two validated column identifiers without introducing raw SQL.
+     */
+    public function whereColumn(
+        string $first,
+        string $operator,
+        string $second,
+        string $boolean = 'and',
+    ): self {
+        $boolean = $this->normalizeBoolean($boolean);
+        $operator = $this->assertValidOperator($operator);
+
+        if (in_array($operator, ['between', 'not between', 'in', 'not in'], true)) {
+            throw QueryException::invalidOperator($operator);
+        }
+
+        $this->validateColumnIdentifier($first, false);
+        $this->validateColumnIdentifier($second, false);
+
+        return $this->appendWhere([
+            'type' => 'column',
+            'first' => $first,
+            'operator' => $operator,
+            'second' => $second,
+            'boolean' => $boolean,
+        ]);
     }
 
     /**
@@ -100,9 +134,7 @@ trait QueryBuilderInternals
         return $this;
     }
 
-    /**
-     * Validate and normalize a comparison operator.
-     */
+    /** Validate and normalize a comparison operator. */
     private function assertValidOperator(string $operator): string
     {
         $normalized = $this->normalizeOperator($operator);
@@ -114,9 +146,7 @@ trait QueryBuilderInternals
         return $normalized;
     }
 
-    /**
-     * Enforce connection-level policy for raw SQL fragments.
-     */
+    /** Enforce connection-level policy for raw SQL fragments. */
     private function enforceRawSqlPolicy(string $sql): void
     {
         $security = $this->connection->getConfig()->securityConfig();
@@ -166,9 +196,7 @@ trait QueryBuilderInternals
         );
     }
 
-    /**
-     * Map legacy string type to QueryType enum.
-     */
+    /** Map legacy string type to QueryType enum. */
     private function mapTypeToEnum(?string $type): QueryType
     {
         $type = $type !== null ? \strtolower($type) : 'select';
@@ -183,12 +211,9 @@ trait QueryBuilderInternals
         };
     }
 
-    /**
-     * Match one allowlist rule against a raw SQL fragment.
-     */
+    /** Match one allowlist rule against a raw SQL fragment. */
     private function matchesRawPolicyRule(string $sql, string $rule): bool
     {
-        // Treat /.../modifiers rules as regex patterns.
         if (strlen($rule) >= 3 && $rule[0] === '/' && strrpos($rule, '/') !== 0) {
             $matched = $this->safePregMatch($rule, $sql);
 
@@ -198,9 +223,7 @@ trait QueryBuilderInternals
         return str_contains(strtolower($sql), strtolower($rule));
     }
 
-    /**
-     * Normalize a SQL boolean combinator to its closed supported set.
-     */
+    /** Normalize a SQL boolean combinator to its closed supported set. */
     private function normalizeBoolean(string $boolean): string
     {
         $boolean = strtolower(trim($boolean));
@@ -212,9 +235,7 @@ trait QueryBuilderInternals
         return $boolean;
     }
 
-    /**
-     * Normalize a JOIN type to its closed supported set.
-     */
+    /** Normalize a JOIN type to its closed supported set. */
     private function normalizeJoinType(string $type, bool $allowCross = true): string
     {
         $type = strtolower(trim($type));
@@ -227,9 +248,7 @@ trait QueryBuilderInternals
         return $type;
     }
 
-    /**
-     * Normalize operator token before validation/storage.
-     */
+    /** Normalize operator token before validation/storage. */
     private function normalizeOperator(string $operator): string
     {
         $normalized = preg_replace('/\s+/', ' ', trim($operator));
@@ -253,9 +272,7 @@ trait QueryBuilderInternals
         $this->orders[] = ['column' => $column, 'direction' => $direction];
     }
 
-    /**
-     * @return non-empty-string
-     */
+    /** @return non-empty-string */
     private function requireNonEmptyString(string $value, string $name): string
     {
         if ($value === '') {
@@ -265,9 +282,7 @@ trait QueryBuilderInternals
         return $value;
     }
 
-    /**
-     * Internal helper to run aggregate queries.
-     */
+    /** Internal helper to run aggregate queries. */
     private function runAggregate(string $function, string $column = '*', bool $ignoreLimitOffset = false): mixed
     {
         $clone = clone $this;
@@ -293,9 +308,7 @@ trait QueryBuilderInternals
         return $row['aggregate'] ?? (\array_values($row)[0] ?? null);
     }
 
-    /**
-     * Execute preg_match while converting invalid-pattern warnings to "no match".
-     */
+    /** Execute preg_match while converting invalid-pattern warnings to "no match". */
     private function safePregMatch(string $pattern, string $subject): int|false
     {
         set_error_handler(static fn(): bool => true);
@@ -307,9 +320,7 @@ trait QueryBuilderInternals
         }
     }
 
-    /**
-     * Whether strict identifier policy is enabled on this connection.
-     */
+    /** Whether strict identifier policy is enabled on this connection. */
     private function shouldValidateIdentifiers(): bool
     {
         if (!$this->connection->getConfig()->isSecurityEnabled()) {
@@ -343,9 +354,7 @@ trait QueryBuilderInternals
         return Numeric::toInt($value, $default);
     }
 
-    /**
-     * Validate a column/alias identifier when strict identifier policy is enabled.
-     */
+    /** Validate a column/alias identifier when strict identifier policy is enabled. */
     private function validateColumnIdentifier(string $column, bool $allowWildcard): void
     {
         if (!$this->shouldValidateIdentifiers()) {
@@ -395,9 +404,7 @@ trait QueryBuilderInternals
         $this->containsRawFragments = true;
     }
 
-    /**
-     * Validate a table identifier when strict identifier policy is enabled.
-     */
+    /** Validate a table identifier when strict identifier policy is enabled. */
     private function validateTableIdentifier(string $table): void
     {
         if (!$this->shouldValidateIdentifiers()) {

@@ -70,6 +70,7 @@ as lookup pages after reading the guides.
 
    api-facade
    api-table-repository
+   api-repository-relations
    api-query-builder
    api-repository
    api-connection-config
