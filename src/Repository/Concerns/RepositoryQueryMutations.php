@@ -32,7 +32,7 @@ trait RepositoryQueryMutations
     /**
      * Insert one or many rows through repository write policy.
      *
-     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @param array<string,mixed>|list<array<string,mixed>> $values
      */
     public function insert(array $values): bool
     {
@@ -47,7 +47,7 @@ trait RepositoryQueryMutations
                 }
             }
 
-            /** @var array<int,array<string,mixed>> $values */
+            /** @var list<array<string,mixed>> $values */
             return $this->tableRepository()->bulkInsert($values);
         }
 
@@ -64,7 +64,7 @@ trait RepositoryQueryMutations
      */
     public function insertGetId(array $values, ?string $sequence = null): string
     {
-        if ($values === [] || array_is_list($values)) {
+        if ($values === []) {
             throw new InvalidArgumentException('Repository insertGetId requires one associative row.');
         }
 
@@ -88,7 +88,11 @@ trait RepositoryQueryMutations
         return $this->tableRepository()->restoreWhere($this->scope());
     }
 
-    /** Update rows matching the current repository-aware fluent query. */
+    /**
+     * Update rows matching the current repository-aware fluent query.
+     *
+     * @param array<string,mixed> $values
+     */
     public function update(array $values): int
     {
         return $this->tableRepository()->updateWhere($values, $this->scope());
@@ -97,7 +101,7 @@ trait RepositoryQueryMutations
     /**
      * Upsert one or many rows through repository write policy.
      *
-     * @param array<string,mixed>|array<int,array<string,mixed>> $values
+     * @param array<string,mixed>|list<array<string,mixed>> $values
      * @param list<string> $uniqueBy
      * @param list<string>|null $update
      */
