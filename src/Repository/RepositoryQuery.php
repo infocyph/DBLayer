@@ -6,25 +6,33 @@ namespace Infocyph\DBLayer\Repository;
 
 use BadMethodCallException;
 use Infocyph\ArrayKit\Collection\Collection;
+use Infocyph\DBLayer\Pagination\CursorPaginator;
+use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
+use Infocyph\DBLayer\Pagination\SimplePaginator;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository;
 
 /**
  * Repository-aware fluent query wrapper.
  *
- * SQL-shaping calls are delegated to QueryBuilder while repository-aware
- * terminal reads preserve configured casts and result processing. Use raw()
- * when intentionally opting out of repository result semantics.
+ * Fluent QueryBuilder calls are recorded and replayed through Repository
+ * terminal operations. This preserves repository casts and result processing
+ * without copying mutable QueryBuilder state or widening Repository internals.
  */
 final class RepositoryQuery
 {
+    /**
+     * @var list<array{method:string,arguments:array<int,mixed>}>
+     */
+    private array $operations = [];
+
     public function __construct(
         private readonly Repository $repository,
         private readonly QueryBuilder $builder,
     ) {}
 
     /**
-     * Delegate fluent query-builder operations while preserving this wrapper.
+     * Delegate QueryBuilder operations while retaining replayable fluent state.
      *
      * @param array<int,mixed> $arguments
      */
@@ -40,15 +48,41 @@ final class RepositoryQuery
 
         $result = $this->builder->$method(...$arguments);
 
-        return $result === $this->builder ? $this : $result;
+        if ($result === $this->builder) {
+            $this->operations[] = [
+                'method' => $method,
+                'arguments' => $arguments,
+            ];
+
+            return $this;
+        }
+
+        return $result;
     }
 
-    /**
-     * Get repository-processed rows as a Collection.
-     */
-    public function get(): Collection
+    public function count(): int
     {
-        return $this->repository->processQueryRows($this->builder->get());
+        return $this->repository->count($this->scope());
+    }
+
+    public function cursorPaginate(
+        int $perPage = 15,
+        ?string $cursor = null,
+        ?string $uniqueColumn = null,
+        ?string $direction = null,
+    ): CursorPaginator {
+        return $this->repository->cursorPaginate(
+            $perPage,
+            $cursor,
+            $uniqueColumn,
+            $direction,
+            $this->scope(),
+        );
+    }
+
+    public function exists(): bool
+    {
+        return $this->repository->exists($this->scope());
     }
 
     /**
@@ -56,9 +90,32 @@ final class RepositoryQuery
      *
      * @return array<string,mixed>|null
      */
-    public function first(): ?array
+    public function first(array $columns = ['*']): ?array
     {
-        return $this->repository->processQueryRow($this->builder->first());
+        return $this->repository->first($this->scope(), $columns);
+    }
+
+    /**
+     * Get repository-processed rows as a Collection.
+     *
+     * @param list<\Infocyph\DBLayer\Query\Expression|string> $columns
+     */
+    public function get(array $columns = ['*']): Collection
+    {
+        return $this->repository->get($this->scope(), $columns);
+    }
+
+    public function paginate(int $perPage = 15, ?int $page = null): LengthAwarePaginator
+    {
+        return $this->repository->paginate($perPage, $page, $this->scope());
+    }
+
+    /**
+     * Access the intentionally raw, already-shaped QueryBuilder.
+     */
+    public function raw(): QueryBuilder
+    {
+        return $this->builder;
     }
 
     /**
@@ -69,11 +126,27 @@ final class RepositoryQuery
         return $this->repository;
     }
 
-    /**
-     * Escape hatch for intentionally raw QueryBuilder semantics.
-     */
-    public function raw(): QueryBuilder
+    public function simplePaginate(int $perPage = 15, ?int $page = null): SimplePaginator
     {
-        return $this->builder;
+        return $this->repository->simplePaginate($perPage, $page, $this->scope());
+    }
+
+    public function value(string $column): mixed
+    {
+        return $this->repository->value($column, $this->scope());
+    }
+
+    /**
+     * Build a replay closure for Repository terminal operations.
+     */
+    private function scope(): callable
+    {
+        $operations = $this->operations;
+
+        return static function (QueryBuilder $query) use ($operations): void {
+            foreach ($operations as $operation) {
+                $query->{$operation['method']}(...$operation['arguments']);
+            }
+        };
     }
 }
