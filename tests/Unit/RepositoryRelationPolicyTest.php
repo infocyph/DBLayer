@@ -89,3 +89,24 @@ it('preserves related repository global scopes and casts during eager loading', 
     expect(array_column($parent['children'], 'name'))->toBe(['Visible'])
         ->and($parent['children'][0]['active'])->toBeTrue();
 });
+
+it('counts relations without hydrating rows and preserves related scopes', function (): void {
+    $parent = RepositoryRelationPolicyParent::query()
+        ->withCount('children')
+        ->first();
+
+    expect($parent['children_count'])->toBe(1)
+        ->and(array_key_exists('children', $parent))->toBeFalse();
+});
+
+it('supports constrained and aliased relation counts', function (): void {
+    $parent = RepositoryRelationPolicyParent::query()
+        ->withCount([
+            'children as visible_named_count' => static function (QueryBuilder $query): void {
+                $query->where('name', '=', 'Visible');
+            },
+        ])
+        ->first();
+
+    expect($parent['visible_named_count'])->toBe(1);
+});
