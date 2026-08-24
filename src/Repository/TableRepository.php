@@ -26,6 +26,25 @@ abstract class TableRepository
     protected static ?string $connection = null;
 
     /**
+     * Attributes accepted from create callers. Empty means unrestricted.
+     *
+     * @var list<string>
+     */
+    protected static array $creatable = [];
+
+    /**
+     * Created timestamp column.
+     */
+    protected static string $createdAt = 'created_at';
+
+    /**
+     * Default attributes merged into create payloads.
+     *
+     * @var array<string,mixed>
+     */
+    protected static array $defaults = [];
+
+    /**
      * Primary-key column used by repository identity operations.
      */
     protected static string $primaryKey = 'id';
@@ -34,6 +53,23 @@ abstract class TableRepository
      * Backing table name.
      */
     protected static string $table = '';
+
+    /**
+     * Enable automatic created/updated timestamp injection for repository writes.
+     */
+    protected static bool $timestamps = false;
+
+    /**
+     * Attributes accepted from update callers. Empty means unrestricted.
+     *
+     * @var list<string>
+     */
+    protected static array $updatable = [];
+
+    /**
+     * Updated timestamp column.
+     */
+    protected static string $updatedAt = 'updated_at';
 
     /**
      * Forward unknown static calls by priority:
@@ -113,6 +149,12 @@ abstract class TableRepository
             static::tableName(),
             static::primaryKeyName(),
             DB::resultProcessor(),
+            static::$defaults,
+            static::$creatable,
+            static::$updatable,
+            static::$timestamps,
+            static::timestampColumn(static::$createdAt, 'created_at'),
+            static::timestampColumn(static::$updatedAt, 'updated_at'),
         );
 
         $casts = static::casts();
@@ -258,5 +300,12 @@ abstract class TableRepository
         }
 
         return $table;
+    }
+
+    private static function timestampColumn(string $column, string $fallback): string
+    {
+        $column = trim($column);
+
+        return $column === '' ? $fallback : $column;
     }
 }
