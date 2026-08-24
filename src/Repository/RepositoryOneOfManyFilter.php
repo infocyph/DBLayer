@@ -42,8 +42,7 @@ final class RepositoryOneOfManyFilter
         $related = $definition->related
             ?? throw new InvalidArgumentException('One-of-many relation requires a related repository.');
         $relatedDefinition = $related::definition();
-        $orderColumn = $definition->oneOfManyColumn ?? $relatedDefinition->primaryKey;
-        $direction = $definition->oneOfManyAggregate === 'min' ? 'asc' : 'desc';
+        $orders = RepositoryOneOfManyOrder::resolve($definition, $relatedDefinition);
         $query = $related::query();
         $this->applyCandidateScopes($query, $definition);
 
@@ -59,24 +58,19 @@ final class RepositoryOneOfManyFilter
             ));
         }
 
-        $query->apply(static function (QueryBuilder $builder) use (
-            $definition,
-            $orderColumn,
-            $direction,
-            $relatedDefinition,
-        ): void {
+        $query->apply(static function (QueryBuilder $builder) use ($definition, $orders): void {
             $builder->orderBy($definition->relatedKey, 'asc');
-            $builder->orderBy($orderColumn, $direction);
-            if ($relatedDefinition->primaryKey !== $orderColumn) {
-                $builder->orderBy($relatedDefinition->primaryKey, $direction);
-            }
+            RepositoryOneOfManyOrder::apply($builder, $orders);
         });
 
-        $winners = [];
-        foreach ($query->raw()->select([
+        $columns = array_values(array_unique([
             $definition->relatedKey,
             $relatedDefinition->primaryKey,
-        ])->cursor() as $row) {
+            ...RepositoryOneOfManyOrder::columns($orders),
+        ]));
+        $winners = [];
+
+        foreach ($query->raw()->select($columns)->cursor() as $row) {
             if (!is_array($row)) {
                 continue;
             }
@@ -89,6 +83,7 @@ final class RepositoryOneOfManyFilter
             $winners[$identity] ??= [
                 'parent' => $parentValue,
                 'id' => $winnerId,
+                'row' => $row,
             ];
         }
 
@@ -110,8 +105,7 @@ final class RepositoryOneOfManyFilter
         $related = $definition->related
             ?? throw new InvalidArgumentException('One-of-many through relation requires a related repository.');
         $relatedDefinition = $related::definition();
-        $orderColumn = $definition->oneOfManyColumn ?? $relatedDefinition->primaryKey;
-        $direction = $definition->oneOfManyAggregate === 'min' ? 'asc' : 'desc';
+        $orders = RepositoryOneOfManyOrder::resolve($definition, $relatedDefinition);
         $parentByThrough = [];
         $throughValues = [];
 
@@ -136,28 +130,22 @@ final class RepositoryOneOfManyFilter
         $winners = [];
         $connection = $related::connection();
         $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+        $columns = array_values(array_unique([
+            $definition->relatedKey,
+            $relatedDefinition->primaryKey,
+            ...RepositoryOneOfManyOrder::columns($orders),
+        ]));
 
         foreach (array_chunk(array_values($throughValues), $batchSize) as $chunk) {
             $query = $related::query()->apply(
                 static fn(QueryBuilder $builder): mixed => $builder->whereIn($definition->relatedKey, $chunk),
             );
             $this->applyCandidateScopes($query, $definition);
-            $query->apply(static function (QueryBuilder $builder) use (
-                $orderColumn,
-                $direction,
-                $relatedDefinition,
-            ): void {
-                $builder->orderBy($orderColumn, $direction);
-                if ($relatedDefinition->primaryKey !== $orderColumn) {
-                    $builder->orderBy($relatedDefinition->primaryKey, $direction);
-                }
+            $query->apply(static function (QueryBuilder $builder) use ($orders): void {
+                RepositoryOneOfManyOrder::apply($builder, $orders);
             });
 
-            foreach ($query->raw()->select([
-                $definition->relatedKey,
-                $relatedDefinition->primaryKey,
-                $orderColumn,
-            ])->cursor() as $row) {
+            foreach ($query->raw()->select($columns)->cursor() as $row) {
                 if (!is_array($row)) {
                     continue;
                 }
@@ -172,14 +160,14 @@ final class RepositoryOneOfManyFilter
                 $candidate = [
                     'parent' => $parentValue,
                     'id' => $winnerId,
-                    'order' => $row[$orderColumn] ?? null,
+                    'row' => $row,
                 ];
 
-                if (!isset($winners[$parentIdentity]) || $this->isBetter(
-                    $candidate,
-                    $winners[$parentIdentity],
-                    $direction,
-                )) {
+                if (!isset($winners[$parentIdentity]) || RepositoryOneOfManyOrder::compare(
+                    $candidate['row'],
+                    $winners[$parentIdentity]['row'],
+                    $orders,
+                ) < 0) {
                     $winners[$parentIdentity] = $candidate;
                 }
             }
@@ -190,7 +178,7 @@ final class RepositoryOneOfManyFilter
 
     /**
      * @param class-string<TableRepository> $related
-     * @param array<string,array{parent:mixed,id:mixed,order?:mixed}> $winners
+     * @param array<string,array{parent:mixed,id:mixed,row:array<string,mixed>}> $winners
      * @param null|callable(QueryBuilder):void $constraint
      * @return list<mixed>
      */
@@ -256,20 +244,6 @@ final class RepositoryOneOfManyFilter
         if ($definition->oneOfManyScope !== null) {
             $query->apply($definition->oneOfManyScope);
         }
-    }
-
-    /**
-     * @param array{parent:mixed,id:mixed,order?:mixed} $candidate
-     * @param array{parent:mixed,id:mixed,order?:mixed} $current
-     */
-    private function isBetter(array $candidate, array $current, string $direction): bool
-    {
-        $comparison = ($candidate['order'] ?? null) <=> ($current['order'] ?? null);
-        if ($comparison === 0) {
-            $comparison = $candidate['id'] <=> $current['id'];
-        }
-
-        return $direction === 'desc' ? $comparison > 0 : $comparison < 0;
     }
 
     private function key(mixed $value): string
