@@ -9,6 +9,7 @@ use Infocyph\DBLayer\Exceptions\UnwritableAttributeException;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\ResultProcessor;
+use Infocyph\DBLayer\Repository\Casts\RepositoryWriteCaster;
 use Infocyph\DBLayer\Repository\Concerns\RepositoryOperationLifecycle;
 use InvalidArgumentException;
 
@@ -256,7 +257,11 @@ final class TableQueryRepository extends RepositoryPagination
             return 0;
         }
 
-        $payload = $this->prepareUpdateAttributes($values);
+        $payload = RepositoryWriteCaster::cast(
+            $this->prepareUpdateAttributes($values),
+            $this->definition->casts,
+            $this->connection,
+        );
         $context = ['payload' => $payload];
         $this->dispatchOperationHook('beforeBulkUpdate', $context);
 
