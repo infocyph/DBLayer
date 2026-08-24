@@ -9,10 +9,7 @@ use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use InvalidArgumentException;
 
-/**
- * Compute relation aggregates in bounded batches without hydrating full
- * relation graphs. Results are keyed by normalized parent relation identity.
- */
+/** Compute relation aggregates in bounded batches without hydrating full graphs. */
 final class RepositoryRelationAggregator
 {
     private const array FUNCTIONS = ['avg', 'count', 'max', 'min', 'sum'];
@@ -46,7 +43,6 @@ final class RepositoryRelationAggregator
         if (!in_array($function, self::FUNCTIONS, true)) {
             throw new InvalidArgumentException(sprintf('Unsupported relation aggregate [%s].', $function));
         }
-
         if ($function !== 'count') {
             $this->assertColumn($column);
         }
@@ -55,7 +51,6 @@ final class RepositoryRelationAggregator
             return (new RepositoryOneOfManyAggregator($this->parentConnection, $this->batchSize))
                 ->aggregate($parents, $definition, $function, $column, $constraint);
         }
-
         if ($definition->through !== null) {
             return (new RepositoryThroughRelationAggregator($this->batchSize))
                 ->aggregate($parents, $definition, $function, $column, $constraint);
@@ -63,43 +58,26 @@ final class RepositoryRelationAggregator
 
         return match ($definition->type) {
             RelationDefinition::BELONGS_TO_MANY,
-            RelationDefinition::MORPH_TO_MANY => $this->aggregatePivot(
-                $parents,
-                $definition,
-                $function,
-                $column,
-                $constraint,
-            ),
-            RelationDefinition::MORPH_TO => $this->aggregateMorphTo(
-                $parents,
-                $definition,
-                $function,
-                $column,
-                $constraint,
-            ),
-            default => $this->aggregateDirect(
-                $parents,
-                $definition,
-                $function,
-                $column,
-                $constraint,
-            ),
+            RelationDefinition::MORPH_TO_MANY => $this->aggregatePivot($parents, $definition, $function, $column, $constraint),
+            RelationDefinition::MORPH_TO => $this->aggregateMorphTo($parents, $definition, $function, $column, $constraint),
+            default => $this->aggregateDirect($parents, $definition, $function, $column, $constraint),
         };
     }
 
-    /** Build the identity key used for one parent row. */
+    /** @param array<string,mixed> $parent */
     public function parentIdentity(array $parent, RelationDefinition $definition): string
     {
-        if ($definition->type === RelationDefinition::MORPH_TO) {
-            $typeColumn = $definition->morphTypeColumn
-                ?? throw new InvalidArgumentException('Morph-to relation requires a type column.');
-            $idColumn = $definition->morphIdColumn
-                ?? throw new InvalidArgumentException('Morph-to relation requires an id column.');
-
-            return 'morph:' . $this->key($parent[$typeColumn] ?? null) . ':' . $this->key($parent[$idColumn] ?? null);
+        if ($definition->type !== RelationDefinition::MORPH_TO) {
+            return RepositorySupport::key($parent[$definition->parentKey] ?? null);
         }
 
-        return $this->key($parent[$definition->parentKey] ?? null);
+        $typeColumn = $definition->morphTypeColumn
+            ?? throw new InvalidArgumentException('Morph-to relation requires a type column.');
+        $idColumn = $definition->morphIdColumn
+            ?? throw new InvalidArgumentException('Morph-to relation requires an id column.');
+
+        return 'morph:' . RepositorySupport::key($parent[$typeColumn] ?? null)
+            . ':' . RepositorySupport::key($parent[$idColumn] ?? null);
     }
 
     /**
@@ -116,38 +94,34 @@ final class RepositoryRelationAggregator
     ): array {
         $related = $definition->related
             ?? throw new InvalidArgumentException('Direct relation requires a related repository.');
+        $relatedKey = RepositorySupport::column($definition->relatedKey);
         $values = $this->values($parents, $definition->parentKey);
         if ($values === []) {
             return [];
         }
 
-        $connection = $related::connection();
-        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+        $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
         $aggregates = [];
         $aggregateExpression = $this->aggregateExpression($function, $column);
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::query()->apply(
-                static function (QueryBuilder $query) use ($definition, $chunk): void {
-                    $query->whereIn($definition->relatedKey, $chunk);
-                    if (
-                        in_array($definition->type, [RelationDefinition::MORPH_ONE, RelationDefinition::MORPH_MANY], true)
-                        && $definition->morphTypeColumn !== null
-                        && $definition->morphAlias !== null
-                    ) {
-                        $query->where($definition->morphTypeColumn, '=', $definition->morphAlias);
-                    }
-                },
-            );
+            $query = $related::query()->apply(static function (QueryBuilder $query) use ($definition, $relatedKey, $chunk): void {
+                $query->whereIn($relatedKey, $chunk);
+                if (
+                    in_array($definition->type, [RelationDefinition::MORPH_ONE, RelationDefinition::MORPH_MANY], true)
+                    && $definition->morphTypeColumn !== null
+                    && $definition->morphAlias !== null
+                ) {
+                    $query->where(RepositorySupport::column($definition->morphTypeColumn), '=', $definition->morphAlias);
+                }
+            });
             $this->applyConstraints($query, $definition, $constraint);
 
-            $rows = $query->raw()
-                ->select($definition->relatedKey, $aggregateExpression)
-                ->groupBy($definition->relatedKey)
-                ->get();
-
-            foreach ($rows as $row) {
-                $aggregates[$this->key($row[$definition->relatedKey] ?? null)] = $row['aggregate'] ?? null;
+            foreach ($query->raw()->select($relatedKey, $aggregateExpression)->groupBy($relatedKey)->get() as $candidateRow) {
+                $row = RepositorySupport::row($candidateRow);
+                if ($row !== null) {
+                    $aggregates[RepositorySupport::key($row[$relatedKey] ?? null)] = $row['aggregate'] ?? null;
+                }
             }
         }
 
@@ -166,11 +140,27 @@ final class RepositoryRelationAggregator
         string $column,
         ?callable $constraint,
     ): array {
+        $groups = $this->morphGroups($parents, $definition);
+        $result = [];
+
+        foreach ($groups as $type => $values) {
+            $this->aggregateMorphGroup($result, $type, array_values($values), $definition, $function, $column, $constraint);
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @return array<string,array<string,mixed>>
+     */
+    private function morphGroups(array $parents, RelationDefinition $definition): array
+    {
         $typeColumn = $definition->morphTypeColumn
             ?? throw new InvalidArgumentException('Morph-to relation requires a type column.');
         $idColumn = $definition->morphIdColumn
             ?? throw new InvalidArgumentException('Morph-to relation requires an id column.');
-        $grouped = [];
+        $groups = [];
 
         foreach ($parents as $parent) {
             $type = $parent[$typeColumn] ?? null;
@@ -181,45 +171,46 @@ final class RepositoryRelationAggregator
             if (!is_string($type) || !isset($definition->morphMap[$type])) {
                 throw new InvalidArgumentException('Morph-to aggregate encountered an unmapped discriminator.');
             }
-            $grouped[$type][$this->key($id)] = $id;
+            $groups[$type][RepositorySupport::key($id)] = $id;
         }
 
-        $result = [];
-        foreach ($grouped as $type => $values) {
-            $related = $definition->morphMap[$type];
-            $connection = $related::connection();
-            $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+        return $groups;
+    }
 
-            foreach (array_chunk(array_values($values), $batchSize) as $chunk) {
-                $query = $related::query()->apply(
-                    static fn(QueryBuilder $query): mixed => $query->whereIn($definition->relatedKey, $chunk),
-                );
-                if ($definition->scope !== null) {
-                    $query->apply($definition->scope);
-                }
-                if ($constraint !== null) {
-                    $query->apply($constraint);
-                }
+    /**
+     * @param array<string,mixed> $result
+     * @param list<mixed> $values
+     * @param null|callable(QueryBuilder):void $constraint
+     */
+    private function aggregateMorphGroup(
+        array &$result,
+        string $type,
+        array $values,
+        RelationDefinition $definition,
+        string $function,
+        string $column,
+        ?callable $constraint,
+    ): void {
+        $related = $definition->morphMap[$type];
+        $relatedKey = RepositorySupport::column($definition->relatedKey);
+        $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
 
-                $columns = [$definition->relatedKey];
-                if ($function !== 'count') {
-                    $columns[] = $column;
-                }
+        foreach (array_chunk($values, $batchSize) as $chunk) {
+            $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
+                $builder->whereIn($relatedKey, $chunk);
+            });
+            $this->applyConstraints($query, $definition, $constraint);
+            $columns = $function === 'count' ? [$relatedKey] : [$relatedKey, RepositorySupport::column($column)];
 
-                foreach ($query->get($columns) as $row) {
-                    if (!is_array($row)) {
-                        continue;
-                    }
-
-                    $identity = 'morph:' . $this->key($type) . ':' . $this->key($row[$definition->relatedKey] ?? null);
-                    $result[$identity] = $function === 'count'
-                        ? 1
-                        : $this->singleValueAggregate($function, $row[$column] ?? null);
+            foreach ($query->get($columns) as $candidateRow) {
+                $row = RepositorySupport::row($candidateRow);
+                if ($row === null) {
+                    continue;
                 }
+                $identity = 'morph:' . RepositorySupport::key($type) . ':' . RepositorySupport::key($row[$relatedKey] ?? null);
+                $result[$identity] = $function === 'count' ? 1 : $this->singleValueAggregate($function, $row[$column] ?? null);
             }
         }
-
-        return $result;
     }
 
     /**
@@ -234,97 +225,142 @@ final class RepositoryRelationAggregator
         string $column,
         ?callable $constraint,
     ): array {
-        $pivotTable = $definition->pivotTable
-            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot table.');
-        $pivotParentKey = $definition->pivotParentKey
-            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot parent key.');
-        $pivotRelatedKey = $definition->pivotRelatedKey
-            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.');
-        $related = $definition->related
-            ?? throw new InvalidArgumentException('Many-to-many relation requires a related repository.');
-
-        $pivotRows = [];
-        $parentValues = $this->values($parents, $definition->parentKey);
-        $batchSize = $this->parentConnection->safeBatchSize(requested: $this->batchSize);
-
-        foreach (array_chunk($parentValues, $batchSize) as $chunk) {
-            $query = $this->parentConnection
-                ->table($pivotTable)
-                ->select([$pivotParentKey, $pivotRelatedKey])
-                ->whereIn($pivotParentKey, $chunk);
-
-            if ($definition->type === RelationDefinition::MORPH_TO_MANY) {
-                $query->where(
-                    $definition->morphTypeColumn
-                        ?? throw new InvalidArgumentException('Polymorphic pivot relation requires a type column.'),
-                    '=',
-                    $definition->morphAlias
-                        ?? throw new InvalidArgumentException('Polymorphic pivot relation requires a morph alias.'),
-                );
-            }
-
-            array_push($pivotRows, ...$query->get());
-        }
-
+        $pivotRows = $this->pivotRows($parents, $definition);
         if ($pivotRows === []) {
             return [];
         }
 
-        $relatedValues = [];
-        $relatedIds = $this->values($pivotRows, $pivotRelatedKey);
-        $relatedConnection = $related::connection();
-        $relatedBatchSize = $relatedConnection->safeBatchSize(requested: $this->batchSize);
+        $relatedValues = $this->pivotRelatedValues($pivotRows, $definition, $function, $column, $constraint);
 
-        foreach (array_chunk($relatedIds, $relatedBatchSize) as $chunk) {
-            $query = $related::query()->apply(
-                static fn(QueryBuilder $query): mixed => $query->whereIn($definition->relatedKey, $chunk),
-            );
-            $this->applyConstraints($query, $definition, $constraint);
-            $columns = [$definition->relatedKey];
-            if ($function !== 'count') {
-                $columns[] = $column;
-            }
+        return $this->reducePivot($pivotRows, $relatedValues, $definition, $function);
+    }
 
-            foreach ($query->get($columns) as $row) {
-                if (!is_array($row)) {
-                    continue;
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @return list<array<string,mixed>>
+     */
+    private function pivotRows(array $parents, RelationDefinition $definition): array
+    {
+        $pivotTable = $definition->pivotTable
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot table.');
+        $parentKey = RepositorySupport::column($definition->pivotParentKey
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot parent key.'));
+        $relatedKey = RepositorySupport::column($definition->pivotRelatedKey
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.'));
+        $parentValues = $this->values($parents, $definition->parentKey);
+        $batchSize = $this->parentConnection->safeBatchSize(requested: $this->batchSize);
+        $rows = [];
+
+        foreach (array_chunk($parentValues, $batchSize) as $chunk) {
+            $query = $this->parentConnection->table($pivotTable)->select([$parentKey, $relatedKey])->whereIn($parentKey, $chunk);
+            $this->applyPivotMorphConstraint($query, $definition);
+
+            foreach ($query->get() as $candidateRow) {
+                $row = RepositorySupport::row($candidateRow);
+                if ($row !== null) {
+                    $rows[] = $row;
                 }
-                $relatedValues[$this->key($row[$definition->relatedKey] ?? null)] = $function === 'count'
-                    ? 1
-                    : ($row[$column] ?? null);
             }
         }
 
+        return $rows;
+    }
+
+    private function applyPivotMorphConstraint(QueryBuilder $query, RelationDefinition $definition): void
+    {
+        if ($definition->type !== RelationDefinition::MORPH_TO_MANY) {
+            return;
+        }
+
+        $query->where(
+            RepositorySupport::column($definition->morphTypeColumn
+                ?? throw new InvalidArgumentException('Polymorphic pivot relation requires a type column.')),
+            '=',
+            $definition->morphAlias
+                ?? throw new InvalidArgumentException('Polymorphic pivot relation requires a morph alias.'),
+        );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $pivotRows
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,mixed>
+     */
+    private function pivotRelatedValues(
+        array $pivotRows,
+        RelationDefinition $definition,
+        string $function,
+        string $column,
+        ?callable $constraint,
+    ): array {
+        $pivotRelatedKey = $definition->pivotRelatedKey
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.');
+        $related = $definition->related
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a related repository.');
+        $relatedKey = RepositorySupport::column($definition->relatedKey);
+        $relatedIds = $this->values($pivotRows, $pivotRelatedKey);
+        $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
+        $values = [];
+
+        foreach (array_chunk($relatedIds, $batchSize) as $chunk) {
+            $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
+                $builder->whereIn($relatedKey, $chunk);
+            });
+            $this->applyConstraints($query, $definition, $constraint);
+            $columns = $function === 'count' ? [$relatedKey] : [$relatedKey, RepositorySupport::column($column)];
+
+            foreach ($query->get($columns) as $candidateRow) {
+                $row = RepositorySupport::row($candidateRow);
+                if ($row !== null) {
+                    $values[RepositorySupport::key($row[$relatedKey] ?? null)] = $function === 'count' ? 1 : ($row[$column] ?? null);
+                }
+            }
+        }
+
+        return $values;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $pivotRows
+     * @param array<string,mixed> $relatedValues
+     * @return array<string,mixed>
+     */
+    private function reducePivot(
+        array $pivotRows,
+        array $relatedValues,
+        RelationDefinition $definition,
+        string $function,
+    ): array {
+        $pivotParentKey = $definition->pivotParentKey
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot parent key.');
+        $pivotRelatedKey = $definition->pivotRelatedKey
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.');
         $states = [];
+
         foreach ($pivotRows as $pivot) {
-            $relatedKey = $this->key($pivot[$pivotRelatedKey] ?? null);
-            if (!array_key_exists($relatedKey, $relatedValues)) {
+            $relatedIdentity = RepositorySupport::key($pivot[$pivotRelatedKey] ?? null);
+            if (!array_key_exists($relatedIdentity, $relatedValues)) {
                 continue;
             }
 
-            $parentKey = $this->key($pivot[$pivotParentKey] ?? null);
-            $states[$parentKey] = $this->accumulate(
-                $states[$parentKey] ?? null,
-                $function,
-                $relatedValues[$relatedKey],
-            );
+            $parentIdentity = RepositorySupport::key($pivot[$pivotParentKey] ?? null);
+            $states[$parentIdentity] = $this->accumulate($states[$parentIdentity] ?? null, $function, $relatedValues[$relatedIdentity]);
         }
 
-        foreach ($states as $parentKey => $state) {
-            $states[$parentKey] = $this->finalize($state, $function);
+        foreach ($states as $parentIdentity => $state) {
+            $states[$parentIdentity] = $this->finalize($state, $function);
         }
 
         return $states;
     }
 
     /** @param null|callable(QueryBuilder):void $constraint */
-    private function applyConstraints(
-        RepositoryQuery $query,
-        RelationDefinition $definition,
-        ?callable $constraint,
-    ): void {
+    private function applyConstraints(RepositoryQuery $query, RelationDefinition $definition, ?callable $constraint): void
+    {
         if ($definition->scope !== null) {
-            $query->apply($definition->scope);
+            /** @var callable(QueryBuilder):void $scope */
+            $scope = $definition->scope;
+            $query->apply($scope);
         }
         if ($constraint !== null) {
             $query->apply($constraint);
@@ -349,46 +385,62 @@ final class RepositoryRelationAggregator
     private function accumulate(mixed $state, string $function, mixed $value): mixed
     {
         return match ($function) {
-            'count' => (int) ($state ?? 0) + 1,
-            'sum' => ($state ?? 0) + (is_numeric($value) ? $value + 0 : 0),
-            'avg' => [
-                'sum' => (float) (($state['sum'] ?? 0.0) + (is_numeric($value) ? (float) $value : 0.0)),
-                'count' => (int) (($state['count'] ?? 0) + 1),
-            ],
-            'min' => $state === null || $value < $state ? $value : $state,
-            'max' => $state === null || $value > $state ? $value : $state,
+            'count' => $this->numericInt($state) + 1,
+            'sum' => $this->numericFloat($state) + $this->numericFloat($value),
+            'avg' => $this->accumulateAverage($state, $value),
+            'min' => $state === null || $this->compare($value, $state) < 0 ? $value : $state,
+            'max' => $state === null || $this->compare($value, $state) > 0 ? $value : $state,
             default => $state,
         };
     }
 
-    private function finalize(mixed $state, string $function): mixed
+    /** @return array{sum:float,count:int} */
+    private function accumulateAverage(mixed $state, mixed $value): array
     {
-        if ($function !== 'avg') {
-            return $state;
-        }
+        $current = is_array($state) ? $state : [];
+        $sum = $this->numericFloat($current['sum'] ?? null);
+        $count = $this->numericInt($current['count'] ?? null);
 
-        if (!is_array($state) || ($state['count'] ?? 0) < 1) {
-            return null;
-        }
-
-        return (float) $state['sum'] / (int) $state['count'];
+        return ['sum' => $sum + $this->numericFloat($value), 'count' => $count + 1];
     }
 
-    private function key(mixed $value): string
+    private function finalize(mixed $state, string $function): mixed
     {
-        return match (true) {
-            is_int($value), is_string($value) => 'scalar:' . $value,
-            is_float($value) => 'float:' . serialize($value),
-            is_bool($value) => 'bool:' . ($value ? '1' : '0'),
-            $value === null => 'null:',
-            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
-        };
+        if ($function !== 'avg' || !is_array($state)) {
+            return $function === 'avg' ? null : $state;
+        }
+
+        $count = $this->numericInt($state['count'] ?? null);
+
+        return $count > 0 ? $this->numericFloat($state['sum'] ?? null) / $count : null;
+    }
+
+    private function compare(mixed $left, mixed $right): int
+    {
+        if (is_numeric($left) && is_numeric($right)) {
+            return (float) $left <=> (float) $right;
+        }
+        if (is_scalar($left) && is_scalar($right)) {
+            return (string) $left <=> (string) $right;
+        }
+
+        return 0;
+    }
+
+    private function numericFloat(mixed $value): float
+    {
+        return is_numeric($value) ? (float) $value : 0.0;
+    }
+
+    private function numericInt(mixed $value): int
+    {
+        return is_numeric($value) ? (int) $value : 0;
     }
 
     private function singleValueAggregate(string $function, mixed $value): mixed
     {
         return match ($function) {
-            'sum', 'avg' => is_numeric($value) ? $value + 0 : 0,
+            'sum', 'avg' => $this->numericFloat($value),
             'min', 'max' => $value,
             default => $value,
         };
@@ -401,22 +453,12 @@ final class RepositoryRelationAggregator
     private function values(array $rows, string $column): array
     {
         $values = [];
-        $seen = [];
-
         foreach ($rows as $row) {
-            if (!array_key_exists($column, $row) || $row[$column] === null) {
-                continue;
+            if (array_key_exists($column, $row) && $row[$column] !== null) {
+                $values[] = $row[$column];
             }
-
-            $key = $this->key($row[$column]);
-            if (isset($seen[$key])) {
-                continue;
-            }
-
-            $seen[$key] = true;
-            $values[] = $row[$column];
         }
 
-        return $values;
+        return RepositorySupport::uniqueValues($values);
     }
 }
