@@ -8,9 +8,7 @@ use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use InvalidArgumentException;
 
-/**
- * Aggregate through relations without hydrating final relation graphs.
- */
+/** Aggregate through relations without hydrating final relation graphs. */
 final class RepositoryThroughRelationAggregator
 {
     public function __construct(private readonly int $batchSize = 500)
@@ -32,154 +30,243 @@ final class RepositoryThroughRelationAggregator
         string $column,
         ?callable $constraint = null,
     ): array {
+        [$parentByThrough, $relatedValues] = $this->throughMap($parents, $definition);
+        if ($relatedValues === []) {
+            return [];
+        }
+
+        return $function === 'avg'
+            ? $this->aggregateAverage($definition, $column, $constraint, $parentByThrough, $relatedValues)
+            : $this->aggregateScalar($definition, $function, $column, $constraint, $parentByThrough, $relatedValues);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @return array{0:array<string,string>,1:list<mixed>}
+     */
+    private function throughMap(array $parents, RelationDefinition $definition): array
+    {
         $through = $definition->through
             ?? throw new InvalidArgumentException('Through aggregate requires an intermediate repository.');
-        $throughParentKey = $definition->throughParentKey
-            ?? throw new InvalidArgumentException('Through aggregate requires an intermediate parent key.');
-        $throughKey = $definition->throughKey
-            ?? throw new InvalidArgumentException('Through aggregate requires an intermediate local key.');
-        $related = $definition->related
-            ?? throw new InvalidArgumentException('Through aggregate requires a related repository.');
-
+        $parentKey = RepositorySupport::column($definition->throughParentKey
+            ?? throw new InvalidArgumentException('Through aggregate requires an intermediate parent key.'));
+        $throughKey = RepositorySupport::column($definition->throughKey
+            ?? throw new InvalidArgumentException('Through aggregate requires an intermediate local key.'));
         $parentValues = $this->values($parents, $definition->parentKey);
         if ($parentValues === []) {
-            return [];
+            return [[], []];
         }
 
-        $throughRows = [];
-        $throughConnection = $through::connection();
-        $throughBatchSize = $throughConnection->safeBatchSize(requested: $this->batchSize);
-
-        foreach (array_chunk($parentValues, $throughBatchSize) as $chunk) {
-            $query = $through::query()->apply(
-                static fn(QueryBuilder $query): mixed => $query->whereIn($throughParentKey, $chunk),
-            );
-            foreach ($query->get([$throughParentKey, $throughKey]) as $row) {
-                if (is_array($row)) {
-                    $throughRows[] = $row;
+        $rows = [];
+        $batchSize = $through::connection()->safeBatchSize(requested: $this->batchSize);
+        foreach (array_chunk($parentValues, $batchSize) as $chunk) {
+            $query = $through::query()->apply(static function (QueryBuilder $builder) use ($parentKey, $chunk): void {
+                $builder->whereIn($parentKey, $chunk);
+            });
+            foreach ($query->get([$parentKey, $throughKey]) as $candidateRow) {
+                $row = RepositorySupport::row($candidateRow);
+                if ($row !== null) {
+                    $rows[] = $row;
                 }
             }
-        }
-
-        if ($throughRows === []) {
-            return [];
         }
 
         $parentByThrough = [];
-        foreach ($throughRows as $row) {
+        foreach ($rows as $row) {
             $throughValue = $row[$throughKey] ?? null;
-            $parentValue = $row[$throughParentKey] ?? null;
-            if ($throughValue === null || $parentValue === null) {
-                continue;
+            $parentValue = $row[$parentKey] ?? null;
+            if ($throughValue !== null && $parentValue !== null) {
+                $parentByThrough[RepositorySupport::key($throughValue)] = RepositorySupport::key($parentValue);
             }
-            $parentByThrough[$this->key($throughValue)] = $this->key($parentValue);
         }
 
-        $relatedValues = $this->values($throughRows, $throughKey);
-        $relatedConnection = $related::connection();
-        $relatedBatchSize = $relatedConnection->safeBatchSize(requested: $this->batchSize);
+        return [$parentByThrough, $this->values($rows, $throughKey)];
+    }
+
+    /**
+     * @param null|callable(QueryBuilder):void $constraint
+     * @param array<string,string> $parentByThrough
+     * @param list<mixed> $relatedValues
+     * @return array<string,mixed>
+     */
+    private function aggregateAverage(
+        RelationDefinition $definition,
+        string $column,
+        ?callable $constraint,
+        array $parentByThrough,
+        array $relatedValues,
+    ): array {
+        /** @var array<string,array{sum:float,count:int}> $states */
         $states = [];
 
-        foreach (array_chunk($relatedValues, $relatedBatchSize) as $chunk) {
-            $query = $related::query()->apply(
-                static fn(QueryBuilder $query): mixed => $query->whereIn($definition->relatedKey, $chunk),
-            );
-
-            if ($definition->scope !== null) {
-                $query->apply($definition->scope);
-            }
-            if ($constraint !== null) {
-                $query->apply($constraint);
+        foreach ($this->aggregateRows($definition, 'avg', $column, $constraint, $relatedValues) as $row) {
+            $parent = $this->parentIdentity($row, $definition, $parentByThrough);
+            if ($parent === null) {
+                continue;
             }
 
-            $builder = $query->raw();
-            if ($function === 'avg') {
-                $builder->select(
-                    $definition->relatedKey,
-                    Expression::make(sprintf('SUM(%s) AS aggregate_sum', $column)),
-                    Expression::make(sprintf('COUNT(%s) AS aggregate_count', $column)),
-                );
-            } else {
-                $aggregateColumn = $function === 'count' ? '*' : $column;
-                $builder->select(
-                    $definition->relatedKey,
-                    Expression::make(sprintf('%s(%s) AS aggregate', strtoupper($function), $aggregateColumn)),
-                );
-            }
-
-            foreach ($builder->groupBy($definition->relatedKey)->get() as $row) {
-                $throughIdentity = $this->key($row[$definition->relatedKey] ?? null);
-                $parentIdentity = $parentByThrough[$throughIdentity] ?? null;
-                if ($parentIdentity === null) {
-                    continue;
-                }
-
-                if ($function === 'avg') {
-                    $states[$parentIdentity]['sum'] = (float) (($states[$parentIdentity]['sum'] ?? 0.0)
-                        + (float) ($row['aggregate_sum'] ?? 0.0));
-                    $states[$parentIdentity]['count'] = (int) (($states[$parentIdentity]['count'] ?? 0)
-                        + (int) ($row['aggregate_count'] ?? 0));
-                    continue;
-                }
-
-                $value = $row['aggregate'] ?? null;
-                $states[$parentIdentity] = match ($function) {
-                    'count' => (int) ($states[$parentIdentity] ?? 0) + (int) ($value ?? 0),
-                    'sum' => (float) ($states[$parentIdentity] ?? 0.0) + (float) ($value ?? 0.0),
-                    'min' => !array_key_exists($parentIdentity, $states) || $value < $states[$parentIdentity]
-                        ? $value
-                        : $states[$parentIdentity],
-                    'max' => !array_key_exists($parentIdentity, $states) || $value > $states[$parentIdentity]
-                        ? $value
-                        : $states[$parentIdentity],
-                    default => $states[$parentIdentity] ?? null,
-                };
-            }
-        }
-
-        if ($function !== 'avg') {
-            return $states;
+            $state = $states[$parent] ?? ['sum' => 0.0, 'count' => 0];
+            $state['sum'] += $this->numericFloat($row['aggregate_sum'] ?? null);
+            $state['count'] += $this->numericInt($row['aggregate_count'] ?? null);
+            $states[$parent] = $state;
         }
 
         $result = [];
-        foreach ($states as $parentIdentity => $state) {
-            $count = (int) ($state['count'] ?? 0);
-            $result[$parentIdentity] = $count > 0
-                ? (float) $state['sum'] / $count
-                : null;
+        foreach ($states as $parent => $state) {
+            $result[$parent] = $state['count'] > 0 ? $state['sum'] / $state['count'] : null;
         }
 
         return $result;
     }
 
-    /** @param list<array<string,mixed>> $rows @return list<mixed> */
+    /**
+     * @param null|callable(QueryBuilder):void $constraint
+     * @param array<string,string> $parentByThrough
+     * @param list<mixed> $relatedValues
+     * @return array<string,mixed>
+     */
+    private function aggregateScalar(
+        RelationDefinition $definition,
+        string $function,
+        string $column,
+        ?callable $constraint,
+        array $parentByThrough,
+        array $relatedValues,
+    ): array {
+        $states = [];
+
+        foreach ($this->aggregateRows($definition, $function, $column, $constraint, $relatedValues) as $row) {
+            $parent = $this->parentIdentity($row, $definition, $parentByThrough);
+            if ($parent === null) {
+                continue;
+            }
+
+            $value = $row['aggregate'] ?? null;
+            $states[$parent] = $this->mergeScalar($function, $states[$parent] ?? null, $value);
+        }
+
+        return $states;
+    }
+
+    /**
+     * @param null|callable(QueryBuilder):void $constraint
+     * @param list<mixed> $relatedValues
+     * @return iterable<array<string,mixed>>
+     */
+    private function aggregateRows(
+        RelationDefinition $definition,
+        string $function,
+        string $column,
+        ?callable $constraint,
+        array $relatedValues,
+    ): iterable {
+        $related = $definition->related
+            ?? throw new InvalidArgumentException('Through aggregate requires a related repository.');
+        $relatedKey = RepositorySupport::column($definition->relatedKey);
+        $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
+
+        foreach (array_chunk($relatedValues, $batchSize) as $chunk) {
+            $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
+                $builder->whereIn($relatedKey, $chunk);
+            });
+            $this->applyScopes($query, $definition, $constraint);
+            $builder = $this->aggregateBuilder($query->raw(), $relatedKey, $function, $column);
+
+            foreach ($builder->groupBy($relatedKey)->get() as $candidateRow) {
+                $row = RepositorySupport::row($candidateRow);
+                if ($row !== null) {
+                    yield $row;
+                }
+            }
+        }
+    }
+
+    private function aggregateBuilder(QueryBuilder $builder, string $relatedKey, string $function, string $column): QueryBuilder
+    {
+        if ($function === 'avg') {
+            return $builder->select(
+                $relatedKey,
+                Expression::make(sprintf('SUM(%s) AS aggregate_sum', $column)),
+                Expression::make(sprintf('COUNT(%s) AS aggregate_count', $column)),
+            );
+        }
+
+        $aggregateColumn = $function === 'count' ? '*' : $column;
+
+        return $builder->select(
+            $relatedKey,
+            Expression::make(sprintf('%s(%s) AS aggregate', strtoupper($function), $aggregateColumn)),
+        );
+    }
+
+    /** @param null|callable(QueryBuilder):void $constraint */
+    private function applyScopes(RepositoryQuery $query, RelationDefinition $definition, ?callable $constraint): void
+    {
+        if ($definition->scope !== null) {
+            /** @var callable(QueryBuilder):void $scope */
+            $scope = $definition->scope;
+            $query->apply($scope);
+        }
+        if ($constraint !== null) {
+            $query->apply($constraint);
+        }
+    }
+
+    /** @param array<string,string> $parentByThrough */
+    private function parentIdentity(array $row, RelationDefinition $definition, array $parentByThrough): ?string
+    {
+        $throughIdentity = RepositorySupport::key($row[$definition->relatedKey] ?? null);
+
+        return $parentByThrough[$throughIdentity] ?? null;
+    }
+
+    private function mergeScalar(string $function, mixed $current, mixed $value): mixed
+    {
+        return match ($function) {
+            'count' => $this->numericInt($current) + $this->numericInt($value),
+            'sum' => $this->numericFloat($current) + $this->numericFloat($value),
+            'min' => $current === null || $this->compare($value, $current) < 0 ? $value : $current,
+            'max' => $current === null || $this->compare($value, $current) > 0 ? $value : $current,
+            default => $current,
+        };
+    }
+
+    private function compare(mixed $left, mixed $right): int
+    {
+        if (is_numeric($left) && is_numeric($right)) {
+            return (float) $left <=> (float) $right;
+        }
+
+        if (is_scalar($left) && is_scalar($right)) {
+            return (string) $left <=> (string) $right;
+        }
+
+        return 0;
+    }
+
+    private function numericFloat(mixed $value): float
+    {
+        return is_numeric($value) ? (float) $value : 0.0;
+    }
+
+    private function numericInt(mixed $value): int
+    {
+        return is_numeric($value) ? (int) $value : 0;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<mixed>
+     */
     private function values(array $rows, string $column): array
     {
         $values = [];
-        $seen = [];
         foreach ($rows as $row) {
-            if (!array_key_exists($column, $row) || $row[$column] === null) {
-                continue;
+            if (array_key_exists($column, $row) && $row[$column] !== null) {
+                $values[] = $row[$column];
             }
-            $identity = $this->key($row[$column]);
-            if (isset($seen[$identity])) {
-                continue;
-            }
-            $seen[$identity] = true;
-            $values[] = $row[$column];
         }
 
-        return $values;
-    }
-
-    private function key(mixed $value): string
-    {
-        return match (true) {
-            is_int($value), is_string($value) => 'scalar:' . $value,
-            is_float($value) => 'float:' . serialize($value),
-            is_bool($value) => 'bool:' . ($value ? '1' : '0'),
-            $value === null => 'null:',
-            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
-        };
+        return RepositorySupport::uniqueValues($values);
     }
 }
