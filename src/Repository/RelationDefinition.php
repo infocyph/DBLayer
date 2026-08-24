@@ -98,11 +98,28 @@ final readonly class RelationDefinition
             throw new InvalidArgumentException('One-of-many column must not be empty.');
         }
 
-        return $this->copy(
-            type: $type,
-            oneOfManyColumn: $column === null ? null : trim($column),
-            oneOfManyAggregate: $aggregate,
-            oneOfManyScope: $scope,
+        return new self(
+            $type,
+            $this->related,
+            $this->parentKey,
+            $this->relatedKey,
+            $this->columns,
+            $this->pivotTable,
+            $this->pivotParentKey,
+            $this->pivotRelatedKey,
+            $this->scope,
+            $this->pivotColumns,
+            $this->pivotAccessor,
+            $this->morphTypeColumn,
+            $this->morphIdColumn,
+            $this->morphAlias,
+            $this->morphMap,
+            $this->through,
+            $this->throughParentKey,
+            $this->throughKey,
+            $column === null ? null : trim($column),
+            $aggregate,
+            $scope,
         );
     }
 
@@ -161,7 +178,6 @@ final readonly class RelationDefinition
      * @param list<string>|null $columns
      * @param null|callable(QueryBuilder):void $scope
      * @param list<string>|null $pivotColumns
-     * @param null|callable(QueryBuilder):void $oneOfManyScope
      */
     private function copy(
         ?string $type = null,
@@ -169,9 +185,6 @@ final readonly class RelationDefinition
         mixed $scope = null,
         ?array $pivotColumns = null,
         ?string $pivotAccessor = null,
-        ?string $oneOfManyColumn = null,
-        ?string $oneOfManyAggregate = null,
-        mixed $oneOfManyScope = null,
     ): self {
         return new self(
             $type ?? $this->type,
@@ -192,9 +205,9 @@ final readonly class RelationDefinition
             $this->through,
             $this->throughParentKey,
             $this->throughKey,
-            $oneOfManyColumn ?? $this->oneOfManyColumn,
-            $oneOfManyAggregate ?? $this->oneOfManyAggregate,
-            $oneOfManyScope ?? $this->oneOfManyScope,
+            $this->oneOfManyColumn,
+            $this->oneOfManyAggregate,
+            $this->oneOfManyScope,
         );
     }
 
