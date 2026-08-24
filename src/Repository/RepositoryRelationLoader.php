@@ -42,7 +42,7 @@ final class RepositoryRelationLoader
         }
 
         if ($definition->through !== null) {
-            return (new RepositoryThroughRelation($this->parentConnection, $this->batchSize))
+            return (new RepositoryThroughRelation($this->batchSize))
                 ->load($parents, $as, $definition, $constraint);
         }
 
@@ -82,11 +82,11 @@ final class RepositoryRelationLoader
         $grouped = [];
 
         foreach ($related as $row) {
-            $grouped[$this->key($row[$definition->relatedKey] ?? null)][] = $row;
+            $grouped[RepositorySupport::key($row[$definition->relatedKey] ?? null)][] = $row;
         }
 
         foreach ($parents as &$parent) {
-            $parent[$as] = $grouped[$this->key($parent[$definition->parentKey] ?? null)] ?? [];
+            $parent[$as] = $grouped[RepositorySupport::key($parent[$definition->parentKey] ?? null)] ?? [];
         }
         unset($parent);
 
@@ -106,14 +106,14 @@ final class RepositoryRelationLoader
     ): array {
         $pivotTable = $definition->pivotTable
             ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot table.');
-        $pivotParentKey = $definition->pivotParentKey
-            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot parent key.');
-        $pivotRelatedKey = $definition->pivotRelatedKey
-            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.');
+        $pivotParentKey = RepositorySupport::column($definition->pivotParentKey
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot parent key.'));
+        $pivotRelatedKey = RepositorySupport::column($definition->pivotRelatedKey
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.'));
 
         $parentValues = $this->values($parents, $definition->parentKey);
         $pivotRows = [];
-        $batchSize = $this->parentConnection->safeBatchSize(requested: $this->batchSize);
+        $batchSize = max(1, $this->parentConnection->safeBatchSize(requested: $this->batchSize));
         $pivotColumns = $this->pivotProjection($definition, $pivotParentKey, $pivotRelatedKey);
 
         foreach (array_chunk($parentValues, $batchSize) as $chunk) {
@@ -123,14 +123,14 @@ final class RepositoryRelationLoader
                 ->whereIn($pivotParentKey, $chunk);
 
             if ($definition->type === RelationDefinition::MORPH_TO_MANY) {
-                $typeColumn = $definition->morphTypeColumn
-                    ?? throw new InvalidArgumentException('Polymorphic pivot relation requires a type column.');
+                $typeColumn = RepositorySupport::column($definition->morphTypeColumn
+                    ?? throw new InvalidArgumentException('Polymorphic pivot relation requires a type column.'));
                 $morphAlias = $definition->morphAlias
                     ?? throw new InvalidArgumentException('Polymorphic pivot relation requires a morph alias.');
                 $query->where($typeColumn, '=', $morphAlias);
             }
 
-            array_push($pivotRows, ...$query->get());
+            array_push($pivotRows, ...$this->normalizeRows($query->get()));
         }
 
         $relatedRows = $this->fetchByValues(
@@ -141,20 +141,20 @@ final class RepositoryRelationLoader
         $relatedByKey = [];
 
         foreach ($relatedRows as $row) {
-            $relatedByKey[$this->key($row[$definition->relatedKey] ?? null)] = $row;
+            $relatedByKey[RepositorySupport::key($row[$definition->relatedKey] ?? null)] = $row;
         }
 
         $pivotsByParent = [];
         foreach ($pivotRows as $pivot) {
-            $pivotsByParent[$this->key($pivot[$pivotParentKey] ?? null)][] = $pivot;
+            $pivotsByParent[RepositorySupport::key($pivot[$pivotParentKey] ?? null)][] = $pivot;
         }
 
         foreach ($parents as &$parent) {
             $matches = [];
-            $parentKey = $this->key($parent[$definition->parentKey] ?? null);
+            $parentKey = RepositorySupport::key($parent[$definition->parentKey] ?? null);
 
             foreach ($pivotsByParent[$parentKey] ?? [] as $pivot) {
-                $relatedKey = $this->key($pivot[$pivotRelatedKey] ?? null);
+                $relatedKey = RepositorySupport::key($pivot[$pivotRelatedKey] ?? null);
                 if (!isset($relatedByKey[$relatedKey])) {
                     continue;
                 }
@@ -184,11 +184,37 @@ final class RepositoryRelationLoader
         RelationDefinition $definition,
         ?callable $constraint,
     ): array {
-        $typeColumn = $definition->morphTypeColumn
-            ?? throw new InvalidArgumentException('Morph-to relation requires a type column.');
-        $idColumn = $definition->morphIdColumn
-            ?? throw new InvalidArgumentException('Morph-to relation requires an id column.');
-        $groupedValues = [];
+        $typeColumn = RepositorySupport::column($definition->morphTypeColumn
+            ?? throw new InvalidArgumentException('Morph-to relation requires a type column.'));
+        $idColumn = RepositorySupport::column($definition->morphIdColumn
+            ?? throw new InvalidArgumentException('Morph-to relation requires an id column.'));
+        $groupedValues = $this->groupMorphValues($parents, $as, $definition, $typeColumn, $idColumn);
+        $indexed = $this->fetchMorphRows($groupedValues, $definition, $constraint);
+
+        foreach ($parents as &$parent) {
+            $type = $parent[$typeColumn] ?? null;
+            $id = $parent[$idColumn] ?? null;
+            $parent[$as] = is_string($type) && $id !== null
+                ? ($indexed[$type][RepositorySupport::key($id)] ?? null)
+                : null;
+        }
+        unset($parent);
+
+        return $parents;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @return array<string,array<string,int|float|string|bool>>
+     */
+    private function groupMorphValues(
+        array $parents,
+        string $as,
+        RelationDefinition $definition,
+        string $typeColumn,
+        string $idColumn,
+    ): array {
+        $grouped = [];
 
         foreach ($parents as $parent) {
             $type = $parent[$typeColumn] ?? null;
@@ -204,10 +230,27 @@ final class RepositoryRelationLoader
                 ));
             }
 
-            $groupedValues[$type][$this->key($id)] = $id;
+            $value = RepositorySupport::value($id);
+            if ($value !== null) {
+                $grouped[$type][RepositorySupport::key($value)] = $value;
+            }
         }
 
+        return $grouped;
+    }
+
+    /**
+     * @param array<string,array<string,int|float|string|bool>> $groupedValues
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,array<string,array<string,mixed>>>
+     */
+    private function fetchMorphRows(
+        array $groupedValues,
+        RelationDefinition $definition,
+        ?callable $constraint,
+    ): array {
         $indexed = [];
+
         foreach ($groupedValues as $type => $valuesByKey) {
             $related = $definition->morphMap[$type];
             $rows = $this->fetchForClass(
@@ -220,20 +263,11 @@ final class RepositoryRelationLoader
             );
 
             foreach ($rows as $row) {
-                $indexed[$type][$this->key($row[$definition->relatedKey] ?? null)] = $row;
+                $indexed[$type][RepositorySupport::key($row[$definition->relatedKey] ?? null)] = $row;
             }
         }
 
-        foreach ($parents as &$parent) {
-            $type = $parent[$typeColumn] ?? null;
-            $id = $parent[$idColumn] ?? null;
-            $parent[$as] = is_string($type) && $id !== null
-                ? ($indexed[$type][$this->key($id)] ?? null)
-                : null;
-        }
-        unset($parent);
-
-        return $parents;
+        return $indexed;
     }
 
     /**
@@ -251,12 +285,12 @@ final class RepositoryRelationLoader
         $indexed = [];
 
         foreach ($related as $row) {
-            $key = $this->key($row[$definition->relatedKey] ?? null);
+            $key = RepositorySupport::key($row[$definition->relatedKey] ?? null);
             $indexed[$key] ??= $row;
         }
 
         foreach ($parents as &$parent) {
-            $parent[$as] = $indexed[$this->key($parent[$definition->parentKey] ?? null)] ?? null;
+            $parent[$as] = $indexed[RepositorySupport::key($parent[$definition->parentKey] ?? null)] ?? null;
         }
         unset($parent);
 
@@ -264,7 +298,7 @@ final class RepositoryRelationLoader
     }
 
     /**
-     * @param list<mixed> $values
+     * @param list<int|float|string|bool> $values
      * @param null|callable(QueryBuilder):void $constraint
      * @return list<array<string,mixed>>
      */
@@ -293,10 +327,9 @@ final class RepositoryRelationLoader
     }
 
     /**
-     * @param list<mixed> $values
+     * @param list<int|float|string|bool> $values
      * @param class-string<TableRepository> $related
      * @param list<string> $columns
-     * @param null|callable(QueryBuilder):void $scope
      * @param null|callable(QueryBuilder):void $constraint
      * @return list<array<string,mixed>>
      */
@@ -314,22 +347,24 @@ final class RepositoryRelationLoader
             return [];
         }
 
+        $relatedKey = RepositorySupport::column($relatedKey);
+        $morphTypeColumn = $morphTypeColumn === null ? null : RepositorySupport::column($morphTypeColumn);
         $columns = $this->ensureKeySelected($columns, $relatedKey);
-        $connection = $related::connection();
-        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+        $batchSize = max(1, $related::connection()->safeBatchSize(requested: $this->batchSize));
         $rows = [];
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
             $query = $related::query()->apply(
-                static function (QueryBuilder $query) use ($relatedKey, $chunk, $morphTypeColumn, $morphAlias): void {
-                    $query->whereIn($relatedKey, $chunk);
+                static function (QueryBuilder $builder) use ($relatedKey, $chunk, $morphTypeColumn, $morphAlias): void {
+                    $builder->whereIn($relatedKey, $chunk);
                     if ($morphTypeColumn !== null && $morphAlias !== null) {
-                        $query->where($morphTypeColumn, '=', $morphAlias);
+                        $builder->where($morphTypeColumn, '=', $morphAlias);
                     }
                 },
             );
 
             if ($scope !== null) {
+                /** @var callable(QueryBuilder):void $scope */
                 $query->apply($scope);
             }
             if ($constraint !== null) {
@@ -372,19 +407,8 @@ final class RepositoryRelationLoader
         return [...$columns, $key];
     }
 
-    private function key(mixed $value): string
-    {
-        return match (true) {
-            is_int($value), is_string($value) => 'scalar:' . $value,
-            is_float($value) => 'float:' . serialize($value),
-            is_bool($value) => 'bool:' . ($value ? '1' : '0'),
-            $value === null => 'null:',
-            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
-        };
-    }
-
     /**
-     * @param array<mixed> $values
+     * @param array<array-key,mixed> $values
      * @return list<array<string,mixed>>
      */
     private function normalizeRows(array $values): array
@@ -392,18 +416,10 @@ final class RepositoryRelationLoader
         $rows = [];
 
         foreach ($values as $value) {
-            if (!is_array($value)) {
-                continue;
+            $row = RepositorySupport::row($value);
+            if ($row !== null) {
+                $rows[] = $row;
             }
-
-            $row = [];
-            foreach ($value as $key => $item) {
-                if (is_string($key)) {
-                    $row[$key] = $item;
-                }
-            }
-
-            $rows[] = $row;
         }
 
         return $rows;
@@ -435,11 +451,11 @@ final class RepositoryRelationLoader
         $columns = [$pivotParentKey => true, $pivotRelatedKey => true];
 
         if ($definition->type === RelationDefinition::MORPH_TO_MANY && $definition->morphTypeColumn !== null) {
-            $columns[$definition->morphTypeColumn] = true;
+            $columns[RepositorySupport::column($definition->morphTypeColumn)] = true;
         }
 
         foreach ($definition->pivotColumns as $column) {
-            $columns[$column] = true;
+            $columns[RepositorySupport::column($column)] = true;
         }
 
         return array_keys($columns);
@@ -447,27 +463,18 @@ final class RepositoryRelationLoader
 
     /**
      * @param list<array<string,mixed>> $rows
-     * @return list<mixed>
+     * @return list<int|float|string|bool>
      */
     private function values(array $rows, string $column): array
     {
         $values = [];
-        $seen = [];
 
         foreach ($rows as $row) {
-            if (!array_key_exists($column, $row) || $row[$column] === null) {
-                continue;
+            if (array_key_exists($column, $row) && $row[$column] !== null) {
+                $values[] = $row[$column];
             }
-
-            $key = $this->key($row[$column]);
-            if (isset($seen[$key])) {
-                continue;
-            }
-
-            $seen[$key] = true;
-            $values[] = $row[$column];
         }
 
-        return $values;
+        return RepositorySupport::uniqueValues($values);
     }
 }
