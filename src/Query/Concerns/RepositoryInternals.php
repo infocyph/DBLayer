@@ -268,9 +268,6 @@ trait RepositoryInternals
     /**
      * Apply cast rules for one value.
      *
-     * Backed-enum class names are directional automatically: repository reads
-     * hydrate enum cases and writes persist their backed scalar values.
-     *
      * @param string|callable(mixed):mixed|AttributeCast $cast
      * @param array<string,mixed> $context
      */
@@ -287,37 +284,52 @@ trait RepositoryInternals
         }
 
         if (is_string($cast) && enum_exists($cast) && is_subclass_of($cast, BackedEnum::class)) {
-            if ($value === null) {
-                return null;
-            }
-
-            if ($value instanceof $cast) {
-                return $forWrite ? $value->value : $value;
-            }
-
             /** @var class-string<BackedEnum> $cast */
-            $case = $cast::from($value);
-
-            return $forWrite ? $case->value : $case;
+            return $this->castBackedEnumValue($value, $cast, $forWrite);
         }
 
         if (\is_callable($cast)) {
             return $cast($value);
         }
 
-        $type = strtolower($cast);
+        return $this->castNamedValue($value, $cast, $forWrite);
+    }
 
-        return match ($type) {
+    /**
+     * @param class-string<BackedEnum> $enumClass
+     */
+    private function castBackedEnumValue(mixed $value, string $enumClass, bool $forWrite): mixed
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if ($value instanceof $enumClass) {
+            return $forWrite ? $value->value : $value;
+        }
+
+        if (!is_int($value) && !is_string($value)) {
+            throw new InvalidArgumentException(sprintf(
+                'Backed enum [%s] expects an int or string value, %s given.',
+                $enumClass,
+                get_debug_type($value),
+            ));
+        }
+
+        $case = $enumClass::from($value);
+
+        return $forWrite ? $case->value : $case;
+    }
+
+    private function castNamedValue(mixed $value, string $type, bool $forWrite): mixed
+    {
+        return match (strtolower($type)) {
             'int', 'integer' => $value === null ? null : $this->castToInt($value),
             'float', 'double', 'real' => $value === null ? null : $this->castToFloat($value),
             'bool', 'boolean' => $value === null ? null : $this->castToBool($value),
             'string' => $value === null ? null : $this->castToString($value),
-            'json', 'array' => $forWrite
-                ? (is_array($value) || is_object($value) ? json_encode($value, JSON_THROW_ON_ERROR) : $value)
-                : (is_string($value) ? (json_decode($value, true) ?? $value) : $value),
-            'datetime' => $forWrite
-                ? $this->normalizeDateTimeForWrite($value)
-                : $value,
+            'json', 'array' => $this->castJsonValue($value, $forWrite),
+            'datetime' => $forWrite ? $this->normalizeDateTimeForWrite($value) : $value,
             'immutable_datetime', 'datetime_immutable' => $forWrite
                 ? $this->normalizeDateTimeForWrite($value)
                 : $this->immutableDateTime($value),
@@ -326,6 +338,17 @@ trait RepositoryInternals
                 : $this->immutableDate($value),
             default => $value,
         };
+    }
+
+    private function castJsonValue(mixed $value, bool $forWrite): mixed
+    {
+        if ($forWrite) {
+            return is_array($value) || is_object($value)
+                ? json_encode($value, JSON_THROW_ON_ERROR)
+                : $value;
+        }
+
+        return is_string($value) ? (json_decode($value, true) ?? $value) : $value;
     }
 
     /**
