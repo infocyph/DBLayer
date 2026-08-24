@@ -35,14 +35,22 @@ repository result casting/projection.
        ->where('active', '=', 1)
        ->get();                       // raw QueryBuilder rows
 
-Definition Metadata
--------------------
+Compiled Definition Metadata
+----------------------------
 
-``TableRepository`` supports declarative table policy metadata:
+``TableRepository`` compiles immutable declarative metadata into one
+``RepositoryDefinition`` per repository class. Repeated ``query()`` and
+``repository()`` calls reuse that definition instead of rebuilding casts,
+scopes and relation declarations on every call. Runtime query state is never
+stored in the definition, so individual repository/query instances remain
+isolated in long-running workers.
+
+Supported static metadata:
 
 - ``protected static string $table`` (required)
 - ``protected static ?string $connection = null``
 - ``protected static string $primaryKey = 'id'``
+- ``protected static int $perPage = 15``
 - ``protected static array $defaults = []``
 - ``protected static array $creatable = []``
 - ``protected static array $updatable = []``
@@ -50,10 +58,36 @@ Definition Metadata
 - ``protected static string $createdAt = 'created_at'``
 - ``protected static string $updatedAt = 'updated_at'``
 
+``definition()`` exposes the compiled metadata for tooling/introspection.
+``flushDefinition()`` invalidates only the calling repository class and is
+intended for tests or intentionally dynamic bootstrap configuration; normal
+applications should treat repository metadata as immutable.
+
 Empty create/update allowlists mean unrestricted repository writes. Once an
 allowlist is declared, unexpected caller attributes throw
 ``UnwritableAttributeException`` instead of being silently discarded.
 System-managed timestamps are added after caller allowlist validation.
+
+Pagination Defaults
+-------------------
+
+``$perPage`` is used whenever a repository pagination method omits its page
+size. It applies consistently to direct and fluent repository entry points:
+
+.. code-block:: php
+
+   final class Post extends TableRepository
+   {
+       protected static string $table = 'posts';
+       protected static int $perPage = 50;
+   }
+
+   $page = Post::paginate();
+   $page = Post::query()->paginate();
+   $page = Post::query()->simplePaginate();
+   $page = Post::query()->cursorPaginate();
+
+An explicit page size always overrides the repository default.
 
 Casts
 -----
@@ -190,6 +224,7 @@ repository policy is not bypassed.
 Core Methods
 ------------
 
+- ``definition()`` / ``flushDefinition()``
 - ``repository(?string $connection = null)`` / ``repo(...)``
 - ``query(?string $connection = null)``
 - ``builder(?string $connection = null)`` / ``rawQuery(...)``
@@ -212,9 +247,14 @@ Customization Hooks
 - ``globalScopes(): array``
 - ``relations(): array``
 
-Use ``configureRepository()`` for repository policies such as soft deletes,
-tenancy, optimistic locking, cache configuration, lifecycle hooks and default
-ordering.
+``casts()``, ``globalScopes()`` and ``relations()`` are declarative metadata and
+are compiled once per repository class. Their returned definitions should not
+capture request-local mutable state. Scope callbacks themselves execute against
+each fresh query, so they may resolve current runtime context when invoked.
+
+Use ``configureRepository()`` for runtime repository policies such as soft
+deletes, tenancy, optimistic locking, cache configuration, lifecycle hooks and
+default ordering.
 
 .. code-block:: php
 
