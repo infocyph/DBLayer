@@ -56,6 +56,31 @@ final class Relation
         );
     }
 
+    /**
+     * Define a has-many-through relation using explicit intermediate keys.
+     *
+     * @param class-string<TableRepository> $related
+     * @param class-string<TableRepository> $through
+     */
+    public static function hasManyThrough(
+        string $related,
+        string $through,
+        string $firstKey,
+        string $secondKey,
+        string $localKey = 'id',
+        string $secondLocalKey = 'id',
+    ): RelationDefinition {
+        return new RelationDefinition(
+            RelationDefinition::HAS_MANY_THROUGH,
+            $related,
+            $localKey,
+            $secondKey,
+            through: $through,
+            throughParentKey: $firstKey,
+            throughKey: $secondLocalKey,
+        );
+    }
+
     /** @param class-string<TableRepository> $related */
     public static function hasOne(
         string $related,
@@ -67,6 +92,31 @@ final class Relation
             $related,
             $localKey,
             $foreignKey,
+        );
+    }
+
+    /**
+     * Define a has-one-through relation using explicit intermediate keys.
+     *
+     * @param class-string<TableRepository> $related
+     * @param class-string<TableRepository> $through
+     */
+    public static function hasOneThrough(
+        string $related,
+        string $through,
+        string $firstKey,
+        string $secondKey,
+        string $localKey = 'id',
+        string $secondLocalKey = 'id',
+    ): RelationDefinition {
+        return new RelationDefinition(
+            RelationDefinition::HAS_ONE_THROUGH,
+            $related,
+            $localKey,
+            $secondKey,
+            through: $through,
+            throughParentKey: $firstKey,
+            throughKey: $secondLocalKey,
         );
     }
 
