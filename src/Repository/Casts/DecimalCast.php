@@ -65,7 +65,7 @@ final readonly class DecimalCast implements AttributeCast
             throw new InvalidArgumentException(sprintf('Invalid decimal value [%s].', $value));
         }
 
-        $sign = $matches[1] ?? '';
+        $sign = $matches[1];
         $integer = ltrim($matches[2], '0');
         $integer = $integer === '' ? '0' : $integer;
         $fraction = $matches[3] ?? '';
