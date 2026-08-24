@@ -20,55 +20,31 @@ use InvalidArgumentException;
  */
 abstract class TableRepository
 {
-    /**
-     * Optional named connection.
-     */
+    /** Optional named connection. */
     protected static ?string $connection = null;
 
-    /**
-     * Attributes accepted from create callers. Empty means unrestricted.
-     *
-     * @var list<string>
-     */
+    /** @var list<string> Attributes accepted from create callers. Empty means unrestricted. */
     protected static array $creatable = [];
 
-    /**
-     * Created timestamp column.
-     */
+    /** Created timestamp column. */
     protected static string $createdAt = 'created_at';
 
-    /**
-     * Default attributes merged into create payloads.
-     *
-     * @var array<string,mixed>
-     */
+    /** @var array<string,mixed> Default attributes merged into create payloads. */
     protected static array $defaults = [];
 
-    /**
-     * Primary-key column used by repository identity operations.
-     */
+    /** Primary-key column used by repository identity operations. */
     protected static string $primaryKey = 'id';
 
-    /**
-     * Backing table name.
-     */
+    /** Backing table name. */
     protected static string $table = '';
 
-    /**
-     * Enable automatic created/updated timestamp injection for repository writes.
-     */
+    /** Enable automatic created/updated timestamp injection for repository writes. */
     protected static bool $timestamps = false;
 
-    /**
-     * Attributes accepted from update callers. Empty means unrestricted.
-     *
-     * @var list<string>
-     */
+    /** @var list<string> Attributes accepted from update callers. Empty means unrestricted. */
     protected static array $updatable = [];
 
-    /**
-     * Updated timestamp column.
-     */
+    /** Updated timestamp column. */
     protected static string $updatedAt = 'updated_at';
 
     /**
@@ -97,25 +73,19 @@ abstract class TableRepository
         ));
     }
 
-    /**
-     * Get the intentionally raw QueryBuilder escape hatch.
-     */
+    /** Get the intentionally raw QueryBuilder escape hatch. */
     public static function builder(?string $connection = null): QueryBuilder
     {
         return static::query($connection)->raw();
     }
 
-    /**
-     * Get the connection instance used by this repository class.
-     */
+    /** Get the connection instance used by this repository class. */
     public static function connection(?string $connection = null): Connection
     {
         return DB::connection(static::resolveConnectionName($connection));
     }
 
-    /**
-     * Build a repository-aware fluent query.
-     */
+    /** Build a repository-aware fluent query. */
     public static function query(?string $connection = null): RepositoryQuery
     {
         $repository = static::repository($connection);
@@ -129,25 +99,19 @@ abstract class TableRepository
         );
     }
 
-    /**
-     * Explicit alias for the raw QueryBuilder escape hatch.
-     */
+    /** Explicit alias for the raw QueryBuilder escape hatch. */
     public static function rawQuery(?string $connection = null): QueryBuilder
     {
         return static::builder($connection);
     }
 
-    /**
-     * Alias for repository() to match common naming preference.
-     */
+    /** Alias for repository() to match common naming preference. */
     public static function repo(?string $connection = null): QueryRepository
     {
         return static::repository($connection);
     }
 
-    /**
-     * Build a repository for this table definition.
-     */
+    /** Build a repository for this table definition. */
     public static function repository(?string $connection = null): QueryRepository
     {
         $repository = new TableQueryRepository(
@@ -177,7 +141,7 @@ abstract class TableRepository
                 ));
             }
 
-            $repository->addNamedGlobalScope(
+            $repository->registerNamedGlobalScope(
                 is_string($name) ? $name : 'scope.' . $name,
                 $scope,
             );
@@ -186,7 +150,7 @@ abstract class TableRepository
         // Preserve configureQuery() as a compatibility/default-query hook, but
         // route it through the same repository constraint pipeline so direct
         // Repository terminals and fluent repository queries cannot diverge.
-        $repository->addNamedGlobalScope(
+        $repository->registerNamedGlobalScope(
             '__configure_query',
             static function (QueryBuilder $query): void {
                 static::configureQuery($query);
@@ -196,27 +160,19 @@ abstract class TableRepository
         return static::configureRepository($repository);
     }
 
-    /**
-     * Public table metadata for relation definitions and tooling.
-     */
+    /** Public table metadata for relation definitions and tooling. */
     public static function table(): string
     {
         return static::tableName();
     }
 
-    /**
-     * Execute a raw scalar query on this repository class configured connection.
-     *
-     * @param array<int,mixed> $bindings
-     */
+    /** @param array<int,mixed> $bindings */
     public static function sqlScalar(string $query, array $bindings = [], ?string $connection = null): mixed
     {
         return DB::scalar($query, $bindings, static::resolveConnectionName($connection));
     }
 
     /**
-     * Execute a raw select query on this repository class configured connection.
-     *
      * @param array<int,mixed> $bindings
      * @return list<array<string,mixed>>
      */
@@ -225,19 +181,13 @@ abstract class TableRepository
         return DB::select($query, $bindings, static::resolveConnectionName($connection));
     }
 
-    /**
-     * Execute a raw statement on this repository class configured connection.
-     *
-     * @param array<int,mixed> $bindings
-     */
+    /** @param array<int,mixed> $bindings */
     public static function sqlStatement(string $query, array $bindings = [], ?string $connection = null): bool
     {
         return DB::statement($query, $bindings, static::resolveConnectionName($connection));
     }
 
-    /**
-     * Run a transaction on this repository class configured connection.
-     */
+    /** Run a transaction on this repository class configured connection. */
     public static function transaction(callable $callback, int $attempts = 1, ?string $connection = null): mixed
     {
         return DB::transaction($callback, $attempts, static::resolveConnectionName($connection));
@@ -246,7 +196,7 @@ abstract class TableRepository
     /**
      * Declarative repository casts.
      *
-     * @return array<string,string|callable(mixed):mixed>
+     * @return array<string,string|callable(mixed):mixed|\Infocyph\DBLayer\Repository\Casts\AttributeCast>
      */
     protected static function casts(): array
     {
@@ -262,17 +212,13 @@ abstract class TableRepository
         return $query;
     }
 
-    /**
-     * Override in subclasses to apply reusable repository policies.
-     */
+    /** Override in subclasses to apply reusable repository policies. */
     protected static function configureRepository(QueryRepository $repository): QueryRepository
     {
         return $repository;
     }
 
-    /**
-     * Resolve configured connection name.
-     */
+    /** Resolve configured connection name. */
     protected static function connectionName(): ?string
     {
         return static::$connection;
@@ -291,19 +237,13 @@ abstract class TableRepository
         return [];
     }
 
-    /**
-     * Declarative eager-loadable relations.
-     *
-     * @return array<string,RelationDefinition>
-     */
+    /** @return array<string,RelationDefinition> Declarative eager-loadable relations. */
     protected static function relations(): array
     {
         return [];
     }
 
-    /**
-     * Resolve and validate configured primary-key column.
-     */
+    /** Resolve and validate configured primary-key column. */
     protected static function primaryKeyName(): string
     {
         $primaryKey = trim(static::$primaryKey);
@@ -318,17 +258,13 @@ abstract class TableRepository
         return $primaryKey;
     }
 
-    /**
-     * Resolve explicit connection override or repository-class default.
-     */
+    /** Resolve explicit connection override or repository-class default. */
     protected static function resolveConnectionName(?string $connection = null): ?string
     {
         return $connection ?? static::connectionName();
     }
 
-    /**
-     * Resolve and validate configured table name.
-     */
+    /** Resolve and validate configured table name. */
     protected static function tableName(): string
     {
         $table = trim(static::$table);
