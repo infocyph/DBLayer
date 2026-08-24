@@ -156,7 +156,7 @@ final class RepositoryRelationFilter
                     continue;
                 }
                 $nested->where(static function (QueryBuilder $group) use ($typeColumn, $idColumn, $alias, $ids, $batchSize): void {
-                    $group->where($typeColumn, '=', $alias);
+                    $group->where(RepositorySupport::column($typeColumn), '=', $alias);
                     self::applyChunkedIn($group, $idColumn, $ids, false, $batchSize);
                 }, boolean: $first ? 'and' : 'or');
                 $first = false;
@@ -184,7 +184,7 @@ final class RepositoryRelationFilter
         }
 
         $query->where(static function (QueryBuilder $nested) use ($typeColumn, $idColumn, $alias, $ids, $batchSize): void {
-            $nested->where($typeColumn, '!=', $alias);
+            $nested->where(RepositorySupport::column($typeColumn), '!=', $alias);
             self::applyChunkedIn($nested, $idColumn, $ids, true, $batchSize, 'or');
         });
     }
