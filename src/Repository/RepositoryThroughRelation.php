@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Repository;
 
-use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use InvalidArgumentException;
 
@@ -17,10 +16,8 @@ use InvalidArgumentException;
  */
 final class RepositoryThroughRelation
 {
-    public function __construct(
-        private readonly Connection $parentConnection,
-        private readonly int $batchSize = 500,
-    ) {
+    public function __construct(private readonly int $batchSize = 500)
+    {
         if ($batchSize < 1) {
             throw new InvalidArgumentException('Relation batch size must be at least one.');
         }
@@ -46,14 +43,10 @@ final class RepositoryThroughRelation
             return $parents;
         }
 
+        $many = $this->isMany($definition);
         [$throughRows, $throughParentKey, $throughKey] = $this->throughRows($parents, $definition);
         if ($throughRows === []) {
-            foreach ($parents as &$parent) {
-                $parent[$as] = $this->isMany($definition) ? [] : null;
-            }
-            unset($parent);
-
-            return $parents;
+            return $this->attachEmpty($parents, $as, $many);
         }
 
         [$relatedRows, $internalColumns] = $this->relatedRows(
@@ -62,41 +55,10 @@ final class RepositoryThroughRelation
             $definition,
             $constraint,
         );
-        $parentByThrough = [];
+        $parentByThrough = $this->parentByThrough($throughRows, $throughParentKey, $throughKey);
+        $matches = $this->matchesByParent($relatedRows, $parentByThrough, $definition, $internalColumns, $many);
 
-        foreach ($throughRows as $throughRow) {
-            $throughValue = $throughRow[$throughKey] ?? null;
-            $parentValue = $throughRow[$throughParentKey] ?? null;
-            if ($throughValue === null || $parentValue === null) {
-                continue;
-            }
-            $parentByThrough[$this->key($throughValue)] = $this->key($parentValue);
-        }
-
-        $matches = [];
-        foreach ($relatedRows as $relatedRow) {
-            $throughIdentity = $this->key($relatedRow[$definition->relatedKey] ?? null);
-            $parentIdentity = $parentByThrough[$throughIdentity] ?? null;
-            if ($parentIdentity === null) {
-                continue;
-            }
-
-            $projected = $this->withoutInternalColumns($relatedRow, $internalColumns);
-            if ($this->isMany($definition)) {
-                $matches[$parentIdentity][] = $projected;
-            } else {
-                $matches[$parentIdentity] ??= $projected;
-            }
-        }
-
-        foreach ($parents as &$parent) {
-            $parentIdentity = $this->key($parent[$definition->parentKey] ?? null);
-            $parent[$as] = $matches[$parentIdentity]
-                ?? ($this->isMany($definition) ? [] : null);
-        }
-        unset($parent);
-
-        return $parents;
+        return $this->attachMatches($parents, $as, $definition->parentKey, $matches, $many);
     }
 
     /**
@@ -104,15 +66,15 @@ final class RepositoryThroughRelation
      * row under the related repository policy.
      *
      * @param null|callable(QueryBuilder):void $constraint
-     * @return list<mixed>
+     * @return list<int|float|string|bool>
      */
     public function matchingParentKeys(
         RelationDefinition $definition,
         ?callable $constraint = null,
     ): array {
         $through = $this->requireThrough($definition);
-        $throughParentKey = $this->requireThroughParentKey($definition);
-        $throughKey = $this->requireThroughKey($definition);
+        $throughParentKey = RepositorySupport::column($this->requireThroughParentKey($definition));
+        $throughKey = RepositorySupport::column($this->requireThroughKey($definition));
         $related = $this->requireRelated($definition);
 
         $relatedQuery = $related::query();
@@ -123,53 +85,40 @@ final class RepositoryThroughRelation
         }
 
         $values = [];
-        $seen = [];
-        $connection = $through::connection();
-        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
-
+        $batchSize = max(1, $through::connection()->safeBatchSize(requested: $this->batchSize));
         foreach (array_chunk($throughValues, $batchSize) as $chunk) {
-            $query = $through::query()->apply(
-                static fn(QueryBuilder $query): mixed => $query->whereIn($throughKey, $chunk),
-            );
+            $query = $through::query()->apply(static function (QueryBuilder $builder) use ($throughKey, $chunk): void {
+                $builder->whereIn($throughKey, $chunk);
+            });
 
-            foreach ($query->get([$throughParentKey]) as $row) {
-                if (!is_array($row)) {
-                    continue;
+            foreach ($query->get([$throughParentKey]) as $candidateRow) {
+                $row = RepositorySupport::row($candidateRow);
+                if ($row !== null && ($row[$throughParentKey] ?? null) !== null) {
+                    $values[] = $row[$throughParentKey];
                 }
-                $value = $row[$throughParentKey] ?? null;
-                if ($value === null) {
-                    continue;
-                }
-                $identity = $this->key($value);
-                if (isset($seen[$identity])) {
-                    continue;
-                }
-                $seen[$identity] = true;
-                $values[] = $value;
             }
         }
 
-        return $values;
+        return RepositorySupport::uniqueValues($values);
     }
 
     /**
      * @param list<array<string,mixed>> $parents
-     * @return array{0:list<array<string,mixed>>,1:string,2:string}
+     * @return array{0:list<array<string,mixed>>,1:non-empty-string,2:non-empty-string}
      */
     private function throughRows(array $parents, RelationDefinition $definition): array
     {
         $through = $this->requireThrough($definition);
-        $throughParentKey = $this->requireThroughParentKey($definition);
-        $throughKey = $this->requireThroughKey($definition);
+        $throughParentKey = RepositorySupport::column($this->requireThroughParentKey($definition));
+        $throughKey = RepositorySupport::column($this->requireThroughKey($definition));
         $parentValues = $this->values($parents, $definition->parentKey);
-        $connection = $through::connection();
-        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+        $batchSize = max(1, $through::connection()->safeBatchSize(requested: $this->batchSize));
         $rows = [];
 
         foreach (array_chunk($parentValues, $batchSize) as $chunk) {
-            $query = $through::query()->apply(
-                static fn(QueryBuilder $query): mixed => $query->whereIn($throughParentKey, $chunk),
-            );
+            $query = $through::query()->apply(static function (QueryBuilder $builder) use ($throughParentKey, $chunk): void {
+                $builder->whereIn($throughParentKey, $chunk);
+            });
             array_push($rows, ...$this->normalizeRows($query->get([$throughParentKey, $throughKey])->toArray()));
         }
 
@@ -188,19 +137,16 @@ final class RepositoryThroughRelation
         ?callable $constraint,
     ): array {
         $related = $this->requireRelated($definition);
+        $relatedKey = RepositorySupport::column($definition->relatedKey);
         $values = $this->values($throughRows, $throughKey);
-        $connection = $related::connection();
-        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
-        [$columns, $internalColumns] = $this->projection(
-            $definition->columns,
-            $definition->relatedKey,
-        );
+        $batchSize = max(1, $related::connection()->safeBatchSize(requested: $this->batchSize));
+        [$columns, $internalColumns] = $this->projection($definition->columns, $relatedKey);
         $rows = [];
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::query()->apply(
-                static fn(QueryBuilder $query): mixed => $query->whereIn($definition->relatedKey, $chunk),
-            );
+            $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
+                $builder->whereIn($relatedKey, $chunk);
+            });
             $this->applyRelatedScopes($query, $definition, $constraint);
             array_push($rows, ...$this->normalizeRows($query->get($columns)->toArray()));
         }
@@ -215,7 +161,9 @@ final class RepositoryThroughRelation
         ?callable $constraint,
     ): void {
         if ($definition->scope !== null) {
-            $query->apply($definition->scope);
+            /** @var callable(QueryBuilder):void $scope */
+            $scope = $definition->scope;
+            $query->apply($scope);
         }
         if ($constraint !== null) {
             $query->apply($constraint);
@@ -239,49 +187,133 @@ final class RepositoryThroughRelation
         return [[...$requested, $relatedKey], [$relatedKey]];
     }
 
-    /** @return list<mixed> */
+    /** @return list<int|float|string|bool> */
     private function distinctValues(RepositoryQuery $query, string $column): array
     {
+        $column = RepositorySupport::column($column);
         $values = [];
-        $seen = [];
 
-        foreach ($query->get([$column]) as $row) {
-            if (!is_array($row)) {
-                continue;
+        foreach ($query->get([$column]) as $candidateRow) {
+            $row = RepositorySupport::row($candidateRow);
+            if ($row !== null && ($row[$column] ?? null) !== null) {
+                $values[] = $row[$column];
             }
-            $value = $row[$column] ?? null;
-            if ($value === null) {
-                continue;
-            }
-            $identity = $this->key($value);
-            if (isset($seen[$identity])) {
-                continue;
-            }
-            $seen[$identity] = true;
-            $values[] = $value;
         }
 
-        return $values;
+        return RepositorySupport::uniqueValues($values);
     }
 
-    /** @param array<mixed> $values @return list<array<string,mixed>> */
+    /**
+     * @param array<array-key,mixed> $values
+     * @return list<array<string,mixed>>
+     */
     private function normalizeRows(array $values): array
     {
         $rows = [];
         foreach ($values as $value) {
-            if (!is_array($value)) {
-                continue;
+            $row = RepositorySupport::row($value);
+            if ($row !== null) {
+                $rows[] = $row;
             }
-            $row = [];
-            foreach ($value as $key => $item) {
-                if (is_string($key)) {
-                    $row[$key] = $item;
-                }
-            }
-            $rows[] = $row;
         }
 
         return $rows;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<int|float|string|bool>
+     */
+    private function values(array $rows, string $column): array
+    {
+        $values = [];
+        foreach ($rows as $row) {
+            if (array_key_exists($column, $row) && $row[$column] !== null) {
+                $values[] = $row[$column];
+            }
+        }
+
+        return RepositorySupport::uniqueValues($values);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return array<string,string>
+     */
+    private function parentByThrough(array $rows, string $parentKey, string $throughKey): array
+    {
+        $map = [];
+        foreach ($rows as $row) {
+            $through = $row[$throughKey] ?? null;
+            $parent = $row[$parentKey] ?? null;
+            if ($through !== null && $parent !== null) {
+                $map[RepositorySupport::key($through)] = RepositorySupport::key($parent);
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @param array<string,string> $parentByThrough
+     * @param list<string> $internalColumns
+     * @return array<string,mixed>
+     */
+    private function matchesByParent(
+        array $rows,
+        array $parentByThrough,
+        RelationDefinition $definition,
+        array $internalColumns,
+        bool $many,
+    ): array {
+        $matches = [];
+        foreach ($rows as $row) {
+            $throughIdentity = RepositorySupport::key($row[$definition->relatedKey] ?? null);
+            $parentIdentity = $parentByThrough[$throughIdentity] ?? null;
+            if ($parentIdentity === null) {
+                continue;
+            }
+
+            $projected = $this->withoutInternalColumns($row, $internalColumns);
+            if ($many) {
+                $matches[$parentIdentity][] = $projected;
+            } else {
+                $matches[$parentIdentity] ??= $projected;
+            }
+        }
+
+        return $matches;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @param array<string,mixed> $matches
+     * @return list<array<string,mixed>>
+     */
+    private function attachMatches(array $parents, string $as, string $parentKey, array $matches, bool $many): array
+    {
+        foreach ($parents as &$parent) {
+            $identity = RepositorySupport::key($parent[$parentKey] ?? null);
+            $parent[$as] = $matches[$identity] ?? ($many ? [] : null);
+        }
+        unset($parent);
+
+        return $parents;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @return list<array<string,mixed>>
+     */
+    private function attachEmpty(array $parents, string $as, bool $many): array
+    {
+        foreach ($parents as &$parent) {
+            $parent[$as] = $many ? [] : null;
+        }
+        unset($parent);
+
+        return $parents;
     }
 
     /**
@@ -296,26 +328,6 @@ final class RepositoryThroughRelation
         }
 
         return $row;
-    }
-
-    /** @param list<array<string,mixed>> $rows @return list<mixed> */
-    private function values(array $rows, string $column): array
-    {
-        $values = [];
-        $seen = [];
-        foreach ($rows as $row) {
-            if (!array_key_exists($column, $row) || $row[$column] === null) {
-                continue;
-            }
-            $identity = $this->key($row[$column]);
-            if (isset($seen[$identity])) {
-                continue;
-            }
-            $seen[$identity] = true;
-            $values[] = $row[$column];
-        }
-
-        return $values;
     }
 
     /** @return class-string<TableRepository> */
@@ -347,16 +359,5 @@ final class RepositoryThroughRelation
     private function isMany(RelationDefinition $definition): bool
     {
         return $definition->type === RelationDefinition::HAS_MANY;
-    }
-
-    private function key(mixed $value): string
-    {
-        return match (true) {
-            is_int($value), is_string($value) => 'scalar:' . $value,
-            is_float($value) => 'float:' . serialize($value),
-            is_bool($value) => 'bool:' . ($value ? '1' : '0'),
-            $value === null => 'null:',
-            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
-        };
     }
 }
