@@ -41,7 +41,12 @@ final class RepositoryOneOfManyRelation
         $relatedDefinition = $related::definition();
         $orderColumn = $definition->oneOfManyColumn ?? $relatedDefinition->primaryKey;
         $direction = $definition->oneOfManyAggregate === 'min' ? 'asc' : 'desc';
-        $columns = $this->ensureSelected($definition->columns, $definition->relatedKey);
+        [$columns, $internalColumns] = $this->projection(
+            $definition->columns,
+            $definition->relatedKey,
+            $orderColumn,
+            $relatedDefinition->primaryKey,
+        );
         $connection = $related::connection();
         $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
         $indexed = [];
@@ -86,7 +91,9 @@ final class RepositoryOneOfManyRelation
                     continue;
                 }
                 $identity = $this->key($row[$definition->relatedKey] ?? null);
-                $indexed[$identity] ??= $row;
+                if (!isset($indexed[$identity])) {
+                    $indexed[$identity] = $this->withoutInternalColumns($row, $internalColumns);
+                }
             }
         }
 
@@ -109,14 +116,46 @@ final class RepositoryOneOfManyRelation
         return $parents;
     }
 
-    /** @param list<string> $columns @return list<string> */
-    private function ensureSelected(array $columns, string $key): array
-    {
-        if ($columns === ['*'] || in_array('*', $columns, true) || in_array($key, $columns, true)) {
-            return $columns;
+    /**
+     * @param list<string> $requested
+     * @return array{0:list<string>,1:list<string>}
+     */
+    private function projection(
+        array $requested,
+        string $relatedKey,
+        string $orderColumn,
+        string $primaryKey,
+    ): array {
+        if ($requested === ['*'] || in_array('*', $requested, true)) {
+            return [$requested, []];
         }
 
-        return [...$columns, $key];
+        $columns = $requested;
+        $internal = [];
+
+        foreach ([$relatedKey, $orderColumn, $primaryKey] as $column) {
+            if (in_array($column, $columns, true)) {
+                continue;
+            }
+            $columns[] = $column;
+            $internal[] = $column;
+        }
+
+        return [$columns, $internal];
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param list<string> $columns
+     * @return array<string,mixed>
+     */
+    private function withoutInternalColumns(array $row, array $columns): array
+    {
+        foreach ($columns as $column) {
+            unset($row[$column]);
+        }
+
+        return $row;
     }
 
     /** @param list<array<string,mixed>> $rows @return list<mixed> */
