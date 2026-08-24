@@ -27,6 +27,7 @@ final readonly class RelationDefinition
      * @param array<string,class-string<TableRepository>> $morphMap
      * @param class-string<TableRepository>|null $through
      * @param null|callable(QueryBuilder):void $oneOfManyScope
+     * @param array<string,'max'|'min'> $oneOfManyOrders
      */
     public function __construct(
         public string $type,
@@ -50,7 +51,14 @@ final readonly class RelationDefinition
         public ?string $oneOfManyColumn = null,
         public ?string $oneOfManyAggregate = null,
         public mixed $oneOfManyScope = null,
-    ) {}
+        public array $oneOfManyOrders = [],
+    ) {
+        foreach ($oneOfManyOrders as $column => $aggregate) {
+            if (trim($column) === '' || !in_array($aggregate, ['max', 'min'], true)) {
+                throw new InvalidArgumentException('Advanced one-of-many orders require non-empty columns mapped to max or min.');
+            }
+        }
+    }
 
     /** Return a copy with an alternate pivot projection key. */
     public function asPivot(string $accessor): self
@@ -74,22 +82,62 @@ final readonly class RelationDefinition
     }
 
     /**
-     * Choose the maximum/minimum related row for each parent relation key.
+     * Choose one related row using max/min sortable criteria.
      *
-     * When $column is null the related repository primary key is used.
-     * The optional scope participates in candidate selection before the winner
-     * is chosen.
+     * A scalar/null column defines one ordering criterion. An associative array
+     * defines lexicographic advanced criteria, e.g.
+     * ``['published_at' => 'max', 'id' => 'max']``. When an array is used, the
+     * second argument may be the candidate-selection scope.
      *
+     * @param string|array<string,'max'|'min'>|null $column
+     * @param string|callable(QueryBuilder):void $aggregate
      * @param null|callable(QueryBuilder):void $scope
      */
     public function ofMany(
-        ?string $column = null,
-        string $aggregate = 'max',
+        string|array|null $column = null,
+        string|callable $aggregate = 'max',
         ?callable $scope = null,
     ): self {
         $type = $this->toOneType();
-        $aggregate = strtolower(trim($aggregate));
 
+        if (is_array($column)) {
+            if ($column === []) {
+                throw new InvalidArgumentException('Advanced one-of-many criteria must not be empty.');
+            }
+
+            if (is_callable($aggregate)) {
+                $scope = $aggregate;
+            } elseif (strtolower(trim($aggregate)) !== 'max') {
+                throw new InvalidArgumentException('Advanced one-of-many uses the second argument as an optional scope.');
+            }
+
+            $orders = [];
+            foreach ($column as $orderColumn => $orderAggregate) {
+                $orderColumn = trim($orderColumn);
+                $orderAggregate = strtolower(trim($orderAggregate));
+                if ($orderColumn === '' || !in_array($orderAggregate, ['max', 'min'], true)) {
+                    throw new InvalidArgumentException('Advanced one-of-many criteria require non-empty columns mapped to max or min.');
+                }
+                $orders[$orderColumn] = $orderAggregate;
+            }
+
+            $firstColumn = array_key_first($orders);
+            $firstAggregate = $orders[$firstColumn];
+
+            return $this->withOneOfMany(
+                $type,
+                $firstColumn,
+                $firstAggregate,
+                $scope,
+                $orders,
+            );
+        }
+
+        if (!is_string($aggregate)) {
+            throw new InvalidArgumentException('Scalar one-of-many definitions require max or min as the aggregate.');
+        }
+
+        $aggregate = strtolower(trim($aggregate));
         if (!in_array($aggregate, ['max', 'min'], true)) {
             throw new InvalidArgumentException('One-of-many aggregate must be max or min.');
         }
@@ -98,28 +146,14 @@ final readonly class RelationDefinition
             throw new InvalidArgumentException('One-of-many column must not be empty.');
         }
 
-        return new self(
+        $column = $column === null ? null : trim($column);
+
+        return $this->withOneOfMany(
             $type,
-            $this->related,
-            $this->parentKey,
-            $this->relatedKey,
-            $this->columns,
-            $this->pivotTable,
-            $this->pivotParentKey,
-            $this->pivotRelatedKey,
-            $this->scope,
-            $this->pivotColumns,
-            $this->pivotAccessor,
-            $this->morphTypeColumn,
-            $this->morphIdColumn,
-            $this->morphAlias,
-            $this->morphMap,
-            $this->through,
-            $this->throughParentKey,
-            $this->throughKey,
-            $column === null ? null : trim($column),
+            $column,
             $aggregate,
             $scope,
+            $column === null ? [] : [$column => $aggregate],
         );
     }
 
@@ -208,6 +242,44 @@ final readonly class RelationDefinition
             $this->oneOfManyColumn,
             $this->oneOfManyAggregate,
             $this->oneOfManyScope,
+            $this->oneOfManyOrders,
+        );
+    }
+
+    /**
+     * @param null|callable(QueryBuilder):void $scope
+     * @param array<string,'max'|'min'> $orders
+     */
+    private function withOneOfMany(
+        string $type,
+        ?string $column,
+        string $aggregate,
+        ?callable $scope,
+        array $orders,
+    ): self {
+        return new self(
+            $type,
+            $this->related,
+            $this->parentKey,
+            $this->relatedKey,
+            $this->columns,
+            $this->pivotTable,
+            $this->pivotParentKey,
+            $this->pivotRelatedKey,
+            $this->scope,
+            $this->pivotColumns,
+            $this->pivotAccessor,
+            $this->morphTypeColumn,
+            $this->morphIdColumn,
+            $this->morphAlias,
+            $this->morphMap,
+            $this->through,
+            $this->throughParentKey,
+            $this->throughKey,
+            $column,
+            $aggregate,
+            $scope,
+            $orders,
         );
     }
 
