@@ -119,8 +119,14 @@ abstract class TableRepository
     public static function query(?string $connection = null): RepositoryQuery
     {
         $repository = static::repository($connection);
+        $resolvedConnection = static::connection($connection);
 
-        return new RepositoryQuery($repository, $repository->builder());
+        return new RepositoryQuery(
+            $repository,
+            $repository->builder(),
+            $resolvedConnection,
+            static::relations(),
+        );
     }
 
     /**
@@ -174,6 +180,14 @@ abstract class TableRepository
         });
 
         return static::configureRepository($repository);
+    }
+
+    /**
+     * Public table metadata for relation definitions and tooling.
+     */
+    public static function table(): string
+    {
+        return static::tableName();
     }
 
     /**
@@ -256,6 +270,16 @@ abstract class TableRepository
      * @return array<array-key,callable(QueryBuilder):void>
      */
     protected static function globalScopes(): array
+    {
+        return [];
+    }
+
+    /**
+     * Declarative eager-loadable relations.
+     *
+     * @return array<string,RelationDefinition>
+     */
+    protected static function relations(): array
     {
         return [];
     }
