@@ -46,11 +46,11 @@ final class RepositoryOneOfManySelector
             ?? throw new InvalidArgumentException('One-of-many relation requires a related repository.');
         $relatedDefinition = $related::definition();
         $orders = RepositoryOneOfManyOrder::resolve($definition, $relatedDefinition);
-        $columns = array_values(array_unique([
+        $columns = RepositorySupport::uniqueColumns([
             $definition->relatedKey,
             $relatedDefinition->primaryKey,
             ...RepositoryOneOfManyOrder::columns($orders),
-        ]));
+        ]);
         $winners = [];
 
         if ($parentValues === null) {
@@ -59,14 +59,12 @@ final class RepositoryOneOfManySelector
             return $winners;
         }
 
-        $values = $this->uniqueValues($parentValues);
+        $values = RepositorySupport::uniqueValues($parentValues);
         if ($values === []) {
             return [];
         }
 
-        $connection = $related::connection();
-        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
-
+        $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
         foreach (array_chunk($values, $batchSize) as $chunk) {
             $this->scanDirectBatch($definition, $related, $columns, $orders, $chunk, $winners);
         }
@@ -76,7 +74,7 @@ final class RepositoryOneOfManySelector
 
     /**
      * @param class-string<TableRepository> $related
-     * @param list<string> $columns
+     * @param list<non-empty-string> $columns
      * @param array<string,'asc'|'desc'> $orders
      * @param list<mixed>|null $parentValues
      * @param array<string,array{parent:mixed,id:mixed,row:array<string,mixed>}> $winners
@@ -90,53 +88,64 @@ final class RepositoryOneOfManySelector
         array &$winners,
     ): void {
         $relatedDefinition = $related::definition();
+        $relatedKey = RepositorySupport::column($definition->relatedKey);
         $query = $related::query();
 
         if ($parentValues !== null) {
-            $query->apply(
-                static fn(QueryBuilder $builder): mixed => $builder->whereIn(
-                    $definition->relatedKey,
-                    $parentValues,
-                ),
-            );
+            $query->apply(static function (QueryBuilder $builder) use ($relatedKey, $parentValues): void {
+                $builder->whereIn($relatedKey, $parentValues);
+            });
         }
 
-        if (
-            $definition->type === RelationDefinition::MORPH_ONE
-            && $definition->morphTypeColumn !== null
-            && $definition->morphAlias !== null
-        ) {
-            $query->apply(static fn(QueryBuilder $builder): mixed => $builder->where(
-                $definition->morphTypeColumn,
-                '=',
-                $definition->morphAlias,
-            ));
-        }
-
+        $this->applyMorphConstraint($query, $definition);
         $this->applyCandidateScopes($query, $definition);
 
-        foreach ($query->raw()->select($columns)->cursor() as $row) {
-            if (!is_array($row)) {
+        foreach ($query->raw()->select($columns)->cursor() as $candidateRow) {
+            $row = RepositorySupport::row($candidateRow);
+            if ($row === null) {
                 continue;
             }
 
-            $parent = $row[$definition->relatedKey] ?? null;
+            $parent = $row[$relatedKey] ?? null;
             $id = $row[$relatedDefinition->primaryKey] ?? null;
             if ($parent === null || $id === null) {
                 continue;
             }
 
-            $identity = $this->key($parent);
+            $identity = RepositorySupport::key($parent);
             $candidate = ['parent' => $parent, 'id' => $id, 'row' => $row];
-
-            if (!isset($winners[$identity]) || RepositoryOneOfManyOrder::compare(
-                $candidate['row'],
-                $winners[$identity]['row'],
-                $orders,
-            ) < 0) {
+            if ($this->isBetterCandidate($candidate, $winners[$identity] ?? null, $orders)) {
                 $winners[$identity] = $candidate;
             }
         }
+    }
+
+    private function applyMorphConstraint(RepositoryQuery $query, RelationDefinition $definition): void
+    {
+        if (
+            $definition->type !== RelationDefinition::MORPH_ONE
+            || $definition->morphTypeColumn === null
+            || $definition->morphAlias === null
+        ) {
+            return;
+        }
+
+        $column = RepositorySupport::column($definition->morphTypeColumn);
+        $alias = $definition->morphAlias;
+        $query->apply(static function (QueryBuilder $builder) use ($column, $alias): void {
+            $builder->where($column, '=', $alias);
+        });
+    }
+
+    /**
+     * @param array{parent:mixed,id:mixed,row:array<string,mixed>} $candidate
+     * @param array{parent:mixed,id:mixed,row:array<string,mixed>}|null $winner
+     * @param array<string,'asc'|'desc'> $orders
+     */
+    private function isBetterCandidate(array $candidate, ?array $winner, array $orders): bool
+    {
+        return $winner === null
+            || RepositoryOneOfManyOrder::compare($candidate['row'], $winner['row'], $orders) < 0;
     }
 
     /**
@@ -145,97 +154,130 @@ final class RepositoryOneOfManySelector
      */
     private function selectThrough(RelationDefinition $definition, ?array $parentValues): array
     {
-        $through = $definition->through
-            ?? throw new InvalidArgumentException('One-of-many through relation requires an intermediate repository.');
-        $throughParentKey = $definition->throughParentKey
-            ?? throw new InvalidArgumentException('One-of-many through relation requires an intermediate parent key.');
-        $throughKey = $definition->throughKey
-            ?? throw new InvalidArgumentException('One-of-many through relation requires an intermediate local key.');
-        $related = $definition->related
-            ?? throw new InvalidArgumentException('One-of-many through relation requires a related repository.');
-        $parentByThrough = [];
-        $throughValues = [];
-
-        if ($parentValues === null) {
-            $this->scanThroughBatch(
-                $through,
-                $throughParentKey,
-                $throughKey,
-                null,
-                $parentByThrough,
-                $throughValues,
-            );
-        } else {
-            $values = $this->uniqueValues($parentValues);
-            if ($values === []) {
-                return [];
-            }
-
-            $connection = $through::connection();
-            $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
-            foreach (array_chunk($values, $batchSize) as $chunk) {
-                $this->scanThroughBatch(
-                    $through,
-                    $throughParentKey,
-                    $throughKey,
-                    $chunk,
-                    $parentByThrough,
-                    $throughValues,
-                );
-            }
-        }
-
+        [$parentByThrough, $throughValues] = $this->loadThroughMap($definition, $parentValues);
         if ($throughValues === []) {
             return [];
         }
 
+        return $this->selectThroughRelated($definition, $parentByThrough, $throughValues);
+    }
+
+    /**
+     * @param list<mixed>|null $parentValues
+     * @return array{0:array<string,mixed>,1:list<mixed>}
+     */
+    private function loadThroughMap(RelationDefinition $definition, ?array $parentValues): array
+    {
+        $through = $definition->through
+            ?? throw new InvalidArgumentException('One-of-many through relation requires an intermediate repository.');
+        $parentKey = RepositorySupport::column($definition->throughParentKey
+            ?? throw new InvalidArgumentException('One-of-many through relation requires an intermediate parent key.'));
+        $throughKey = RepositorySupport::column($definition->throughKey
+            ?? throw new InvalidArgumentException('One-of-many through relation requires an intermediate local key.'));
+        $parentByThrough = [];
+        $throughValues = [];
+
+        if ($parentValues === null) {
+            $this->scanThroughBatch($through, $parentKey, $throughKey, null, $parentByThrough, $throughValues);
+        } else {
+            $values = RepositorySupport::uniqueValues($parentValues);
+            $batchSize = $through::connection()->safeBatchSize(requested: $this->batchSize);
+            foreach (array_chunk($values, $batchSize) as $chunk) {
+                $this->scanThroughBatch($through, $parentKey, $throughKey, $chunk, $parentByThrough, $throughValues);
+            }
+        }
+
+        return [$parentByThrough, array_values($throughValues)];
+    }
+
+    /**
+     * @param array<string,mixed> $parentByThrough
+     * @param list<mixed> $throughValues
+     * @return array<string,array{parent:mixed,id:mixed,row:array<string,mixed>}>
+     */
+    private function selectThroughRelated(
+        RelationDefinition $definition,
+        array $parentByThrough,
+        array $throughValues,
+    ): array {
+        $related = $definition->related
+            ?? throw new InvalidArgumentException('One-of-many through relation requires a related repository.');
         $relatedDefinition = $related::definition();
+        $relatedKey = RepositorySupport::column($definition->relatedKey);
         $orders = RepositoryOneOfManyOrder::resolve($definition, $relatedDefinition);
-        $columns = array_values(array_unique([
-            $definition->relatedKey,
+        $columns = RepositorySupport::uniqueColumns([
+            $relatedKey,
             $relatedDefinition->primaryKey,
             ...RepositoryOneOfManyOrder::columns($orders),
-        ]));
-        $connection = $related::connection();
-        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+        ]);
+        $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
         $winners = [];
 
-        foreach (array_chunk(array_values($throughValues), $batchSize) as $chunk) {
-            $query = $related::query()->apply(
-                static fn(QueryBuilder $builder): mixed => $builder->whereIn($definition->relatedKey, $chunk),
+        foreach (array_chunk($throughValues, $batchSize) as $chunk) {
+            $this->scanThroughRelatedBatch(
+                $definition,
+                $related,
+                $relatedKey,
+                $columns,
+                $orders,
+                $chunk,
+                $parentByThrough,
+                $winners,
             );
-            $this->applyCandidateScopes($query, $definition);
-
-            foreach ($query->raw()->select($columns)->cursor() as $row) {
-                if (!is_array($row)) {
-                    continue;
-                }
-
-                $throughIdentity = $this->key($row[$definition->relatedKey] ?? null);
-                $parent = $parentByThrough[$throughIdentity] ?? null;
-                $id = $row[$relatedDefinition->primaryKey] ?? null;
-                if ($parent === null || $id === null) {
-                    continue;
-                }
-
-                $parentIdentity = $this->key($parent);
-                $candidate = ['parent' => $parent, 'id' => $id, 'row' => $row];
-
-                if (!isset($winners[$parentIdentity]) || RepositoryOneOfManyOrder::compare(
-                    $candidate['row'],
-                    $winners[$parentIdentity]['row'],
-                    $orders,
-                ) < 0) {
-                    $winners[$parentIdentity] = $candidate;
-                }
-            }
         }
 
         return $winners;
     }
 
     /**
+     * @param class-string<TableRepository> $related
+     * @param non-empty-string $relatedKey
+     * @param list<non-empty-string> $columns
+     * @param array<string,'asc'|'desc'> $orders
+     * @param list<mixed> $values
+     * @param array<string,mixed> $parentByThrough
+     * @param array<string,array{parent:mixed,id:mixed,row:array<string,mixed>}> $winners
+     */
+    private function scanThroughRelatedBatch(
+        RelationDefinition $definition,
+        string $related,
+        string $relatedKey,
+        array $columns,
+        array $orders,
+        array $values,
+        array $parentByThrough,
+        array &$winners,
+    ): void {
+        $relatedDefinition = $related::definition();
+        $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $values): void {
+            $builder->whereIn($relatedKey, $values);
+        });
+        $this->applyCandidateScopes($query, $definition);
+
+        foreach ($query->raw()->select($columns)->cursor() as $candidateRow) {
+            $row = RepositorySupport::row($candidateRow);
+            if ($row === null) {
+                continue;
+            }
+
+            $parent = $parentByThrough[RepositorySupport::key($row[$relatedKey] ?? null)] ?? null;
+            $id = $row[$relatedDefinition->primaryKey] ?? null;
+            if ($parent === null || $id === null) {
+                continue;
+            }
+
+            $identity = RepositorySupport::key($parent);
+            $candidate = ['parent' => $parent, 'id' => $id, 'row' => $row];
+            if ($this->isBetterCandidate($candidate, $winners[$identity] ?? null, $orders)) {
+                $winners[$identity] = $candidate;
+            }
+        }
+    }
+
+    /**
      * @param class-string<TableRepository> $through
+     * @param non-empty-string $throughParentKey
+     * @param non-empty-string $throughKey
      * @param list<mixed>|null $parentValues
      * @param array<string,mixed> $parentByThrough
      * @param array<string,mixed> $throughValues
@@ -250,16 +292,14 @@ final class RepositoryOneOfManySelector
     ): void {
         $query = $through::query();
         if ($parentValues !== null) {
-            $query->apply(
-                static fn(QueryBuilder $builder): mixed => $builder->whereIn(
-                    $throughParentKey,
-                    $parentValues,
-                ),
-            );
+            $query->apply(static function (QueryBuilder $builder) use ($throughParentKey, $parentValues): void {
+                $builder->whereIn($throughParentKey, $parentValues);
+            });
         }
 
-        foreach ($query->raw()->select([$throughParentKey, $throughKey])->cursor() as $row) {
-            if (!is_array($row)) {
+        foreach ($query->raw()->select([$throughParentKey, $throughKey])->cursor() as $candidateRow) {
+            $row = RepositorySupport::row($candidateRow);
+            if ($row === null) {
                 continue;
             }
 
@@ -269,7 +309,7 @@ final class RepositoryOneOfManySelector
                 continue;
             }
 
-            $identity = $this->key($throughValue);
+            $identity = RepositorySupport::key($throughValue);
             $parentByThrough[$identity] = $parent;
             $throughValues[$identity] = $throughValue;
         }
@@ -278,35 +318,14 @@ final class RepositoryOneOfManySelector
     private function applyCandidateScopes(RepositoryQuery $query, RelationDefinition $definition): void
     {
         if ($definition->scope !== null) {
-            $query->apply($definition->scope);
+            /** @var callable(QueryBuilder):void $scope */
+            $scope = $definition->scope;
+            $query->apply($scope);
         }
         if ($definition->oneOfManyScope !== null) {
-            $query->apply($definition->oneOfManyScope);
+            /** @var callable(QueryBuilder):void $scope */
+            $scope = $definition->oneOfManyScope;
+            $query->apply($scope);
         }
-    }
-
-    /** @param list<mixed> $values @return list<mixed> */
-    private function uniqueValues(array $values): array
-    {
-        $unique = [];
-        foreach ($values as $value) {
-            if ($value === null) {
-                continue;
-            }
-            $unique[$this->key($value)] = $value;
-        }
-
-        return array_values($unique);
-    }
-
-    private function key(mixed $value): string
-    {
-        return match (true) {
-            is_int($value), is_string($value) => 'scalar:' . $value,
-            is_float($value) => 'float:' . serialize($value),
-            is_bool($value) => 'bool:' . ($value ? '1' : '0'),
-            $value === null => 'null:',
-            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
-        };
     }
 }
