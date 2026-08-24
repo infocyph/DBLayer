@@ -8,12 +8,9 @@ use Infocyph\DBLayer\Query\QueryBuilder;
 use InvalidArgumentException;
 
 /**
- * Resolve one-of-many relations by ordering each bounded related-key batch and
- * keeping the first row for each parent relation key.
- *
- * Definition and one-of-many scopes constrain the candidate set. A per-query
- * eager constraint is applied after winner selection so it cannot promote an
- * older/non-winning row.
+ * Hydrate already-selected one-of-many winners through the related repository.
+ * Candidate selection itself is delegated to RepositoryOneOfManySelector so
+ * direct, polymorphic and through paths share one streaming selection engine.
  */
 final class RepositoryOneOfManyRelation
 {
@@ -35,79 +32,40 @@ final class RepositoryOneOfManyRelation
         RelationDefinition $definition,
         ?callable $constraint = null,
     ): array {
+        if ($parents === []) {
+            return $parents;
+        }
+
         $related = $definition->related
             ?? throw new InvalidArgumentException('One-of-many relation requires a related repository.');
         $parentValues = $this->values($parents, $definition->parentKey);
-        if ($parentValues === []) {
+        $winners = (new RepositoryOneOfManySelector($this->batchSize))
+            ->select($definition, $parentValues);
+
+        if ($winners === []) {
             return $this->attachEmpty($parents, $as);
         }
 
-        $relatedDefinition = $related::definition();
-        $orders = RepositoryOneOfManyOrder::resolve($definition, $relatedDefinition);
-        [$columns, $internalColumns] = $this->projection(
-            $definition->columns,
-            $definition->relatedKey,
-            RepositoryOneOfManyOrder::columns($orders),
-        );
-        $connection = $related::connection();
-        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
-        $indexed = [];
-
-        foreach (array_chunk($parentValues, $batchSize) as $chunk) {
-            $query = $related::query()->apply(
-                static function (QueryBuilder $query) use ($definition, $chunk): void {
-                    $query->whereIn($definition->relatedKey, $chunk);
-                    if (
-                        $definition->type === RelationDefinition::MORPH_ONE
-                        && $definition->morphTypeColumn !== null
-                        && $definition->morphAlias !== null
-                    ) {
-                        $query->where($definition->morphTypeColumn, '=', $definition->morphAlias);
-                    }
-                },
-            );
-
-            if ($definition->scope !== null) {
-                $query->apply($definition->scope);
-            }
-            if ($definition->oneOfManyScope !== null) {
-                $query->apply($definition->oneOfManyScope);
-            }
-
-            $query->apply(static function (QueryBuilder $builder) use ($orders): void {
-                RepositoryOneOfManyOrder::apply($builder, $orders);
-            });
-
-            foreach ($query->get($columns) as $row) {
-                if (!is_array($row)) {
-                    continue;
-                }
-                $identity = $this->key($row[$definition->relatedKey] ?? null);
-                $winnerId = $row[$relatedDefinition->primaryKey] ?? null;
-                if ($winnerId === null || isset($indexed[$identity])) {
-                    continue;
-                }
-
-                $indexed[$identity] = [
-                    'id' => $winnerId,
-                    'row' => $this->withoutInternalColumns($row, $internalColumns),
-                ];
-            }
-        }
-
-        $allowed = $this->allowedWinnerIds(
+        $primaryKey = $related::definition()->primaryKey;
+        [$columns, $internalColumns] = $this->projection($definition->columns, $primaryKey);
+        $rowsById = $this->winnerRows(
             $related,
-            $relatedDefinition->primaryKey,
-            $indexed,
+            $primaryKey,
+            array_values(array_map(
+                static fn(array $winner): mixed => $winner['id'],
+                $winners,
+            )),
+            $columns,
+            $internalColumns,
             $constraint,
         );
 
         foreach ($parents as &$parent) {
             $identity = $this->key($parent[$definition->parentKey] ?? null);
-            $winner = $indexed[$identity] ?? null;
-            $parent[$as] = $winner !== null && isset($allowed[$this->key($winner['id'])])
-                ? $winner['row']
-                : null;
+            $winner = $winners[$identity] ?? null;
+            $parent[$as] = $winner === null
+                ? null
+                : ($rowsById[$this->key($winner['id'])] ?? null);
         }
         unset($parent);
 
@@ -116,47 +74,60 @@ final class RepositoryOneOfManyRelation
 
     /**
      * @param class-string<TableRepository> $related
-     * @param array<string,array{id:mixed,row:array<string,mixed>}> $indexed
+     * @param list<mixed> $ids
+     * @param list<string> $columns
+     * @param list<string> $internalColumns
      * @param null|callable(QueryBuilder):void $constraint
-     * @return array<string,true>
+     * @return array<string,array<string,mixed>>
      */
-    private function allowedWinnerIds(
+    private function winnerRows(
         string $related,
         string $primaryKey,
-        array $indexed,
+        array $ids,
+        array $columns,
+        array $internalColumns,
         ?callable $constraint,
     ): array {
-        $allowed = [];
-        $ids = [];
-
-        foreach ($indexed as $winner) {
-            $allowed[$this->key($winner['id'])] = true;
-            $ids[] = $winner['id'];
-        }
-
-        if ($constraint === null || $ids === []) {
-            return $allowed;
-        }
-
-        $allowed = [];
         $connection = $related::connection();
         $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+        $rows = [];
 
         foreach (array_chunk($ids, $batchSize) as $chunk) {
             $query = $related::query()->apply(
                 static fn(QueryBuilder $builder): mixed => $builder->whereIn($primaryKey, $chunk),
             );
-            $query->apply($constraint);
+            if ($constraint !== null) {
+                $query->apply($constraint);
+            }
 
-            foreach ($query->raw()->select($primaryKey)->cursor() as $row) {
+            foreach ($query->get($columns) as $row) {
                 if (!is_array($row) || !array_key_exists($primaryKey, $row)) {
                     continue;
                 }
-                $allowed[$this->key($row[$primaryKey])] = true;
+
+                $id = $row[$primaryKey];
+                $rows[$this->key($id)] = $this->withoutInternalColumns($row, $internalColumns);
             }
         }
 
-        return $allowed;
+        return $rows;
+    }
+
+    /**
+     * @param list<string> $requested
+     * @return array{0:list<string>,1:list<string>}
+     */
+    private function projection(array $requested, string $primaryKey): array
+    {
+        if ($requested === ['*'] || in_array('*', $requested, true)) {
+            return [$requested, []];
+        }
+
+        if (in_array($primaryKey, $requested, true)) {
+            return [$requested, []];
+        }
+
+        return [[...$requested, $primaryKey], [$primaryKey]];
     }
 
     /** @param list<array<string,mixed>> $parents @return list<array<string,mixed>> */
@@ -168,31 +139,6 @@ final class RepositoryOneOfManyRelation
         unset($parent);
 
         return $parents;
-    }
-
-    /**
-     * @param list<string> $requested
-     * @param list<string> $required
-     * @return array{0:list<string>,1:list<string>}
-     */
-    private function projection(array $requested, string $relatedKey, array $required): array
-    {
-        if ($requested === ['*'] || in_array('*', $requested, true)) {
-            return [$requested, []];
-        }
-
-        $columns = $requested;
-        $internal = [];
-
-        foreach (array_unique([$relatedKey, ...$required]) as $column) {
-            if (in_array($column, $columns, true)) {
-                continue;
-            }
-            $columns[] = $column;
-            $internal[] = $column;
-        }
-
-        return [$columns, $internal];
     }
 
     /**
@@ -214,14 +160,17 @@ final class RepositoryOneOfManyRelation
     {
         $values = [];
         $seen = [];
+
         foreach ($rows as $row) {
             if (!array_key_exists($column, $row) || $row[$column] === null) {
                 continue;
             }
+
             $identity = $this->key($row[$column]);
             if (isset($seen[$identity])) {
                 continue;
             }
+
             $seen[$identity] = true;
             $values[] = $row[$column];
         }
