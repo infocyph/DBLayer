@@ -51,6 +51,16 @@ final class RepositoryRelationAggregator
             $this->assertColumn($column);
         }
 
+        if ($definition->oneOfManyAggregate !== null) {
+            return (new RepositoryOneOfManyAggregator($this->parentConnection, $this->batchSize))
+                ->aggregate($parents, $definition, $function, $column, $constraint);
+        }
+
+        if ($definition->through !== null) {
+            return (new RepositoryThroughRelationAggregator($this->batchSize))
+                ->aggregate($parents, $definition, $function, $column, $constraint);
+        }
+
         return match ($definition->type) {
             RelationDefinition::BELONGS_TO_MANY,
             RelationDefinition::MORPH_TO_MANY => $this->aggregatePivot(
