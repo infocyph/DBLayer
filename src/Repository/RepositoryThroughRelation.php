@@ -48,7 +48,7 @@ final class RepositoryThroughRelation
             return $parents;
         }
 
-        $relatedRows = $this->relatedRows($throughRows, $throughKey, $definition, $constraint);
+        [$relatedRows, $internalColumns] = $this->relatedRows($throughRows, $throughKey, $definition, $constraint);
         $parentByThrough = [];
 
         foreach ($throughRows as $throughRow) {
@@ -68,10 +68,11 @@ final class RepositoryThroughRelation
                 continue;
             }
 
+            $projected = $this->withoutInternalColumns($relatedRow, $internalColumns);
             if ($this->isMany($definition)) {
-                $matches[$parentIdentity][] = $relatedRow;
+                $matches[$parentIdentity][] = $projected;
             } else {
-                $matches[$parentIdentity] ??= $relatedRow;
+                $matches[$parentIdentity] ??= $projected;
             }
         }
 
@@ -165,7 +166,7 @@ final class RepositoryThroughRelation
     /**
      * @param list<array<string,mixed>> $throughRows
      * @param null|callable(QueryBuilder):void $constraint
-     * @return list<array<string,mixed>>
+     * @return array{0:list<array<string,mixed>>,1:list<string>}
      */
     private function relatedRows(
         array $throughRows,
@@ -177,10 +178,15 @@ final class RepositoryThroughRelation
         $values = $this->values($throughRows, $throughKey);
         $connection = $related::connection();
         $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
-        $columns = $this->ensureKeySelected($definition->columns, $definition->relatedKey);
-        $rows = [];
         [$orderColumn, $direction] = $this->oneOfManyOrder($definition, $related);
         $primaryKey = $related::definition()->primaryKey;
+        [$columns, $internalColumns] = $this->projection(
+            $definition->columns,
+            $definition->relatedKey,
+            $orderColumn,
+            $primaryKey,
+        );
+        $rows = [];
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
             $query = $related::query()->apply(
@@ -211,7 +217,7 @@ final class RepositoryThroughRelation
             });
         }
 
-        return $rows;
+        return [$rows, $internalColumns];
     }
 
     /** @param null|callable(QueryBuilder):void $constraint */
@@ -246,6 +252,39 @@ final class RepositoryThroughRelation
         return [$column, $definition->oneOfManyAggregate === 'max' ? 'desc' : 'asc'];
     }
 
+    /**
+     * @param list<string> $requested
+     * @return array{0:list<string>,1:list<string>}
+     */
+    private function projection(
+        array $requested,
+        string $relatedKey,
+        ?string $orderColumn,
+        string $primaryKey,
+    ): array {
+        if ($requested === ['*'] || in_array('*', $requested, true)) {
+            return [$requested, []];
+        }
+
+        $columns = $requested;
+        $internal = [];
+        $required = [$relatedKey];
+        if ($orderColumn !== null) {
+            $required[] = $orderColumn;
+            $required[] = $primaryKey;
+        }
+
+        foreach (array_unique($required) as $column) {
+            if (in_array($column, $columns, true)) {
+                continue;
+            }
+            $columns[] = $column;
+            $internal[] = $column;
+        }
+
+        return [$columns, $internal];
+    }
+
     /** @return list<mixed> */
     private function distinctValues(RepositoryQuery $query, string $column): array
     {
@@ -271,16 +310,6 @@ final class RepositoryThroughRelation
         return $values;
     }
 
-    /** @param list<string> $columns @return list<string> */
-    private function ensureKeySelected(array $columns, string $key): array
-    {
-        if ($columns === ['*'] || in_array('*', $columns, true) || in_array($key, $columns, true)) {
-            return $columns;
-        }
-
-        return [...$columns, $key];
-    }
-
     /** @param array<mixed> $values @return list<array<string,mixed>> */
     private function normalizeRows(array $values): array
     {
@@ -299,6 +328,20 @@ final class RepositoryThroughRelation
         }
 
         return $rows;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param list<string> $columns
+     * @return array<string,mixed>
+     */
+    private function withoutInternalColumns(array $row, array $columns): array
+    {
+        foreach ($columns as $column) {
+            unset($row[$column]);
+        }
+
+        return $row;
     }
 
     /** @param list<array<string,mixed>> $rows @return list<mixed> */
