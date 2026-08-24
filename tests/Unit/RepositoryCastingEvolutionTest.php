@@ -170,3 +170,37 @@ it('supports immutable date aliases with date-only persistence', function (): vo
         ->and($record['scheduled_date'])->toBeInstanceOf(DateTimeImmutable::class)
         ->and($record['scheduled_date']->format('Y-m-d H:i:s'))->toBe('2026-08-24 00:00:00');
 });
+
+it('applies repository write casts to set-based fluent updates', function (): void {
+    $record = RepositoryCastingRecord::create([
+        'status' => RepositoryCastingStatus::Draft,
+        'token' => 'secret',
+        'amount' => '1.00',
+        'payload' => (object) ['stage' => 'before'],
+    ]);
+
+    $affected = RepositoryCastingRecord::query()
+        ->where('id', '=', $record['id'])
+        ->update([
+            'status' => RepositoryCastingStatus::Published,
+            'token' => 'rotated',
+            'amount' => '12.345',
+            'payload' => (object) ['stage' => 'after'],
+            'scheduled_date' => new DateTimeImmutable('2026-08-25 22:15:00'),
+        ]);
+
+    $raw = DB::table('repository_casting_records')->where('id', '=', $record['id'])->first();
+    $updated = RepositoryCastingRecord::find($record['id']);
+
+    expect($affected)->toBe(1)
+        ->and($raw['status'])->toBe('published')
+        ->and($raw['token'])->toBe('db:rotated')
+        ->and($raw['amount'])->toBe('12.35')
+        ->and($raw['payload'])->toBe('{"stage":"after"}')
+        ->and($raw['scheduled_date'])->toBe('2026-08-25')
+        ->and($updated['status'])->toBe(RepositoryCastingStatus::Published)
+        ->and($updated['token'])->toBe('rotated')
+        ->and($updated['amount'])->toBe('12.35')
+        ->and($updated['payload'])->toBeInstanceOf(stdClass::class)
+        ->and($updated['payload']->stage)->toBe('after');
+});
