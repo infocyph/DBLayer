@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Exceptions\UnwritableAttributeException;
 use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Repository\Relation;
+use Infocyph\DBLayer\Repository\RelationDefinition;
 use Infocyph\DBLayer\Repository\TableRepository;
 
 final class RepositoryEvolutionUser extends TableRepository
@@ -53,6 +55,27 @@ final class RepositoryEvolutionPost extends TableRepository
     ];
 }
 
+final class RepositoryEvolutionParent extends TableRepository
+{
+    protected static string $table = 'repository_evolution_parents';
+
+    /** @return array<string,RelationDefinition> */
+    protected static function relations(): array
+    {
+        return [
+            'children' => Relation::hasMany(
+                RepositoryEvolutionChild::class,
+                foreignKey: 'parent_id',
+            ),
+        ];
+    }
+}
+
+final class RepositoryEvolutionChild extends TableRepository
+{
+    protected static string $table = 'repository_evolution_children';
+}
+
 beforeEach(function (): void {
     DB::purge();
     DB::setSecurityDefaults([], false);
@@ -76,6 +99,22 @@ beforeEach(function (): void {
             status text not null,
             created_on text not null,
             updated_on text not null
+        )',
+    );
+
+    DB::statement(
+        'create table repository_evolution_parents (
+            id integer primary key autoincrement,
+            name text not null
+        )',
+    );
+
+    DB::statement(
+        'create table repository_evolution_children (
+            id integer primary key autoincrement,
+            parent_id integer not null,
+            name text not null,
+            active integer not null
         )',
     );
 
@@ -153,4 +192,41 @@ it('rejects attributes outside create and update policies', function (): void {
         $post['post_key'],
         ['internal_notes' => 'nope'],
     ))->toThrow(UnwritableAttributeException::class);
+});
+
+it('eager loads declared has-many relations in bounded batches', function (): void {
+    DB::table('repository_evolution_parents')->insert([
+        ['name' => 'One'],
+        ['name' => 'Two'],
+    ]);
+    DB::table('repository_evolution_children')->insert([
+        ['parent_id' => 1, 'name' => 'A', 'active' => 1],
+        ['parent_id' => 1, 'name' => 'B', 'active' => 0],
+        ['parent_id' => 2, 'name' => 'C', 'active' => 1],
+    ]);
+
+    $parents = RepositoryEvolutionParent::query()
+        ->with('children')
+        ->orderBy('id')
+        ->get()
+        ->toArray();
+
+    expect(array_column($parents[0]['children'], 'name'))->toBe(['A', 'B'])
+        ->and(array_column($parents[1]['children'], 'name'))->toBe(['C']);
+});
+
+it('supports constrained eager relation loading', function (): void {
+    DB::table('repository_evolution_parents')->insert(['name' => 'One']);
+    DB::table('repository_evolution_children')->insert([
+        ['parent_id' => 1, 'name' => 'A', 'active' => 1],
+        ['parent_id' => 1, 'name' => 'B', 'active' => 0],
+    ]);
+
+    $parent = RepositoryEvolutionParent::query()
+        ->with([
+            'children' => static fn(QueryBuilder $query) => $query->where('active', '=', 1),
+        ])
+        ->first();
+
+    expect(array_column($parent['children'], 'name'))->toBe(['A']);
 });
