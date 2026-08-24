@@ -8,6 +8,7 @@ use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository;
+use Infocyph\DBLayer\Repository\Casts\AttributeCast;
 use InvalidArgumentException;
 
 /**
@@ -15,6 +16,9 @@ use InvalidArgumentException;
  */
 abstract class RepositoryPagination extends Repository
 {
+    /** @var array<string,string|callable(mixed):mixed|AttributeCast> */
+    protected array $casts = [];
+
     /**
      * Paginate repository rows while preserving casts/result processing.
      *
