@@ -13,6 +13,7 @@ use Infocyph\DBLayer\Pagination\SimplePaginator;
 use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository;
+use Infocyph\DBLayer\Repository\Concerns\RepositoryQueryMutations;
 use InvalidArgumentException;
 
 /**
@@ -24,6 +25,8 @@ use InvalidArgumentException;
  */
 final class RepositoryQuery
 {
+    use RepositoryQueryMutations;
+
     /** @var list<array{method:string,arguments:array<int,mixed>}> */
     private array $operations = [];
 
@@ -54,6 +57,14 @@ final class RepositoryQuery
     /** @param array<int,mixed> $arguments */
     public function __call(string $method, array $arguments): mixed
     {
+        if ($this->isBlockedBuilderMutation($method)) {
+            throw new BadMethodCallException(sprintf(
+                'Mutation %s::%s() has no repository-aware equivalent. Use raw() or builder() for an explicit policy bypass.',
+                self::class,
+                $method,
+            ));
+        }
+
         if (!method_exists($this->builder, $method)) {
             throw new BadMethodCallException(sprintf(
                 'Method %s::%s() does not exist on the underlying query builder.',
