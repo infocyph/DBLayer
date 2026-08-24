@@ -7,11 +7,7 @@ namespace Infocyph\DBLayer\Repository;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use InvalidArgumentException;
 
-/**
- * Hydrate already-selected one-of-many winners through the related repository.
- * Candidate selection itself is delegated to RepositoryOneOfManySelector so
- * direct, polymorphic and through paths share one streaming selection engine.
- */
+/** Hydrate already-selected one-of-many winners through the related repository. */
 final class RepositoryOneOfManyRelation
 {
     public function __construct(private readonly int $batchSize = 500)
@@ -39,8 +35,7 @@ final class RepositoryOneOfManyRelation
         $related = $definition->related
             ?? throw new InvalidArgumentException('One-of-many relation requires a related repository.');
         $parentValues = $this->values($parents, $definition->parentKey);
-        $winners = (new RepositoryOneOfManySelector($this->batchSize))
-            ->select($definition, $parentValues);
+        $winners = (new RepositoryOneOfManySelector($this->batchSize))->select($definition, $parentValues);
 
         if ($winners === []) {
             return $this->attachEmpty($parents, $as);
@@ -61,11 +56,11 @@ final class RepositoryOneOfManyRelation
         );
 
         foreach ($parents as &$parent) {
-            $identity = $this->key($parent[$definition->parentKey] ?? null);
+            $identity = RepositorySupport::key($parent[$definition->parentKey] ?? null);
             $winner = $winners[$identity] ?? null;
             $parent[$as] = $winner === null
                 ? null
-                : ($rowsById[$this->key($winner['id'])] ?? null);
+                : ($rowsById[RepositorySupport::key($winner['id'])] ?? null);
         }
         unset($parent);
 
@@ -88,25 +83,29 @@ final class RepositoryOneOfManyRelation
         array $internalColumns,
         ?callable $constraint,
     ): array {
-        $connection = $related::connection();
-        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+        $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
         $rows = [];
 
         foreach (array_chunk($ids, $batchSize) as $chunk) {
             $query = $related::query()->apply(
-                static fn(QueryBuilder $builder): mixed => $builder->whereIn($primaryKey, $chunk),
+                static function (QueryBuilder $builder) use ($primaryKey, $chunk): void {
+                    $builder->whereIn($primaryKey, $chunk);
+                },
             );
             if ($constraint !== null) {
                 $query->apply($constraint);
             }
 
-            foreach ($query->get($columns) as $row) {
-                if (!is_array($row) || !array_key_exists($primaryKey, $row)) {
+            foreach ($query->get($columns) as $candidateRow) {
+                $row = RepositorySupport::row($candidateRow);
+                if ($row === null || !array_key_exists($primaryKey, $row)) {
                     continue;
                 }
 
-                $id = $row[$primaryKey];
-                $rows[$this->key($id)] = $this->withoutInternalColumns($row, $internalColumns);
+                $rows[RepositorySupport::key($row[$primaryKey])] = $this->withoutInternalColumns(
+                    $row,
+                    $internalColumns,
+                );
             }
         }
 
@@ -119,18 +118,17 @@ final class RepositoryOneOfManyRelation
      */
     private function projection(array $requested, string $primaryKey): array
     {
-        if ($requested === ['*'] || in_array('*', $requested, true)) {
-            return [$requested, []];
-        }
-
-        if (in_array($primaryKey, $requested, true)) {
+        if ($requested === ['*'] || in_array('*', $requested, true) || in_array($primaryKey, $requested, true)) {
             return [$requested, []];
         }
 
         return [[...$requested, $primaryKey], [$primaryKey]];
     }
 
-    /** @param list<array<string,mixed>> $parents @return list<array<string,mixed>> */
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @return list<array<string,mixed>>
+     */
     private function attachEmpty(array $parents, string $as): array
     {
         foreach ($parents as &$parent) {
@@ -155,37 +153,19 @@ final class RepositoryOneOfManyRelation
         return $row;
     }
 
-    /** @param list<array<string,mixed>> $rows @return list<mixed> */
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<mixed>
+     */
     private function values(array $rows, string $column): array
     {
         $values = [];
-        $seen = [];
-
         foreach ($rows as $row) {
-            if (!array_key_exists($column, $row) || $row[$column] === null) {
-                continue;
+            if (array_key_exists($column, $row) && $row[$column] !== null) {
+                $values[] = $row[$column];
             }
-
-            $identity = $this->key($row[$column]);
-            if (isset($seen[$identity])) {
-                continue;
-            }
-
-            $seen[$identity] = true;
-            $values[] = $row[$column];
         }
 
-        return $values;
-    }
-
-    private function key(mixed $value): string
-    {
-        return match (true) {
-            is_int($value), is_string($value) => 'scalar:' . $value,
-            is_float($value) => 'float:' . serialize($value),
-            is_bool($value) => 'bool:' . ($value ? '1' : '0'),
-            $value === null => 'null:',
-            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
-        };
+        return RepositorySupport::uniqueValues($values);
     }
 }
