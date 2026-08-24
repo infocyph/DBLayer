@@ -9,12 +9,7 @@ use Infocyph\DBLayer\Repository\Casts\AttributeCast;
 use Infocyph\DBLayer\Repository\Casts\CastFactory;
 use InvalidArgumentException;
 
-/**
- * Immutable, validated metadata compiled once per TableRepository class.
- *
- * Runtime query state is deliberately excluded so the definition is safe to
- * reuse in long-running workers.
- */
+/** Immutable, validated metadata compiled once per TableRepository class. */
 final readonly class RepositoryDefinition
 {
     /** @var array<string,mixed> */
@@ -236,28 +231,11 @@ final readonly class RepositoryDefinition
         $this->assertRelationColumns($name, $relation);
 
         if ($relation->type === RelationDefinition::MORPH_TO) {
-            if ($relation->related !== null || $relation->morphMap === []) {
-                throw new InvalidArgumentException(sprintf(
-                    '%s morph-to relation [%s] requires only an explicit morph map.',
-                    $this->repositoryClass,
-                    $name,
-                ));
-            }
-
-            foreach ($relation->morphMap as $alias => $related) {
-                if (trim($alias) === '' || !is_a($related, TableRepository::class, true)) {
-                    throw new InvalidArgumentException(sprintf(
-                        '%s morph-to relation [%s] contains an invalid morph-map entry.',
-                        $this->repositoryClass,
-                        $name,
-                    ));
-                }
-            }
-
+            $this->validateMorphTo($name, $relation);
             return;
         }
 
-        if ($relation->related === null || !is_a($relation->related, TableRepository::class, true)) {
+        if ($relation->related === null) {
             throw new InvalidArgumentException(sprintf(
                 '%s relation [%s] must target a TableRepository class.',
                 $this->repositoryClass,
@@ -265,69 +243,94 @@ final readonly class RepositoryDefinition
             ));
         }
 
-        if ($relation->pivotTable !== null) {
-            $this->assertIdentifier($relation->pivotTable, 'pivot table');
-            $this->assertIdentifier((string) $relation->pivotParentKey, 'pivot parent key');
-            $this->assertIdentifier((string) $relation->pivotRelatedKey, 'pivot related key');
-        }
-
-        if ($relation->through !== null) {
-            if (!in_array($relation->type, [RelationDefinition::HAS_ONE, RelationDefinition::HAS_MANY], true)) {
-                throw new InvalidArgumentException(sprintf(
-                    '%s through relation [%s] must use has-one or has-many cardinality.',
-                    $this->repositoryClass,
-                    $name,
-                ));
-            }
-
-            if (!is_a($relation->through, TableRepository::class, true)) {
-                throw new InvalidArgumentException(sprintf(
-                    '%s through relation [%s] must target an intermediate TableRepository class.',
-                    $this->repositoryClass,
-                    $name,
-                ));
-            }
-
-            $this->assertIdentifier((string) $relation->throughParentKey, 'through parent key');
-            $this->assertIdentifier((string) $relation->throughKey, 'through local key');
-        }
-
-        if ($relation->oneOfManyAggregate !== null) {
-            if (!in_array($relation->type, [
-                RelationDefinition::HAS_ONE,
-                RelationDefinition::HAS_ONE_THROUGH,
-                RelationDefinition::MORPH_ONE,
-            ], true)) {
-                throw new InvalidArgumentException(sprintf(
-                    '%s relation [%s] uses one-of-many metadata on an unsupported relation type.',
-                    $this->repositoryClass,
-                    $name,
-                ));
-            }
-
-            if (!in_array($relation->oneOfManyAggregate, ['max', 'min'], true)) {
-                throw new InvalidArgumentException(sprintf(
-                    '%s relation [%s] has an invalid one-of-many aggregate.',
-                    $this->repositoryClass,
-                    $name,
-                ));
-            }
-
-            if ($relation->oneOfManyColumn !== null) {
-                $this->assertIdentifier($relation->oneOfManyColumn, 'one-of-many column');
-            }
-
-            if ($relation->oneOfManyScope !== null && !is_callable($relation->oneOfManyScope)) {
-                throw new InvalidArgumentException(sprintf(
-                    '%s relation [%s] has an invalid one-of-many scope.',
-                    $this->repositoryClass,
-                    $name,
-                ));
-            }
-        }
+        $this->validatePivot($relation);
+        $this->validateThrough($name, $relation);
+        $this->validateOneOfMany($name, $relation);
 
         foreach ($relation->pivotColumns as $column) {
             $this->assertIdentifier($column, 'pivot column');
+        }
+    }
+
+    private function validateMorphTo(string $name, RelationDefinition $relation): void
+    {
+        if ($relation->related !== null || $relation->morphMap === []) {
+            throw new InvalidArgumentException(sprintf(
+                '%s morph-to relation [%s] requires only an explicit morph map.',
+                $this->repositoryClass,
+                $name,
+            ));
+        }
+
+        foreach ($relation->morphMap as $alias => $related) {
+            unset($related);
+            if (trim($alias) === '') {
+                throw new InvalidArgumentException(sprintf(
+                    '%s morph-to relation [%s] contains an invalid morph-map entry.',
+                    $this->repositoryClass,
+                    $name,
+                ));
+            }
+        }
+    }
+
+    private function validatePivot(RelationDefinition $relation): void
+    {
+        if ($relation->pivotTable === null) {
+            return;
+        }
+
+        $this->assertIdentifier($relation->pivotTable, 'pivot table');
+        $this->assertIdentifier((string) $relation->pivotParentKey, 'pivot parent key');
+        $this->assertIdentifier((string) $relation->pivotRelatedKey, 'pivot related key');
+    }
+
+    private function validateThrough(string $name, RelationDefinition $relation): void
+    {
+        if ($relation->through === null) {
+            return;
+        }
+
+        if (!in_array($relation->type, [RelationDefinition::HAS_ONE, RelationDefinition::HAS_MANY], true)) {
+            throw new InvalidArgumentException(sprintf(
+                '%s through relation [%s] must use has-one or has-many cardinality.',
+                $this->repositoryClass,
+                $name,
+            ));
+        }
+
+        $this->assertIdentifier((string) $relation->throughParentKey, 'through parent key');
+        $this->assertIdentifier((string) $relation->throughKey, 'through local key');
+    }
+
+    private function validateOneOfMany(string $name, RelationDefinition $relation): void
+    {
+        if ($relation->oneOfManyAggregate === null) {
+            return;
+        }
+
+        if (!in_array($relation->type, [
+            RelationDefinition::HAS_ONE,
+            RelationDefinition::HAS_ONE_THROUGH,
+            RelationDefinition::MORPH_ONE,
+        ], true)) {
+            throw new InvalidArgumentException(sprintf(
+                '%s relation [%s] uses one-of-many metadata on an unsupported relation type.',
+                $this->repositoryClass,
+                $name,
+            ));
+        }
+
+        if (!in_array($relation->oneOfManyAggregate, ['max', 'min'], true)) {
+            throw new InvalidArgumentException(sprintf(
+                '%s relation [%s] has an invalid one-of-many aggregate.',
+                $this->repositoryClass,
+                $name,
+            ));
+        }
+
+        if ($relation->oneOfManyColumn !== null) {
+            $this->assertIdentifier($relation->oneOfManyColumn, 'one-of-many column');
         }
     }
 
