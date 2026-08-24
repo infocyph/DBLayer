@@ -9,6 +9,7 @@ use Infocyph\DBLayer\Exceptions\UnwritableAttributeException;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\ResultProcessor;
+use InvalidArgumentException;
 
 /**
  * Concrete Repository used by TableRepository metadata.
@@ -33,9 +34,6 @@ final class TableQueryRepository extends RepositoryPagination
         );
     }
 
-    /**
-     * Disable one named global scope for this repository instance.
-     */
     public function disableNamedGlobalScope(string $name): static
     {
         if (array_key_exists($name, $this->definition->globalScopes)) {
@@ -45,11 +43,7 @@ final class TableQueryRepository extends RepositoryPagination
         return $this;
     }
 
-    /**
-     * Disable selected named scopes, or every named scope when names are null.
-     *
-     * @param list<string>|null $names
-     */
+    /** @param list<string>|null $names */
     public function disableNamedGlobalScopes(?array $names = null): static
     {
         $names ??= array_keys($this->definition->globalScopes);
@@ -61,9 +55,7 @@ final class TableQueryRepository extends RepositoryPagination
         return $this;
     }
 
-    /**
-     * @param array<int,array<string,mixed>> $rows
-     */
+    /** @param array<int,array<string,mixed>> $rows */
     #[\Override]
     public function bulkInsert(array $rows): bool
     {
@@ -104,9 +96,7 @@ final class TableQueryRepository extends RepositoryPagination
         );
     }
 
-    /**
-     * @param array<string,mixed> $values
-     */
+    /** @param array<string,mixed> $values */
     #[\Override]
     public function updateById(mixed $id, array $values): int
     {
@@ -117,9 +107,7 @@ final class TableQueryRepository extends RepositoryPagination
         return parent::updateById($id, $this->prepareUpdateAttributes($values));
     }
 
-    /**
-     * @param array<string,mixed> $values
-     */
+    /** @param array<string,mixed> $values */
     #[\Override]
     public function updateByIdWithVersion(
         mixed $id,
@@ -149,7 +137,12 @@ final class TableQueryRepository extends RepositoryPagination
     {
         $existing = $this->first(static function (QueryBuilder $query) use ($attributes): void {
             foreach ($attributes as $column => $value) {
-                $query->where((string) $column, '=', $value);
+                $column = trim($column);
+                if ($column === '') {
+                    throw new InvalidArgumentException('Repository lookup attributes must use non-empty column names.');
+                }
+
+                $query->where($column, '=', $value);
             }
         });
 
@@ -195,7 +188,7 @@ final class TableQueryRepository extends RepositoryPagination
                 continue;
             }
 
-            $prepared[] = $this->prepareCreateAttributes($row);
+            $prepared[] = $this->prepareCreateAttributes($this->normalizeWriteRow($row));
         }
 
         if ($prepared === []) {
@@ -247,6 +240,25 @@ final class TableQueryRepository extends RepositoryPagination
     protected function table(): string
     {
         return $this->definition->table;
+    }
+
+    /**
+     * @param array<array-key,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function normalizeWriteRow(array $row): array
+    {
+        $normalized = [];
+
+        foreach ($row as $column => $value) {
+            if (!is_string($column) || trim($column) === '') {
+                throw new InvalidArgumentException('Repository write rows must use non-empty string column names.');
+            }
+
+            $normalized[$column] = $value;
+        }
+
+        return $normalized;
     }
 
     /**
