@@ -777,10 +777,10 @@ abstract class Repository
     public function paginate(?int $perPage = null, ?int $page = null, ?callable $scope = null): LengthAwarePaginator
     {
         $perPage = $this->resolvePerPage($perPage);
-        $query = $this->applyScope(
+        $query = $this->ensurePaginationOrder($this->applyScope(
             $this->query(),
             $scope,
-        );
+        ));
 
         return $query->paginate($perPage, $page);
     }
@@ -849,10 +849,10 @@ abstract class Repository
     public function simplePaginate(?int $perPage = null, ?int $page = null, ?callable $scope = null): SimplePaginator
     {
         $perPage = $this->resolvePerPage($perPage);
-        $query = $this->applyScope(
+        $query = $this->ensurePaginationOrder($this->applyScope(
             $this->query(),
             $scope,
-        );
+        ));
 
         return $query->simplePaginate($perPage, $page);
     }
@@ -1133,6 +1133,16 @@ abstract class Repository
             $normalized = self::normalizeAttributeArray($row);
             yield $this->applyReadCastsToRow($normalized) ?? $normalized;
         }
+    }
+
+    /** Ensure offset pagination is deterministic and valid on every driver. */
+    private function ensurePaginationOrder(QueryBuilder $query): QueryBuilder
+    {
+        if ($query->getComponents()['orders'] === []) {
+            $query->orderBy($this->normalizeColumnName($this->primaryKey(), 'id'));
+        }
+
+        return $query;
     }
 
     /**

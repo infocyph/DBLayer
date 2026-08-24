@@ -42,7 +42,7 @@ final class RepositoryMatrixPost extends TableRepository
     {
         return [
             'active' => static function (QueryBuilder $query): void {
-                $query->where('active', '=', 1);
+                $query->where('active', '=', true);
             },
         ];
     }
@@ -89,17 +89,24 @@ function setupRepositoryEvolutionMatrix(string $driver): void
     dblayerDropTable('repository_matrix_comments', 'repository_evolution_matrix');
     dblayerDropTable('repository_matrix_posts', 'repository_evolution_matrix');
 
+    $booleanType = match ($schemaDriver) {
+        'pgsql' => 'boolean',
+        'mssql' => 'bit',
+        default => 'integer',
+    };
+
     DB::statement(
         sprintf(
             'create table repository_matrix_posts (
                 %s,
                 title %s not null unique,
-                active integer not null,
+                active %s not null,
                 created_on %s not null,
                 updated_on %s not null
             )',
             dblayerAutoIncrementPrimaryKey($schemaDriver, 'post_key'),
             dblayerStringType($schemaDriver, 191),
+            $booleanType,
             dblayerDateTimeType($schemaDriver),
             dblayerDateTimeType($schemaDriver),
         ),
@@ -125,7 +132,7 @@ it('keeps repository query semantics and relation features portable across drive
 
     DB::table('repository_matrix_posts', 'repository_evolution_matrix')->insert([
         'title' => 'Hidden',
-        'active' => 0,
+        'active' => false,
         'created_on' => '2026-01-01 00:00:00',
         'updated_on' => '2026-01-01 00:00:00',
     ]);
