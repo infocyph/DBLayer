@@ -39,13 +39,11 @@ final class RepositoryOneOfManyRelation
         }
 
         $relatedDefinition = $related::definition();
-        $orderColumn = $definition->oneOfManyColumn ?? $relatedDefinition->primaryKey;
-        $direction = $definition->oneOfManyAggregate === 'min' ? 'asc' : 'desc';
+        $orders = RepositoryOneOfManyOrder::resolve($definition, $relatedDefinition);
         [$columns, $internalColumns] = $this->projection(
             $definition->columns,
             $definition->relatedKey,
-            $orderColumn,
-            $relatedDefinition->primaryKey,
+            RepositoryOneOfManyOrder::columns($orders),
         );
         $connection = $related::connection();
         $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
@@ -75,15 +73,8 @@ final class RepositoryOneOfManyRelation
                 $query->apply($constraint);
             }
 
-            $query->apply(static function (QueryBuilder $builder) use (
-                $orderColumn,
-                $direction,
-                $relatedDefinition,
-            ): void {
-                $builder->orderBy($orderColumn, $direction);
-                if ($relatedDefinition->primaryKey !== $orderColumn) {
-                    $builder->orderBy($relatedDefinition->primaryKey, $direction);
-                }
+            $query->apply(static function (QueryBuilder $builder) use ($orders): void {
+                RepositoryOneOfManyOrder::apply($builder, $orders);
             });
 
             foreach ($query->get($columns) as $row) {
@@ -118,14 +109,11 @@ final class RepositoryOneOfManyRelation
 
     /**
      * @param list<string> $requested
+     * @param list<string> $required
      * @return array{0:list<string>,1:list<string>}
      */
-    private function projection(
-        array $requested,
-        string $relatedKey,
-        string $orderColumn,
-        string $primaryKey,
-    ): array {
+    private function projection(array $requested, string $relatedKey, array $required): array
+    {
         if ($requested === ['*'] || in_array('*', $requested, true)) {
             return [$requested, []];
         }
@@ -133,7 +121,7 @@ final class RepositoryOneOfManyRelation
         $columns = $requested;
         $internal = [];
 
-        foreach ([$relatedKey, $orderColumn, $primaryKey] as $column) {
+        foreach (array_unique([$relatedKey, ...$required]) as $column) {
             if (in_array($column, $columns, true)) {
                 continue;
             }
