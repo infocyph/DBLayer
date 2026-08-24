@@ -158,9 +158,7 @@ final readonly class RelationDefinition
         return $this->withOneOfMany($type, $firstColumn, $orders[$firstColumn], $scope, $orders);
     }
 
-    /**
-     * @param null|callable(QueryBuilder):void $scope
-     */
+    /** @param null|callable(QueryBuilder):void $scope */
     private function scalarOfMany(string $type, ?string $column, string|callable $aggregate, ?callable $scope): self
     {
         if (!is_string($aggregate)) {
@@ -201,6 +199,10 @@ final readonly class RelationDefinition
                 throw new InvalidArgumentException('Advanced one-of-many criteria require non-empty columns mapped to max or min.');
             }
             $orders[$column] = $aggregate;
+        }
+
+        if ($orders === []) {
+            throw new InvalidArgumentException('Advanced one-of-many criteria must not be empty.');
         }
 
         return $orders;
