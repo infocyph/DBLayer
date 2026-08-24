@@ -37,9 +37,9 @@ final readonly class RepositoryDefinition
     /**
      * @param class-string<TableRepository> $repositoryClass
      * @param array<string,mixed> $defaults
-     * @param list<string> $creatable
-     * @param list<string> $updatable
-     * @param array<string,mixed> $casts
+     * @param array<array-key,mixed> $creatable
+     * @param array<array-key,mixed> $updatable
+     * @param array<array-key,mixed> $casts
      * @param array<array-key,mixed> $globalScopes
      * @param array<array-key,mixed> $relations
      */
@@ -92,7 +92,7 @@ final readonly class RepositoryDefinition
     }
 
     /**
-     * @param array<string,mixed> $casts
+     * @param array<array-key,mixed> $casts
      * @return array<string,string|callable(mixed):mixed|AttributeCast>
      */
     private function normalizeCasts(array $casts): array
@@ -100,6 +100,13 @@ final readonly class RepositoryDefinition
         $normalized = [];
 
         foreach ($casts as $column => $cast) {
+            if (!is_string($column)) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s cast columns must be strings.',
+                    $this->repositoryClass,
+                ));
+            }
+
             $column = trim($column);
             if ($column === '') {
                 throw new InvalidArgumentException(sprintf(
@@ -123,7 +130,7 @@ final readonly class RepositoryDefinition
     }
 
     /**
-     * @param list<string> $columns
+     * @param array<array-key,mixed> $columns
      * @return list<string>
      */
     private function normalizeColumns(array $columns, string $label): array
