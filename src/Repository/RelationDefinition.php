@@ -13,6 +13,7 @@ final readonly class RelationDefinition
     public const string BELONGS_TO_MANY = 'belongs_to_many';
     public const string HAS_MANY = 'has_many';
     public const string HAS_ONE = 'has_one';
+    public const string HAS_ONE_THROUGH = 'has_one_through';
     public const string MORPH_MANY = 'morph_many';
     public const string MORPH_ONE = 'morph_one';
     public const string MORPH_TO = 'morph_to';
