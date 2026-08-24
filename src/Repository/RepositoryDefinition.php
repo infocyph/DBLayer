@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Repository;
 
 use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Repository\Casts\AttributeCast;
 use InvalidArgumentException;
 
 /**
@@ -24,7 +25,7 @@ final readonly class RepositoryDefinition
     /** @var list<string> */
     public array $updatable;
 
-    /** @var array<string,mixed> */
+    /** @var array<string,string|callable(mixed):mixed|AttributeCast> */
     public array $casts;
 
     /** @var array<string,callable(QueryBuilder):void> */
@@ -39,8 +40,8 @@ final readonly class RepositoryDefinition
      * @param list<string> $creatable
      * @param list<string> $updatable
      * @param array<string,mixed> $casts
-     * @param array<array-key,callable(QueryBuilder):void> $globalScopes
-     * @param array<string,RelationDefinition> $relations
+     * @param array<array-key,mixed> $globalScopes
+     * @param array<array-key,mixed> $relations
      */
     public function __construct(
         public string $repositoryClass,
@@ -72,7 +73,7 @@ final readonly class RepositoryDefinition
         $this->defaults = $defaults;
         $this->creatable = $this->normalizeColumns($creatable, 'creatable');
         $this->updatable = $this->normalizeColumns($updatable, 'updatable');
-        $this->casts = $casts;
+        $this->casts = $this->normalizeCasts($casts);
         $this->globalScopes = $this->normalizeScopes($globalScopes);
         $this->relations = $this->normalizeRelations($relations);
     }
@@ -91,6 +92,37 @@ final readonly class RepositoryDefinition
     }
 
     /**
+     * @param array<string,mixed> $casts
+     * @return array<string,string|callable(mixed):mixed|AttributeCast>
+     */
+    private function normalizeCasts(array $casts): array
+    {
+        $normalized = [];
+
+        foreach ($casts as $column => $cast) {
+            $column = trim($column);
+            if ($column === '') {
+                throw new InvalidArgumentException(sprintf(
+                    '%s contains an empty cast column.',
+                    $this->repositoryClass,
+                ));
+            }
+
+            if (!is_string($cast) && !is_callable($cast) && !$cast instanceof AttributeCast) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s cast [%s] must be a cast name, callable, or AttributeCast.',
+                    $this->repositoryClass,
+                    $column,
+                ));
+            }
+
+            $normalized[$column] = $cast;
+        }
+
+        return $normalized;
+    }
+
+    /**
      * @param list<string> $columns
      * @return list<string>
      */
@@ -100,6 +132,14 @@ final readonly class RepositoryDefinition
         $seen = [];
 
         foreach ($columns as $column) {
+            if (!is_string($column)) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s %s attributes must be strings.',
+                    $this->repositoryClass,
+                    $label,
+                ));
+            }
+
             $column = trim($column);
             if ($column === '') {
                 throw new InvalidArgumentException(sprintf(
@@ -121,7 +161,7 @@ final readonly class RepositoryDefinition
     }
 
     /**
-     * @param array<array-key,callable(QueryBuilder):void> $scopes
+     * @param array<array-key,mixed> $scopes
      * @return array<string,callable(QueryBuilder):void>
      */
     private function normalizeScopes(array $scopes): array
@@ -152,7 +192,7 @@ final readonly class RepositoryDefinition
     }
 
     /**
-     * @param array<string,RelationDefinition> $relations
+     * @param array<array-key,mixed> $relations
      * @return array<string,RelationDefinition>
      */
     private function normalizeRelations(array $relations): array
@@ -160,11 +200,19 @@ final readonly class RepositoryDefinition
         $normalized = [];
 
         foreach ($relations as $name => $relation) {
-            $name = trim($name);
+            $name = is_string($name) ? trim($name) : '';
             if ($name === '' || !$relation instanceof RelationDefinition) {
                 throw new InvalidArgumentException(sprintf(
                     '%s relations must use non-empty names and RelationDefinition values.',
                     $this->repositoryClass,
+                ));
+            }
+
+            if (!is_a($relation->related, TableRepository::class, true)) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s relation [%s] must target a TableRepository class.',
+                    $this->repositoryClass,
+                    $name,
                 ));
             }
 
