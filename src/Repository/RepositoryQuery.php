@@ -114,15 +114,17 @@ final class RepositoryQuery
             return null;
         }
 
-        return $this->projectRows([$row])[0] ?? $row;
+        $projected = $this->projectRows([$row]);
+
+        return $projected[0];
     }
 
     /** @param list<Expression|string> $columns */
     public function get(array $columns = ['*']): Collection
     {
-        $rows = $this->repository
+        $rows = $this->normalizeRows($this->repository
             ->get($this->scope(), $this->projectionColumns($columns))
-            ->toArray();
+            ->toArray());
 
         return new Collection($this->projectRows($rows));
     }
@@ -136,8 +138,8 @@ final class RepositoryQuery
         );
 
         return new LengthAwarePaginator(
-            $this->projectRows($paginator->items()),
-            $paginator->total() ?? 0,
+            $this->projectRows($this->normalizeRows($paginator->items())),
+            $paginator->total(),
             $paginator->perPage(),
             $paginator->currentPage(),
         );
@@ -162,7 +164,7 @@ final class RepositoryQuery
         );
 
         return new SimplePaginator(
-            $this->projectRows($paginator->items()),
+            $this->projectRows($this->normalizeRows($paginator->items())),
             $paginator->perPage(),
             $paginator->currentPage(),
             $paginator->hasMorePages(),
@@ -310,6 +312,32 @@ final class RepositoryQuery
                 $this->relationDefinition($name),
                 $constraint,
             );
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param array<mixed> $values
+     * @return list<array<string,mixed>>
+     */
+    private function normalizeRows(array $values): array
+    {
+        $rows = [];
+
+        foreach ($values as $value) {
+            if (!is_array($value)) {
+                continue;
+            }
+
+            $row = [];
+            foreach ($value as $key => $item) {
+                if (is_string($key)) {
+                    $row[$key] = $item;
+                }
+            }
+
+            $rows[] = $row;
         }
 
         return $rows;
