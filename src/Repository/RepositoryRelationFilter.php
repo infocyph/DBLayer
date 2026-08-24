@@ -13,8 +13,8 @@ use InvalidArgumentException;
  * Apply relation-existence constraints without loading relation graphs.
  *
  * Same-connection direct relations compile to correlated EXISTS queries.
- * Cross-connection and pivot/polymorphic variants use bounded key projection
- * while preserving related repository scopes and policies.
+ * Cross-connection, through, one-of-many, pivot and polymorphic variants use
+ * bounded key projection while preserving repository scopes and policies.
  */
 final class RepositoryRelationFilter
 {
@@ -34,6 +34,22 @@ final class RepositoryRelationFilter
         ?callable $constraint = null,
         bool $not = false,
     ): void {
+        if ($definition->oneOfManyAggregate !== null) {
+            $matching = (new RepositoryOneOfManyFilter($this->batchSize))
+                ->matchingParentKeys($definition, $constraint);
+            $this->applyValues($parentQuery, $definition->parentKey, $matching, $not);
+
+            return;
+        }
+
+        if ($definition->through !== null) {
+            $matching = (new RepositoryThroughRelation($this->parentConnection, $this->batchSize))
+                ->matchingParentKeys($definition, $constraint);
+            $this->applyValues($parentQuery, $definition->parentKey, $matching, $not);
+
+            return;
+        }
+
         if ($definition->type === RelationDefinition::MORPH_TO) {
             $this->applyMorphTo($parentQuery, $definition, $constraint, $not);
 
