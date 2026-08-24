@@ -58,13 +58,17 @@ final class RepositoryRelationCounter
             return [];
         }
 
-        $related = $this->relatedClass($definition);
+        $related = $definition->related;
         $connection = $related::connection();
         $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
         $counts = [];
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::query()->whereIn($definition->relatedKey, $chunk);
+            $query = $related::query()->apply(
+                static function (QueryBuilder $query) use ($definition, $chunk): void {
+                    $query->whereIn($definition->relatedKey, $chunk);
+                },
+            );
             $this->applyConstraints($query, $definition, $constraint);
 
             $rows = $query->raw()
@@ -151,13 +155,17 @@ final class RepositoryRelationCounter
             return [];
         }
 
-        $related = $this->relatedClass($definition);
+        $related = $definition->related;
         $connection = $related::connection();
         $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
         $allowed = [];
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::query()->whereIn($definition->relatedKey, $chunk);
+            $query = $related::query()->apply(
+                static function (QueryBuilder $query) use ($definition, $chunk): void {
+                    $query->whereIn($definition->relatedKey, $chunk);
+                },
+            );
             $this->applyConstraints($query, $definition, $constraint);
 
             foreach ($query->get([$definition->relatedKey]) as $row) {
@@ -181,34 +189,12 @@ final class RepositoryRelationCounter
         ?callable $constraint,
     ): void {
         if ($definition->scope !== null) {
-            if (!is_callable($definition->scope)) {
-                throw new InvalidArgumentException('Relation scope must be callable.');
-            }
-
             $query->apply($definition->scope);
         }
 
         if ($constraint !== null) {
             $query->apply($constraint);
         }
-    }
-
-    /**
-     * @return class-string<TableRepository>
-     */
-    private function relatedClass(RelationDefinition $definition): string
-    {
-        $related = $definition->related;
-
-        if (!is_a($related, TableRepository::class, true)) {
-            throw new InvalidArgumentException(sprintf(
-                'Related repository [%s] must extend %s.',
-                $related,
-                TableRepository::class,
-            ));
-        }
-
-        return $related;
     }
 
     private function key(mixed $value): string
