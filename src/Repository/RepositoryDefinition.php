@@ -6,6 +6,7 @@ namespace Infocyph\DBLayer\Repository;
 
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Repository\Casts\AttributeCast;
+use Infocyph\DBLayer\Repository\Casts\CastFactory;
 use InvalidArgumentException;
 
 /**
@@ -131,7 +132,7 @@ final readonly class RepositoryDefinition
                 ));
             }
 
-            $normalized[$column] = $cast;
+            $normalized[$column] = is_string($cast) ? CastFactory::compile($cast) : $cast;
         }
 
         return $normalized;
