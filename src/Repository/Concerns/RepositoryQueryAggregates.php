@@ -10,22 +10,6 @@ use InvalidArgumentException;
 
 trait RepositoryQueryAggregates
 {
-    /** @param string|array<int|string,string|callable(QueryBuilder):void> ...$relations */
-    public function withCount(string|array ...$relations): self
-    {
-        $this->registerAggregateList('count', '*', false, $relations);
-
-        return $this;
-    }
-
-    /** @param string|array<int|string,string|callable(QueryBuilder):void> ...$relations */
-    public function withExists(string|array ...$relations): self
-    {
-        $this->registerAggregateList('count', '*', true, $relations);
-
-        return $this;
-    }
-
     /** @param null|callable(QueryBuilder):void $constraint */
     public function withAggregate(
         string $relation,
@@ -52,15 +36,31 @@ trait RepositoryQueryAggregates
     }
 
     /** @param null|callable(QueryBuilder):void $constraint */
-    public function withSum(string $relation, string $column, ?string $alias = null, ?callable $constraint = null): self
-    {
-        return $this->withAggregate($relation, $column, 'sum', $alias, $constraint);
-    }
-
-    /** @param null|callable(QueryBuilder):void $constraint */
     public function withAvg(string $relation, string $column, ?string $alias = null, ?callable $constraint = null): self
     {
         return $this->withAggregate($relation, $column, 'avg', $alias, $constraint);
+    }
+
+    /** @param string|array<int|string,string|callable(QueryBuilder):void> ...$relations */
+    public function withCount(string|array ...$relations): self
+    {
+        $this->registerAggregateList('count', '*', false, $relations);
+
+        return $this;
+    }
+
+    /** @param string|array<int|string,string|callable(QueryBuilder):void> ...$relations */
+    public function withExists(string|array ...$relations): self
+    {
+        $this->registerAggregateList('count', '*', true, $relations);
+
+        return $this;
+    }
+
+    /** @param null|callable(QueryBuilder):void $constraint */
+    public function withMax(string $relation, string $column, ?string $alias = null, ?callable $constraint = null): self
+    {
+        return $this->withAggregate($relation, $column, 'max', $alias, $constraint);
     }
 
     /** @param null|callable(QueryBuilder):void $constraint */
@@ -70,9 +70,39 @@ trait RepositoryQueryAggregates
     }
 
     /** @param null|callable(QueryBuilder):void $constraint */
-    public function withMax(string $relation, string $column, ?string $alias = null, ?callable $constraint = null): self
+    public function withSum(string $relation, string $column, ?string $alias = null, ?callable $constraint = null): self
     {
-        return $this->withAggregate($relation, $column, 'max', $alias, $constraint);
+        return $this->withAggregate($relation, $column, 'sum', $alias, $constraint);
+    }
+
+    private function aggregateAlias(string $relation, string $function, string $column, bool $exists): string
+    {
+        if ($exists) {
+            return $relation . '_exists';
+        }
+        if ($function === 'count') {
+            return $relation . '_count';
+        }
+
+        $column = preg_replace('/[^A-Za-z0-9_]+/', '_', $column) ?? $column;
+
+        return sprintf('%s_%s_%s', $relation, $function, trim($column, '_'));
+    }
+
+    private function aggregateProjectionValue(bool $exists, string $function, mixed $value): mixed
+    {
+        if ($exists) {
+            return $this->numericInt($value) > 0;
+        }
+
+        return $function === 'count' ? $this->numericInt($value) : $value;
+    }
+
+    private function assertAggregateAlias(string $alias): void
+    {
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $alias) !== 1) {
+            throw new InvalidArgumentException(sprintf('Invalid relation projection alias [%s].', $alias));
+        }
     }
 
     /**
@@ -107,53 +137,23 @@ trait RepositoryQueryAggregates
         return $rows;
     }
 
-    private function aggregateProjectionValue(bool $exists, string $function, mixed $value): mixed
-    {
-        if ($exists) {
-            return $this->numericInt($value) > 0;
-        }
-
-        return $function === 'count' ? $this->numericInt($value) : $value;
-    }
-
     private function numericInt(mixed $value): int
     {
         return is_numeric($value) ? (int) $value : 0;
     }
 
-    /**
-     * @param array<int|string,string|array<int|string,string|callable(QueryBuilder):void>> $relations
-     */
-    private function registerAggregateList(
-        string $function,
-        string $column,
-        bool $exists,
-        array $relations,
-    ): void {
-        foreach ($relations as $relation) {
-            if (is_string($relation)) {
-                $this->registerAggregate($relation, $function, $column, null, null, $exists);
-                continue;
-            }
+    /** @return array{0:string,1:?string} */
+    private function parseAggregateAlias(string $expression): array
+    {
+        $parts = preg_split('/\s+as\s+/i', trim($expression), 2);
+        $relation = trim((string) ($parts[0] ?? ''));
+        $alias = isset($parts[1]) ? trim((string) $parts[1]) : null;
 
-            foreach ($relation as $expression => $constraint) {
-                if (is_int($expression)) {
-                    if (!is_string($constraint)) {
-                        throw new InvalidArgumentException('Numeric relation aggregate entries must contain relation names.');
-                    }
-                    $this->registerAggregate($constraint, $function, $column, null, null, $exists);
-                    continue;
-                }
-
-                if (!is_callable($constraint)) {
-                    throw new InvalidArgumentException(sprintf(
-                        'Relation aggregate constraint for [%s] must be callable.',
-                        $expression,
-                    ));
-                }
-                $this->registerAggregate($expression, $function, $column, null, $constraint, $exists);
-            }
+        if ($relation === '' || $alias === '') {
+            throw new InvalidArgumentException('Relation name and optional alias must be non-empty.');
         }
+
+        return [$relation, $alias];
     }
 
     /** @param null|callable(QueryBuilder):void $constraint */
@@ -179,38 +179,40 @@ trait RepositoryQueryAggregates
         ];
     }
 
-    /** @return array{0:string,1:?string} */
-    private function parseAggregateAlias(string $expression): array
-    {
-        $parts = preg_split('/\s+as\s+/i', trim($expression), 2);
-        $relation = trim((string) ($parts[0] ?? ''));
-        $alias = isset($parts[1]) ? trim((string) $parts[1]) : null;
+    /**
+     * @param array<int|string,string|array<int|string,string|callable(QueryBuilder):void>> $relations
+     */
+    private function registerAggregateList(
+        string $function,
+        string $column,
+        bool $exists,
+        array $relations,
+    ): void {
+        foreach ($relations as $relation) {
+            if (is_string($relation)) {
+                $this->registerAggregate($relation, $function, $column, null, null, $exists);
 
-        if ($relation === '' || $alias === '') {
-            throw new InvalidArgumentException('Relation name and optional alias must be non-empty.');
-        }
+                continue;
+            }
 
-        return [$relation, $alias];
-    }
+            foreach ($relation as $expression => $constraint) {
+                if (is_int($expression)) {
+                    if (!is_string($constraint)) {
+                        throw new InvalidArgumentException('Numeric relation aggregate entries must contain relation names.');
+                    }
+                    $this->registerAggregate($constraint, $function, $column, null, null, $exists);
 
-    private function aggregateAlias(string $relation, string $function, string $column, bool $exists): string
-    {
-        if ($exists) {
-            return $relation . '_exists';
-        }
-        if ($function === 'count') {
-            return $relation . '_count';
-        }
+                    continue;
+                }
 
-        $column = preg_replace('/[^A-Za-z0-9_]+/', '_', $column) ?? $column;
-
-        return sprintf('%s_%s_%s', $relation, $function, trim($column, '_'));
-    }
-
-    private function assertAggregateAlias(string $alias): void
-    {
-        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $alias) !== 1) {
-            throw new InvalidArgumentException(sprintf('Invalid relation projection alias [%s].', $alias));
+                if (!is_callable($constraint)) {
+                    throw new InvalidArgumentException(sprintf(
+                        'Relation aggregate constraint for [%s] must be callable.',
+                        $expression,
+                    ));
+                }
+                $this->registerAggregate($expression, $function, $column, null, $constraint, $exists);
+            }
         }
     }
 }

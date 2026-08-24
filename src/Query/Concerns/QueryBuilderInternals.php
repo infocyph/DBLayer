@@ -14,6 +14,12 @@ use Infocyph\DBLayer\Support\Numeric;
 
 trait QueryBuilderInternals
 {
+    /** Compare two columns with an OR boolean. */
+    public function orWhereColumn(string $first, string $operator, string $second): self
+    {
+        return $this->whereColumn($first, $operator, $second, 'or');
+    }
+
     /**
      * Set the columns to select.
      *
@@ -83,12 +89,6 @@ trait QueryBuilderInternals
             'second' => $second,
             'boolean' => $boolean,
         ]);
-    }
-
-    /** Compare two columns with an OR boolean. */
-    public function orWhereColumn(string $first, string $operator, string $second): self
-    {
-        return $this->whereColumn($first, $operator, $second, 'or');
     }
 
     /**

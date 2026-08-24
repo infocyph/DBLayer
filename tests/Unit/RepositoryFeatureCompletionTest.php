@@ -37,15 +37,40 @@ final class CompletionPost extends TableRepository
     /** @var list<string> */
     public static array $operationEvents = [];
 
-    protected static string $table = 'completion_posts';
+    protected static array $creatable = ['author_id', 'title', 'status'];
 
     protected static int $maxRelationDepth = 2;
 
+    protected static string $table = 'completion_posts';
+
     protected static bool $timestamps = true;
 
-    protected static array $creatable = ['author_id', 'title', 'status'];
-
     protected static array $updatable = ['title', 'status'];
+
+    protected static function configureRepository(QueryRepository $repository): QueryRepository
+    {
+        $repository->enableSoftDeletes();
+
+        if ($repository instanceof TableQueryRepository) {
+            $repository
+                ->beforeBulkUpdate(static function (): void {
+                    self::$operationEvents[] = 'before_bulk_update';
+                })
+                ->afterBulkUpdate(static function (): void {
+                    self::$operationEvents[] = 'after_bulk_update';
+                })
+                ->afterCommit(static function (
+                    string $operation,
+                    array $context,
+                    TableQueryRepository $repository,
+                ): void {
+                    unset($context, $repository);
+                    self::$commitEvents[] = $operation;
+                });
+        }
+
+        return $repository;
+    }
 
     /** @return array<string,RelationDefinition> */
     protected static function relations(): array
@@ -73,31 +98,6 @@ final class CompletionPost extends TableRepository
                 'post',
             )->withPivot('context')->asPivot('tagging'),
         ];
-    }
-
-    protected static function configureRepository(QueryRepository $repository): QueryRepository
-    {
-        $repository->enableSoftDeletes();
-
-        if ($repository instanceof TableQueryRepository) {
-            $repository
-                ->beforeBulkUpdate(static function (): void {
-                    self::$operationEvents[] = 'before_bulk_update';
-                })
-                ->afterBulkUpdate(static function (): void {
-                    self::$operationEvents[] = 'after_bulk_update';
-                })
-                ->afterCommit(static function (
-                    string $operation,
-                    array $context,
-                    TableQueryRepository $repository,
-                ): void {
-                    unset($context, $repository);
-                    self::$commitEvents[] = $operation;
-                });
-        }
-
-        return $repository;
     }
 }
 
@@ -152,9 +152,9 @@ final class CompletionImage extends TableRepository
 
 final class CompletionActivity extends TableRepository
 {
-    protected static string $table = 'completion_activities';
-
     protected static int $maxRelationDepth = 2;
+
+    protected static string $table = 'completion_activities';
 
     /** @return array<string,RelationDefinition> */
     protected static function relations(): array
@@ -311,7 +311,7 @@ afterEach(function (): void {
 });
 
 it('supports bounded nested eager loading and enforces configured depth', function (): void {
-    $post = CompletionPost::query()
+    $post = CompletionPost::repositoryQuery()
         ->with('comments.author')
         ->where('id', '=', 1)
         ->first();
@@ -321,12 +321,12 @@ it('supports bounded nested eager loading and enforces configured depth', functi
         ->and($post['comments'][0]['author']['name'])->toBe('Bob')
         ->and($post['comments'][1]['author']['name'])->toBe('Alice');
 
-    expect(fn() => CompletionPost::query()->with('comments.author.posts'))
+    expect(fn() => CompletionPost::repositoryQuery()->with('comments.author.posts'))
         ->toThrow(InvalidArgumentException::class);
 });
 
 it('projects normal pivot attributes under a configurable accessor', function (): void {
-    $post = CompletionPost::query()
+    $post = CompletionPost::repositoryQuery()
         ->with('tags')
         ->where('id', '=', 1)
         ->first();
@@ -339,12 +339,12 @@ it('projects normal pivot attributes under a configurable accessor', function ()
 });
 
 it('loads morph relations through explicit discriminators only', function (): void {
-    $post = CompletionPost::query()
+    $post = CompletionPost::repositoryQuery()
         ->with('images')
         ->where('id', '=', 1)
         ->first();
 
-    $comment = CompletionComment::query()
+    $comment = CompletionComment::repositoryQuery()
         ->with('images')
         ->where('id', '=', 1)
         ->first();
@@ -354,7 +354,7 @@ it('loads morph relations through explicit discriminators only', function (): vo
 });
 
 it('loads morph-to relations and nested relations for each mapped repository', function (): void {
-    $activities = CompletionActivity::query()
+    $activities = CompletionActivity::repositoryQuery()
         ->with('subject.author')
         ->orderBy('id')
         ->get()
@@ -367,12 +367,12 @@ it('loads morph-to relations and nested relations for each mapped repository', f
 });
 
 it('loads polymorphic many-to-many relations and inverse mappings with pivot data', function (): void {
-    $post = CompletionPost::query()
+    $post = CompletionPost::repositoryQuery()
         ->with('labels')
         ->where('id', '=', 1)
         ->first();
 
-    $tag = CompletionTag::query()
+    $tag = CompletionTag::repositoryQuery()
         ->with('posts')
         ->where('id', '=', 1)
         ->first();
@@ -384,7 +384,7 @@ it('loads polymorphic many-to-many relations and inverse mappings with pivot dat
 });
 
 it('projects direct and pivot relation aggregates without hydrating relation graphs', function (): void {
-    $post = CompletionPost::query()
+    $post = CompletionPost::repositoryQuery()
         ->withCount('comments', 'tags', 'labels')
         ->withExists('comments')
         ->withSum('comments', 'score')
@@ -405,12 +405,12 @@ it('projects direct and pivot relation aggregates without hydrating relation gra
 });
 
 it('filters by direct, polymorphic, and pivot relation existence', function (): void {
-    $highScore = CompletionPost::query()
+    $highScore = CompletionPost::repositoryQuery()
         ->whereRelation('comments', 'score', '>', 5)
         ->get()
         ->toArray();
 
-    $withoutVeryHigh = CompletionPost::query()
+    $withoutVeryHigh = CompletionPost::repositoryQuery()
         ->whereDoesntHave(
             'comments',
             static fn(QueryBuilder $query) => $query->where('score', '>', 6),
@@ -418,8 +418,8 @@ it('filters by direct, polymorphic, and pivot relation existence', function (): 
         ->get()
         ->toArray();
 
-    $withImages = CompletionPost::query()->whereHas('images')->get()->toArray();
-    $withLabels = CompletionPost::query()->whereHas('labels')->get()->toArray();
+    $withImages = CompletionPost::repositoryQuery()->whereHas('images')->get()->toArray();
+    $withLabels = CompletionPost::repositoryQuery()->whereHas('labels')->get()->toArray();
 
     expect(array_column($highScore, 'title'))->toBe(['Second'])
         ->and(array_column($withoutVeryHigh, 'title'))->toBe(['First'])
@@ -428,7 +428,7 @@ it('filters by direct, polymorphic, and pivot relation existence', function (): 
 });
 
 it('keeps fluent mutations inside repository write policy and soft-delete semantics', function (): void {
-    $inserted = CompletionPost::query()->insert([
+    $inserted = CompletionPost::repositoryQuery()->insert([
         'author_id' => 1,
         'title' => 'Third',
         'status' => 'draft',
@@ -436,7 +436,7 @@ it('keeps fluent mutations inside repository write policy and soft-delete semant
 
     expect($inserted)->toBeTrue();
 
-    $affected = CompletionPost::query()
+    $affected = CompletionPost::repositoryQuery()
         ->where('status', '=', 'draft')
         ->update(['status' => 'published']);
 
@@ -445,18 +445,18 @@ it('keeps fluent mutations inside repository write policy and soft-delete semant
             'before_bulk_update',
             'after_bulk_update',
         ])
-        ->and(CompletionPost::query()->where('status', '=', 'published')->count())->toBe(1);
+        ->and(CompletionPost::repositoryQuery()->where('status', '=', 'published')->count())->toBe(1);
 
-    expect(fn() => CompletionPost::query()
+    expect(fn() => CompletionPost::repositoryQuery()
         ->where('id', '=', 1)
         ->update(['author_id' => 2]))
         ->toThrow(UnwritableAttributeException::class);
 
-    expect(CompletionPost::query()->where('id', '=', 1)->delete())->toBe(1)
-        ->and(CompletionPost::query()->where('id', '=', 1)->count())->toBe(0)
-        ->and(CompletionPost::query()->withTrashed()->where('id', '=', 1)->count())->toBe(1)
-        ->and(CompletionPost::query()->onlyTrashed()->where('id', '=', 1)->restore())->toBe(1)
-        ->and(CompletionPost::query()->where('id', '=', 1)->count())->toBe(1);
+    expect(CompletionPost::repositoryQuery()->where('id', '=', 1)->delete())->toBe(1)
+        ->and(CompletionPost::repositoryQuery()->where('id', '=', 1)->count())->toBe(0)
+        ->and(CompletionPost::repositoryQuery()->withTrashed()->where('id', '=', 1)->count())->toBe(1)
+        ->and(CompletionPost::repositoryQuery()->onlyTrashed()->where('id', '=', 1)->restore())->toBe(1)
+        ->and(CompletionPost::repositoryQuery()->where('id', '=', 1)->count())->toBe(1);
 });
 
 it('fires after-commit callbacks only after top-level commit and discards them on rollback', function (): void {
@@ -485,7 +485,7 @@ it('fires after-commit callbacks only after top-level commit and discards them o
     $connection->rollBack();
 
     expect(CompletionPost::$commitEvents)->toBe([])
-        ->and(CompletionPost::query()->where('title', '=', 'Rolled back')->count())->toBe(0);
+        ->and(CompletionPost::repositoryQuery()->where('title', '=', 'Rolled back')->count())->toBe(0);
 });
 
 it('promotes after-commit callbacks through nested savepoints to the top-level commit', function (): void {
@@ -507,7 +507,7 @@ it('promotes after-commit callbacks through nested savepoints to the top-level c
 });
 
 it('prunes in bounded repository-aware batches using soft or force deletion', function (): void {
-    CompletionPost::query()->insert([
+    CompletionPost::repositoryQuery()->insert([
         ['author_id' => 1, 'title' => 'Old A', 'status' => 'prune'],
         ['author_id' => 1, 'title' => 'Old B', 'status' => 'prune'],
         ['author_id' => 1, 'title' => 'Old C', 'status' => 'prune'],
@@ -520,8 +520,8 @@ it('prunes in bounded repository-aware batches using soft or force deletion', fu
     $softDeleted = CompletionPost::pruner()->prune($scope, chunkSize: 2);
 
     expect($softDeleted)->toBe(3)
-        ->and(CompletionPost::query()->where('status', '=', 'prune')->count())->toBe(0)
-        ->and(CompletionPost::query()->onlyTrashed()->where('status', '=', 'prune')->count())->toBe(3);
+        ->and(CompletionPost::repositoryQuery()->where('status', '=', 'prune')->count())->toBe(0)
+        ->and(CompletionPost::repositoryQuery()->onlyTrashed()->where('status', '=', 'prune')->count())->toBe(3);
 
     $forceDeleted = CompletionPost::pruner()->prune(
         static function (RepositoryQuery $query): void {
@@ -532,5 +532,5 @@ it('prunes in bounded repository-aware batches using soft or force deletion', fu
     );
 
     expect($forceDeleted)->toBe(3)
-        ->and(CompletionPost::query()->withTrashed()->where('status', '=', 'prune')->count())->toBe(0);
+        ->and(CompletionPost::repositoryQuery()->withTrashed()->where('status', '=', 'prune')->count())->toBe(0);
 });

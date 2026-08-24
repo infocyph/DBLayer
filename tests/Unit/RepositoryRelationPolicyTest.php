@@ -84,7 +84,7 @@ afterEach(function (): void {
 });
 
 it('preserves related repository global scopes and casts during eager loading', function (): void {
-    $parent = RepositoryRelationPolicyParent::query()
+    $parent = RepositoryRelationPolicyParent::repositoryQuery()
         ->with('children')
         ->first();
 
@@ -93,7 +93,7 @@ it('preserves related repository global scopes and casts during eager loading', 
 });
 
 it('counts relations without hydrating rows and preserves related scopes', function (): void {
-    $parent = RepositoryRelationPolicyParent::query()
+    $parent = RepositoryRelationPolicyParent::repositoryQuery()
         ->withCount('children')
         ->first();
 
@@ -102,7 +102,7 @@ it('counts relations without hydrating rows and preserves related scopes', funct
 });
 
 it('supports constrained and aliased relation counts', function (): void {
-    $parent = RepositoryRelationPolicyParent::query()
+    $parent = RepositoryRelationPolicyParent::repositoryQuery()
         ->withCount([
             'children as visible_named_count' => static function (QueryBuilder $query): void {
                 $query->where('name', '=', 'Visible');

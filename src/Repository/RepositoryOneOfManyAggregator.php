@@ -32,7 +32,7 @@ final readonly class RepositoryOneOfManyAggregator
             : [$definition->relatedKey, $column];
         $selectedDefinition = $definition->select(array_values(array_unique($projection)));
         $alias = '__one_of_many_aggregate';
-        $rows = (new RepositoryRelationLoader($this->parentConnection, $this->batchSize))
+        $rows = new RepositoryRelationLoader($this->parentConnection, $this->batchSize)
             ->load($parents, $alias, $selectedDefinition, $constraint);
         $result = [];
 
@@ -54,12 +54,6 @@ final readonly class RepositoryOneOfManyAggregator
         return $result;
     }
 
-    /** @param array<string,mixed> $parent */
-    private function parentIdentity(array $parent, RelationDefinition $definition): string
-    {
-        return $this->key($parent[$definition->parentKey] ?? null);
-    }
-
     private function key(mixed $value): string
     {
         return match (true) {
@@ -69,5 +63,11 @@ final readonly class RepositoryOneOfManyAggregator
             $value === null => 'null:',
             default => serialize($value),
         };
+    }
+
+    /** @param array<string,mixed> $parent */
+    private function parentIdentity(array $parent, RelationDefinition $definition): string
+    {
+        return $this->key($parent[$definition->parentKey] ?? null);
     }
 }

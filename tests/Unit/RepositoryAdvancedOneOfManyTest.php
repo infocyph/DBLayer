@@ -201,7 +201,7 @@ afterEach(function (): void {
 });
 
 it('selects advanced direct one-of-many rows lexicographically after candidate scope', function (): void {
-    $parent = RepositoryAdvancedOneParent::query()
+    $parent = RepositoryAdvancedOneParent::repositoryQuery()
         ->with('current_child')
         ->withCount('current_child')
         ->withSum('current_child', 'amount')
@@ -213,15 +213,15 @@ it('selects advanced direct one-of-many rows lexicographically after candidate s
 });
 
 it('uses the advanced selected winner for relation existence filters', function (): void {
-    $winner = RepositoryAdvancedOneParent::query()
+    $winner = RepositoryAdvancedOneParent::repositoryQuery()
         ->whereRelation('current_child', 'title', '=', 'Tie Winner')
         ->get()
         ->toArray();
-    $loser = RepositoryAdvancedOneParent::query()
+    $loser = RepositoryAdvancedOneParent::repositoryQuery()
         ->whereRelation('current_child', 'title', '=', 'Tie Loser')
         ->get()
         ->toArray();
-    $disabled = RepositoryAdvancedOneParent::query()
+    $disabled = RepositoryAdvancedOneParent::repositoryQuery()
         ->whereRelation('current_child', 'title', '=', 'Newer Disabled')
         ->get()
         ->toArray();
@@ -232,7 +232,7 @@ it('uses the advanced selected winner for relation existence filters', function 
 });
 
 it('applies advanced one-of-many criteria across through relations', function (): void {
-    $country = RepositoryAdvancedOneCountry::query()
+    $country = RepositoryAdvancedOneCountry::repositoryQuery()
         ->with('current_post')
         ->withCount('current_post')
         ->withSum('current_post', 'amount')
@@ -242,11 +242,11 @@ it('applies advanced one-of-many criteria across through relations', function ()
         ->and($country['current_post_count'])->toBe(1)
         ->and((int) $country['current_post_sum_amount'])->toBe(60);
 
-    $winner = RepositoryAdvancedOneCountry::query()
+    $winner = RepositoryAdvancedOneCountry::repositoryQuery()
         ->whereRelation('current_post', 'title', '=', 'Through Tie Winner')
         ->get()
         ->toArray();
-    $disabled = RepositoryAdvancedOneCountry::query()
+    $disabled = RepositoryAdvancedOneCountry::repositoryQuery()
         ->whereRelation('current_post', 'title', '=', 'Through Newer Disabled')
         ->get()
         ->toArray();

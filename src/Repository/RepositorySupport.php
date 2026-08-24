@@ -9,6 +9,8 @@ use InvalidArgumentException;
 /** Internal typed helpers shared by repository relation infrastructure. */
 final class RepositorySupport
 {
+    private function __construct() {}
+
     /** @return non-empty-string */
     public static function column(string $column): string
     {
@@ -32,14 +34,36 @@ final class RepositorySupport
         };
     }
 
-    /** @return int|float|string|bool|null */
-    public static function value(mixed $value): int|float|string|bool|null
+    /** @return array<string,mixed>|null */
+    public static function row(mixed $value): ?array
     {
-        if ($value === null || is_int($value) || is_float($value) || is_string($value) || is_bool($value)) {
-            return $value;
+        if (!is_array($value)) {
+            return null;
         }
 
-        throw new InvalidArgumentException('Relation keys must be scalar or null.');
+        foreach (array_keys($value) as $key) {
+            if (!is_string($key)) {
+                return null;
+            }
+        }
+
+        /** @var array<string,mixed> $value */
+        return $value;
+    }
+
+    /**
+     * @param list<string> $columns
+     * @return list<non-empty-string>
+     */
+    public static function uniqueColumns(array $columns): array
+    {
+        $unique = [];
+        foreach ($columns as $column) {
+            $column = self::column($column);
+            $unique[$column] = true;
+        }
+
+        return array_keys($unique);
     }
 
     /**
@@ -59,37 +83,12 @@ final class RepositorySupport
         return array_values($unique);
     }
 
-    /**
-     * @param list<string> $columns
-     * @return list<non-empty-string>
-     */
-    public static function uniqueColumns(array $columns): array
+    public static function value(mixed $value): int|float|string|bool|null
     {
-        $unique = [];
-        foreach ($columns as $column) {
-            $column = self::column($column);
-            $unique[$column] = true;
+        if ($value === null || is_int($value) || is_float($value) || is_string($value) || is_bool($value)) {
+            return $value;
         }
 
-        return array_keys($unique);
+        throw new InvalidArgumentException('Relation keys must be scalar or null.');
     }
-
-    /** @return array<string,mixed>|null */
-    public static function row(mixed $value): ?array
-    {
-        if (!is_array($value)) {
-            return null;
-        }
-
-        foreach (array_keys($value) as $key) {
-            if (!is_string($key)) {
-                return null;
-            }
-        }
-
-        /** @var array<string,mixed> $value */
-        return $value;
-    }
-
-    private function __construct() {}
 }

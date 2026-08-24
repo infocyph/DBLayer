@@ -178,6 +178,11 @@ Mapping to DTO
 TableRepository Recipes
 -----------------------
 
+For a runnable end-to-end definition covering metadata, casts, write policy,
+scopes, relations, lifecycle hooks, repository-aware mutations, soft deletes,
+optimistic locking, pagination, and pruning, see
+``examples/complete_repository.php``.
+
 Minimal TableRepository Class
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

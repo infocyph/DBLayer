@@ -8,9 +8,9 @@ use Infocyph\DBLayer\Query\QueryBuilder;
 use InvalidArgumentException;
 
 /** Hydrate already-selected one-of-many winners through the related repository. */
-final class RepositoryOneOfManyRelation
+final readonly class RepositoryOneOfManyRelation
 {
-    public function __construct(private readonly int $batchSize = 500)
+    public function __construct(private int $batchSize = 500)
     {
         if ($batchSize < 1) {
             throw new InvalidArgumentException('Relation batch size must be at least one.');
@@ -35,7 +35,7 @@ final class RepositoryOneOfManyRelation
         $related = $definition->related
             ?? throw new InvalidArgumentException('One-of-many relation requires a related repository.');
         $parentValues = $this->values($parents, $definition->parentKey);
-        $winners = (new RepositoryOneOfManySelector($this->batchSize))->select($definition, $parentValues);
+        $winners = new RepositoryOneOfManySelector($this->batchSize)->select($definition, $parentValues);
 
         if ($winners === []) {
             return $this->attachEmpty($parents, $as);
@@ -68,6 +68,49 @@ final class RepositoryOneOfManyRelation
     }
 
     /**
+     * @param list<array<string,mixed>> $parents
+     * @return list<array<string,mixed>>
+     */
+    private function attachEmpty(array $parents, string $as): array
+    {
+        foreach ($parents as &$parent) {
+            $parent[$as] = null;
+        }
+        unset($parent);
+
+        return $parents;
+    }
+
+    /**
+     * @param list<string> $requested
+     * @return array{0:list<string>,1:list<string>}
+     */
+    private function projection(array $requested, string $primaryKey): array
+    {
+        if ($requested === ['*'] || in_array('*', $requested, true) || in_array($primaryKey, $requested, true)) {
+            return [$requested, []];
+        }
+
+        return [[...$requested, $primaryKey], [$primaryKey]];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<mixed>
+     */
+    private function values(array $rows, string $column): array
+    {
+        $values = [];
+        foreach ($rows as $row) {
+            if (array_key_exists($column, $row) && $row[$column] !== null) {
+                $values[] = $row[$column];
+            }
+        }
+
+        return RepositorySupport::uniqueValues($values);
+    }
+
+    /**
      * @param class-string<TableRepository> $related
      * @param list<mixed> $ids
      * @param list<string> $columns
@@ -87,7 +130,7 @@ final class RepositoryOneOfManyRelation
         $rows = [];
 
         foreach (array_chunk($ids, $batchSize) as $chunk) {
-            $query = $related::query()->apply(
+            $query = $related::repositoryQuery()->apply(
                 static function (QueryBuilder $builder) use ($primaryKey, $chunk): void {
                     $builder->whereIn($primaryKey, $chunk);
                 },
@@ -113,33 +156,6 @@ final class RepositoryOneOfManyRelation
     }
 
     /**
-     * @param list<string> $requested
-     * @return array{0:list<string>,1:list<string>}
-     */
-    private function projection(array $requested, string $primaryKey): array
-    {
-        if ($requested === ['*'] || in_array('*', $requested, true) || in_array($primaryKey, $requested, true)) {
-            return [$requested, []];
-        }
-
-        return [[...$requested, $primaryKey], [$primaryKey]];
-    }
-
-    /**
-     * @param list<array<string,mixed>> $parents
-     * @return list<array<string,mixed>>
-     */
-    private function attachEmpty(array $parents, string $as): array
-    {
-        foreach ($parents as &$parent) {
-            $parent[$as] = null;
-        }
-        unset($parent);
-
-        return $parents;
-    }
-
-    /**
      * @param array<string,mixed> $row
      * @param list<string> $columns
      * @return array<string,mixed>
@@ -151,21 +167,5 @@ final class RepositoryOneOfManyRelation
         }
 
         return $row;
-    }
-
-    /**
-     * @param list<array<string,mixed>> $rows
-     * @return list<mixed>
-     */
-    private function values(array $rows, string $column): array
-    {
-        $values = [];
-        foreach ($rows as $row) {
-            if (array_key_exists($column, $row) && $row[$column] !== null) {
-                $values[] = $row[$column];
-            }
-        }
-
-        return RepositorySupport::uniqueValues($values);
     }
 }

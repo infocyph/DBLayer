@@ -12,23 +12,20 @@ use InvalidArgumentException;
 /** Immutable, validated metadata compiled once per TableRepository class. */
 final readonly class RepositoryDefinition
 {
-    /** @var array<string,mixed> */
-    public array $defaults;
+    /** @var array<string,string|callable(mixed):mixed|AttributeCast> */
+    public array $casts;
 
     /** @var list<string> */
     public array $creatable;
-
-    /** @var list<string> */
-    public array $updatable;
-
-    /** @var array<string,string|callable(mixed):mixed|AttributeCast> */
-    public array $casts;
 
     /** @var array<string,callable(QueryBuilder):void> */
     public array $globalScopes;
 
     /** @var array<string,RelationDefinition> */
     public array $relations;
+
+    /** @var list<string> */
+    public array $updatable;
 
     /**
      * @param class-string<TableRepository> $repositoryClass
@@ -45,7 +42,7 @@ final readonly class RepositoryDefinition
         public string $primaryKey,
         public int $perPage,
         public int $maxRelationDepth = 3,
-        array $defaults = [],
+        public array $defaults = [],
         array $creatable = [],
         array $updatable = [],
         public bool $timestamps = false,
@@ -73,8 +70,6 @@ final readonly class RepositoryDefinition
                 $repositoryClass,
             ));
         }
-
-        $this->defaults = $defaults;
         $this->creatable = $this->normalizeColumns($creatable, 'creatable');
         $this->updatable = $this->normalizeColumns($updatable, 'updatable');
         $this->casts = $this->normalizeCasts($casts);
@@ -93,6 +88,28 @@ final readonly class RepositoryDefinition
             $this->repositoryClass,
             $label,
         ));
+    }
+
+    private function assertRelationColumns(string $name, RelationDefinition $relation): void
+    {
+        $this->assertIdentifier($relation->parentKey, sprintf('relation [%s] parent key', $name));
+        $this->assertIdentifier($relation->relatedKey, sprintf('relation [%s] related key', $name));
+
+        if ($relation->morphTypeColumn !== null) {
+            $this->assertIdentifier($relation->morphTypeColumn, sprintf('relation [%s] morph type column', $name));
+        }
+
+        if ($relation->morphIdColumn !== null) {
+            $this->assertIdentifier($relation->morphIdColumn, sprintf('relation [%s] morph id column', $name));
+        }
+
+        if ($relation->morphAlias !== null && trim($relation->morphAlias) === '') {
+            throw new InvalidArgumentException(sprintf(
+                '%s relation [%s] morph alias must not be empty.',
+                $this->repositoryClass,
+                $name,
+            ));
+        }
     }
 
     /**
@@ -172,6 +189,30 @@ final readonly class RepositoryDefinition
     }
 
     /**
+     * @param array<array-key,mixed> $relations
+     * @return array<string,RelationDefinition>
+     */
+    private function normalizeRelations(array $relations): array
+    {
+        $normalized = [];
+
+        foreach ($relations as $name => $relation) {
+            $name = is_string($name) ? trim($name) : '';
+            if ($name === '' || !$relation instanceof RelationDefinition) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s relations must use non-empty names and RelationDefinition values.',
+                    $this->repositoryClass,
+                ));
+            }
+
+            $this->validateRelation($name, $relation);
+            $normalized[$name] = $relation;
+        }
+
+        return $normalized;
+    }
+
+    /**
      * @param array<array-key,mixed> $scopes
      * @return array<string,callable(QueryBuilder):void>
      */
@@ -202,56 +243,6 @@ final readonly class RepositoryDefinition
         return $normalized;
     }
 
-    /**
-     * @param array<array-key,mixed> $relations
-     * @return array<string,RelationDefinition>
-     */
-    private function normalizeRelations(array $relations): array
-    {
-        $normalized = [];
-
-        foreach ($relations as $name => $relation) {
-            $name = is_string($name) ? trim($name) : '';
-            if ($name === '' || !$relation instanceof RelationDefinition) {
-                throw new InvalidArgumentException(sprintf(
-                    '%s relations must use non-empty names and RelationDefinition values.',
-                    $this->repositoryClass,
-                ));
-            }
-
-            $this->validateRelation($name, $relation);
-            $normalized[$name] = $relation;
-        }
-
-        return $normalized;
-    }
-
-    private function validateRelation(string $name, RelationDefinition $relation): void
-    {
-        $this->assertRelationColumns($name, $relation);
-
-        if ($relation->type === RelationDefinition::MORPH_TO) {
-            $this->validateMorphTo($name, $relation);
-            return;
-        }
-
-        if ($relation->related === null) {
-            throw new InvalidArgumentException(sprintf(
-                '%s relation [%s] must target a TableRepository class.',
-                $this->repositoryClass,
-                $name,
-            ));
-        }
-
-        $this->validatePivot($relation);
-        $this->validateThrough($name, $relation);
-        $this->validateOneOfMany($name, $relation);
-
-        foreach ($relation->pivotColumns as $column) {
-            $this->assertIdentifier($column, 'pivot column');
-        }
-    }
-
     private function validateMorphTo(string $name, RelationDefinition $relation): void
     {
         if ($relation->related !== null || $relation->morphMap === []) {
@@ -272,35 +263,6 @@ final readonly class RepositoryDefinition
                 ));
             }
         }
-    }
-
-    private function validatePivot(RelationDefinition $relation): void
-    {
-        if ($relation->pivotTable === null) {
-            return;
-        }
-
-        $this->assertIdentifier($relation->pivotTable, 'pivot table');
-        $this->assertIdentifier((string) $relation->pivotParentKey, 'pivot parent key');
-        $this->assertIdentifier((string) $relation->pivotRelatedKey, 'pivot related key');
-    }
-
-    private function validateThrough(string $name, RelationDefinition $relation): void
-    {
-        if ($relation->through === null) {
-            return;
-        }
-
-        if (!in_array($relation->type, [RelationDefinition::HAS_ONE, RelationDefinition::HAS_MANY], true)) {
-            throw new InvalidArgumentException(sprintf(
-                '%s through relation [%s] must use has-one or has-many cardinality.',
-                $this->repositoryClass,
-                $name,
-            ));
-        }
-
-        $this->assertIdentifier((string) $relation->throughParentKey, 'through parent key');
-        $this->assertIdentifier((string) $relation->throughKey, 'through local key');
     }
 
     private function validateOneOfMany(string $name, RelationDefinition $relation): void
@@ -334,25 +296,59 @@ final readonly class RepositoryDefinition
         }
     }
 
-    private function assertRelationColumns(string $name, RelationDefinition $relation): void
+    private function validatePivot(RelationDefinition $relation): void
     {
-        $this->assertIdentifier($relation->parentKey, sprintf('relation [%s] parent key', $name));
-        $this->assertIdentifier($relation->relatedKey, sprintf('relation [%s] related key', $name));
-
-        if ($relation->morphTypeColumn !== null) {
-            $this->assertIdentifier($relation->morphTypeColumn, sprintf('relation [%s] morph type column', $name));
+        if ($relation->pivotTable === null) {
+            return;
         }
 
-        if ($relation->morphIdColumn !== null) {
-            $this->assertIdentifier($relation->morphIdColumn, sprintf('relation [%s] morph id column', $name));
+        $this->assertIdentifier($relation->pivotTable, 'pivot table');
+        $this->assertIdentifier((string) $relation->pivotParentKey, 'pivot parent key');
+        $this->assertIdentifier((string) $relation->pivotRelatedKey, 'pivot related key');
+    }
+
+    private function validateRelation(string $name, RelationDefinition $relation): void
+    {
+        $this->assertRelationColumns($name, $relation);
+
+        if ($relation->type === RelationDefinition::MORPH_TO) {
+            $this->validateMorphTo($name, $relation);
+
+            return;
         }
 
-        if ($relation->morphAlias !== null && trim($relation->morphAlias) === '') {
+        if ($relation->related === null) {
             throw new InvalidArgumentException(sprintf(
-                '%s relation [%s] morph alias must not be empty.',
+                '%s relation [%s] must target a TableRepository class.',
                 $this->repositoryClass,
                 $name,
             ));
         }
+
+        $this->validatePivot($relation);
+        $this->validateThrough($name, $relation);
+        $this->validateOneOfMany($name, $relation);
+
+        foreach ($relation->pivotColumns as $column) {
+            $this->assertIdentifier($column, 'pivot column');
+        }
+    }
+
+    private function validateThrough(string $name, RelationDefinition $relation): void
+    {
+        if ($relation->through === null) {
+            return;
+        }
+
+        if (!in_array($relation->type, [RelationDefinition::HAS_ONE, RelationDefinition::HAS_MANY], true)) {
+            throw new InvalidArgumentException(sprintf(
+                '%s through relation [%s] must use has-one or has-many cardinality.',
+                $this->repositoryClass,
+                $name,
+            ));
+        }
+
+        $this->assertIdentifier((string) $relation->throughParentKey, 'through parent key');
+        $this->assertIdentifier((string) $relation->throughKey, 'through local key');
     }
 }

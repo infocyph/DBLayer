@@ -8,6 +8,8 @@ use InvalidArgumentException;
 
 final class Relation
 {
+    private function __construct() {}
+
     /** @param class-string<TableRepository> $related */
     public static function belongsTo(
         string $related,
@@ -121,6 +123,34 @@ final class Relation
     }
 
     /**
+     * Inverse polymorphic many-to-many uses the same bounded pivot mechanism;
+     * naming this factory keeps repository definitions readable.
+     *
+     * @param class-string<TableRepository> $related
+     */
+    public static function morphedByMany(
+        string $related,
+        string $pivot,
+        string $foreignPivotKey,
+        string $relatedPivotKey,
+        string $morphTypeColumn,
+        string $morph,
+        string $parentKey = 'id',
+        string $relatedKey = 'id',
+    ): RelationDefinition {
+        return self::morphToMany(
+            $related,
+            $pivot,
+            $foreignPivotKey,
+            $relatedPivotKey,
+            $morphTypeColumn,
+            $morph,
+            $parentKey,
+            $relatedKey,
+        );
+    }
+
+    /**
      * Define a polymorphic has-many relation using an explicit discriminator.
      *
      * @param class-string<TableRepository> $related
@@ -224,34 +254,6 @@ final class Relation
         );
     }
 
-    /**
-     * Inverse polymorphic many-to-many uses the same bounded pivot mechanism;
-     * naming this factory keeps repository definitions readable.
-     *
-     * @param class-string<TableRepository> $related
-     */
-    public static function morphedByMany(
-        string $related,
-        string $pivot,
-        string $foreignPivotKey,
-        string $relatedPivotKey,
-        string $morphTypeColumn,
-        string $morph,
-        string $parentKey = 'id',
-        string $relatedKey = 'id',
-    ): RelationDefinition {
-        return self::morphToMany(
-            $related,
-            $pivot,
-            $foreignPivotKey,
-            $relatedPivotKey,
-            $morphTypeColumn,
-            $morph,
-            $parentKey,
-            $relatedKey,
-        );
-    }
-
     /** @return array{0:string,1:string} */
     private static function morphColumns(string $name): array
     {
@@ -269,6 +271,4 @@ final class Relation
 
         return $value;
     }
-
-    private function __construct() {}
 }

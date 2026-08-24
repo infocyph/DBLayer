@@ -11,9 +11,9 @@ use InvalidArgumentException;
  * Resolve parent keys for one-of-many existence queries. Winner selection is
  * performed before the caller's whereHas/whereRelation constraint is applied.
  */
-final class RepositoryOneOfManyFilter
+final readonly class RepositoryOneOfManyFilter
 {
-    public function __construct(private readonly int $batchSize = 500)
+    public function __construct(private int $batchSize = 500)
     {
         if ($batchSize < 1) {
             throw new InvalidArgumentException('Relation batch size must be at least one.');
@@ -31,7 +31,7 @@ final class RepositoryOneOfManyFilter
         $related = $definition->related
             ?? throw new InvalidArgumentException('One-of-many relation requires a related repository.');
         $primaryKey = $related::definition()->primaryKey;
-        $winners = (new RepositoryOneOfManySelector($this->batchSize))->select($definition);
+        $winners = new RepositoryOneOfManySelector($this->batchSize)->select($definition);
 
         if ($winners === []) {
             return [];
@@ -59,7 +59,7 @@ final class RepositoryOneOfManyFilter
         $seen = [];
 
         foreach (array_chunk($ids, $batchSize) as $chunk) {
-            $query = $related::query()->apply(
+            $query = $related::repositoryQuery()->apply(
                 static function (QueryBuilder $builder) use ($primaryKey, $chunk): void {
                     $builder->whereIn($primaryKey, $chunk);
                 },

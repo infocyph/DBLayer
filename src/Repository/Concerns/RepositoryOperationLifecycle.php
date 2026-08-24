@@ -30,29 +30,11 @@ trait RepositoryOperationLifecycle
         'afterBulkDelete',
     ];
 
-    /** @var array<string,list<callable(array<string,mixed>,TableQueryRepository):void>> */
-    private array $operationHooks = [];
-
     /** @var list<array{operation:?string,callback:callable(string,array<string,mixed>,TableQueryRepository):void}> */
     private array $afterCommitHooks = [];
 
-    /**
-     * Register a callback after a successful repository write reaches the
-     * surrounding top-level transaction commit. Outside a transaction it runs
-     * immediately after the successful operation.
-     *
-     * @param callable(string,array<string,mixed>,TableQueryRepository):void $callback
-     */
-    public function afterCommit(callable $callback, ?string $operation = null): static
-    {
-        $operation = $operation === null ? null : $this->normalizeOperationName($operation);
-        $this->afterCommitHooks[] = [
-            'operation' => $operation,
-            'callback' => $callback,
-        ];
-
-        return $this;
-    }
+    /** @var array<string,list<callable(array<string,mixed>,TableQueryRepository):void>> */
+    private array $operationHooks = [];
 
     /** @param callable(array<string,mixed>,TableQueryRepository):void $callback */
     public function afterBulkDelete(callable $callback): static
@@ -70,6 +52,24 @@ trait RepositoryOperationLifecycle
     public function afterBulkUpdate(callable $callback): static
     {
         return $this->onOperation('afterBulkUpdate', $callback);
+    }
+
+    /**
+     * Register a callback after a successful repository write reaches the
+     * surrounding top-level transaction commit. Outside a transaction it runs
+     * immediately after the successful operation.
+     *
+     * @param callable(string,array<string,mixed>,TableQueryRepository):void $callback
+     */
+    public function afterCommit(callable $callback, ?string $operation = null): static
+    {
+        $operation = $operation === null ? null : $this->normalizeOperationName($operation);
+        $this->afterCommitHooks[] = [
+            'operation' => $operation,
+            'callback' => $callback,
+        ];
+
+        return $this;
     }
 
     /** @param callable(array<string,mixed>,TableQueryRepository):void $callback */
@@ -153,6 +153,18 @@ trait RepositoryOperationLifecycle
         }
     }
 
+    private function normalizeOperationName(string $operation): string
+    {
+        $operation = strtolower(trim($operation));
+        $operation = str_replace(['-', ' '], '_', $operation);
+
+        if ($operation === '') {
+            throw new InvalidArgumentException('Repository operation name must not be empty.');
+        }
+
+        return $operation;
+    }
+
     /** @param array<string,mixed> $context */
     private function scheduleAfterCommit(string $operation, array $context): void
     {
@@ -175,17 +187,5 @@ trait RepositoryOperationLifecycle
                 $hook['callback']($operation, $context, $this);
             }
         });
-    }
-
-    private function normalizeOperationName(string $operation): string
-    {
-        $operation = strtolower(trim($operation));
-        $operation = str_replace(['-', ' '], '_', $operation);
-
-        if ($operation === '') {
-            throw new InvalidArgumentException('Repository operation name must not be empty.');
-        }
-
-        return $operation;
     }
 }

@@ -194,6 +194,62 @@ trait RepositoryInternals
     }
 
     /**
+     * @param class-string<BackedEnum> $enumClass
+     */
+    private function castBackedEnumValue(mixed $value, string $enumClass, bool $forWrite): mixed
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if ($value instanceof $enumClass) {
+            return $forWrite ? $value->value : $value;
+        }
+
+        if (!is_int($value) && !is_string($value)) {
+            throw new InvalidArgumentException(sprintf(
+                'Backed enum [%s] expects an int or string value, %s given.',
+                $enumClass,
+                get_debug_type($value),
+            ));
+        }
+
+        $case = $enumClass::from($value);
+
+        return $forWrite ? $case->value : $case;
+    }
+
+    private function castJsonValue(mixed $value, bool $forWrite): mixed
+    {
+        if ($forWrite) {
+            return is_array($value) || is_object($value)
+                ? json_encode($value, JSON_THROW_ON_ERROR)
+                : $value;
+        }
+
+        return is_string($value) ? (json_decode($value, true) ?? $value) : $value;
+    }
+
+    private function castNamedValue(mixed $value, string $type, bool $forWrite): mixed
+    {
+        return match (strtolower($type)) {
+            'int', 'integer' => $value === null ? null : $this->castToInt($value),
+            'float', 'double', 'real' => $value === null ? null : $this->castToFloat($value),
+            'bool', 'boolean' => $value === null ? null : $this->castToBool($value),
+            'string' => $value === null ? null : $this->castToString($value),
+            'json', 'array' => $this->castJsonValue($value, $forWrite),
+            'datetime' => $forWrite ? $this->normalizeDateTimeForWrite($value) : $value,
+            'immutable_datetime', 'datetime_immutable' => $forWrite
+                ? $this->normalizeDateTimeForWrite($value)
+                : $this->immutableDateTime($value),
+            'date' => $forWrite
+                ? $this->normalizeDateForWrite($value)
+                : $this->immutableDate($value),
+            default => $value,
+        };
+    }
+
+    /**
      * Normalize native and stringified database boolean representations.
      *
      * PDO normally exposes PostgreSQL booleans as native bools, but explicit
@@ -296,62 +352,6 @@ trait RepositoryInternals
     }
 
     /**
-     * @param class-string<BackedEnum> $enumClass
-     */
-    private function castBackedEnumValue(mixed $value, string $enumClass, bool $forWrite): mixed
-    {
-        if ($value === null) {
-            return null;
-        }
-
-        if ($value instanceof $enumClass) {
-            return $forWrite ? $value->value : $value;
-        }
-
-        if (!is_int($value) && !is_string($value)) {
-            throw new InvalidArgumentException(sprintf(
-                'Backed enum [%s] expects an int or string value, %s given.',
-                $enumClass,
-                get_debug_type($value),
-            ));
-        }
-
-        $case = $enumClass::from($value);
-
-        return $forWrite ? $case->value : $case;
-    }
-
-    private function castNamedValue(mixed $value, string $type, bool $forWrite): mixed
-    {
-        return match (strtolower($type)) {
-            'int', 'integer' => $value === null ? null : $this->castToInt($value),
-            'float', 'double', 'real' => $value === null ? null : $this->castToFloat($value),
-            'bool', 'boolean' => $value === null ? null : $this->castToBool($value),
-            'string' => $value === null ? null : $this->castToString($value),
-            'json', 'array' => $this->castJsonValue($value, $forWrite),
-            'datetime' => $forWrite ? $this->normalizeDateTimeForWrite($value) : $value,
-            'immutable_datetime', 'datetime_immutable' => $forWrite
-                ? $this->normalizeDateTimeForWrite($value)
-                : $this->immutableDateTime($value),
-            'date' => $forWrite
-                ? $this->normalizeDateForWrite($value)
-                : $this->immutableDate($value),
-            default => $value,
-        };
-    }
-
-    private function castJsonValue(mixed $value, bool $forWrite): mixed
-    {
-        if ($forWrite) {
-            return is_array($value) || is_object($value)
-                ? json_encode($value, JSON_THROW_ON_ERROR)
-                : $value;
-        }
-
-        return is_string($value) ? (json_decode($value, true) ?? $value) : $value;
-    }
-
-    /**
      * Find the first row that matches all given attributes.
      *
      * @param array<string,mixed> $attributes
@@ -372,40 +372,6 @@ trait RepositoryInternals
         return new \DateTimeImmutable('now')->format($this->connection->getDriver()->dateFormat());
     }
 
-    private function immutableDate(mixed $value): mixed
-    {
-        if ($value === null || $value instanceof \DateTimeImmutable) {
-            return $value;
-        }
-
-        if ($value instanceof \DateTimeInterface) {
-            return \DateTimeImmutable::createFromInterface($value)->setTime(0, 0);
-        }
-
-        if (!is_string($value) || trim($value) === '') {
-            return $value;
-        }
-
-        return (new \DateTimeImmutable($value))->setTime(0, 0);
-    }
-
-    private function immutableDateTime(mixed $value): mixed
-    {
-        if ($value === null || $value instanceof \DateTimeImmutable) {
-            return $value;
-        }
-
-        if ($value instanceof \DateTimeInterface) {
-            return \DateTimeImmutable::createFromInterface($value);
-        }
-
-        if (!is_string($value) || trim($value) === '') {
-            return $value;
-        }
-
-        return new \DateTimeImmutable($value);
-    }
-
     /**
      * @param ReflectionClass<object> $reflection
      * @param array<string,mixed> $row
@@ -424,6 +390,40 @@ trait RepositoryInternals
 
             $property->setValue($instance, $value);
         }
+    }
+
+    private function immutableDate(mixed $value): mixed
+    {
+        if ($value === null || $value instanceof \DateTimeImmutable) {
+            return $value;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return \DateTimeImmutable::createFromInterface($value)->setTime(0, 0);
+        }
+
+        if (!is_string($value) || trim($value) === '') {
+            return $value;
+        }
+
+        return new \DateTimeImmutable($value)->setTime(0, 0);
+    }
+
+    private function immutableDateTime(mixed $value): mixed
+    {
+        if ($value === null || $value instanceof \DateTimeImmutable) {
+            return $value;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return \DateTimeImmutable::createFromInterface($value);
+        }
+
+        if (!is_string($value) || trim($value) === '') {
+            return $value;
+        }
+
+        return new \DateTimeImmutable($value);
     }
 
     /**

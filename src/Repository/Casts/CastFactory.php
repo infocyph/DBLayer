@@ -8,6 +8,11 @@ use InvalidArgumentException;
 
 final class CastFactory
 {
+    private function __construct()
+    {
+        throw new InvalidArgumentException('CastFactory cannot be instantiated.');
+    }
+
     public static function compile(string $cast): string|AttributeCast
     {
         $normalized = strtolower(trim($cast));
@@ -21,10 +26,5 @@ final class CastFactory
             'immutable_date', 'date_immutable' => new ImmutableDateCast(),
             default => $cast,
         };
-    }
-
-    private function __construct()
-    {
-        throw new InvalidArgumentException('CastFactory cannot be instantiated.');
     }
 }

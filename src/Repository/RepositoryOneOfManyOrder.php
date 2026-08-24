@@ -7,6 +7,34 @@ namespace Infocyph\DBLayer\Repository;
 /** Resolve and compare deterministic one-of-many ordering criteria. */
 final class RepositoryOneOfManyOrder
 {
+    private function __construct() {}
+
+    /**
+     * @param array<string,'asc'|'desc'> $orders
+     * @return list<string>
+     */
+    public static function columns(array $orders): array
+    {
+        return array_keys($orders);
+    }
+
+    /**
+     * @param array<string,mixed> $left
+     * @param array<string,mixed> $right
+     * @param array<string,'asc'|'desc'> $orders
+     */
+    public static function compare(array $left, array $right, array $orders): int
+    {
+        foreach ($orders as $column => $direction) {
+            $comparison = self::compareValues($left[$column] ?? null, $right[$column] ?? null);
+            if ($comparison !== 0) {
+                return $direction === 'desc' ? -$comparison : $comparison;
+            }
+        }
+
+        return 0;
+    }
+
     /** @return array<string,'asc'|'desc'> */
     public static function resolve(
         RelationDefinition $definition,
@@ -32,29 +60,38 @@ final class RepositoryOneOfManyOrder
     }
 
     /**
-     * @param array<string,mixed> $left
-     * @param array<string,mixed> $right
-     * @param array<string,'asc'|'desc'> $orders
+     * @param int|float|numeric-string $left
+     * @param int|float|numeric-string $right
      */
-    public static function compare(array $left, array $right, array $orders): int
+    private static function compareNumericValues(int|float|string $left, int|float|string $right): int
     {
-        foreach ($orders as $column => $direction) {
-            $comparison = self::compareValues($left[$column] ?? null, $right[$column] ?? null);
-            if ($comparison !== 0) {
-                return $direction === 'desc' ? -$comparison : $comparison;
-            }
+        $leftParts = self::numericParts(self::numericString($left));
+        $rightParts = self::numericParts(self::numericString($right));
+
+        if ($leftParts === null || $rightParts === null) {
+            return ((float) $left) <=> ((float) $right);
         }
 
-        return 0;
-    }
+        [$leftSign, $leftDigits, $leftPoint] = $leftParts;
+        [$rightSign, $rightDigits, $rightPoint] = $rightParts;
 
-    /**
-     * @param array<string,'asc'|'desc'> $orders
-     * @return list<string>
-     */
-    public static function columns(array $orders): array
-    {
-        return array_keys($orders);
+        if ($leftSign !== $rightSign) {
+            return $leftSign <=> $rightSign;
+        }
+        if ($leftSign === 0) {
+            return 0;
+        }
+
+        $magnitude = $leftPoint <=> $rightPoint;
+        if ($magnitude === 0) {
+            $length = max(strlen($leftDigits), strlen($rightDigits));
+            $magnitude = strcmp(
+                str_pad($leftDigits, $length, '0'),
+                str_pad($rightDigits, $length, '0'),
+            ) <=> 0;
+        }
+
+        return $leftSign < 0 ? -$magnitude : $magnitude;
     }
 
     private static function compareValues(mixed $left, mixed $right): int
@@ -93,47 +130,6 @@ final class RepositoryOneOfManyOrder
             || (is_string($value) && is_numeric($value));
     }
 
-    /**
-     * @param int|float|numeric-string $left
-     * @param int|float|numeric-string $right
-     */
-    private static function compareNumericValues(int|float|string $left, int|float|string $right): int
-    {
-        $leftParts = self::numericParts(self::numericString($left));
-        $rightParts = self::numericParts(self::numericString($right));
-
-        if ($leftParts === null || $rightParts === null) {
-            return ((float) $left) <=> ((float) $right);
-        }
-
-        [$leftSign, $leftDigits, $leftPoint] = $leftParts;
-        [$rightSign, $rightDigits, $rightPoint] = $rightParts;
-
-        if ($leftSign !== $rightSign) {
-            return $leftSign <=> $rightSign;
-        }
-        if ($leftSign === 0) {
-            return 0;
-        }
-
-        $magnitude = $leftPoint <=> $rightPoint;
-        if ($magnitude === 0) {
-            $length = max(strlen($leftDigits), strlen($rightDigits));
-            $magnitude = strcmp(
-                str_pad($leftDigits, $length, '0'),
-                str_pad($rightDigits, $length, '0'),
-            ) <=> 0;
-        }
-
-        return $leftSign < 0 ? -$magnitude : $magnitude;
-    }
-
-    /** @param int|float|numeric-string $value */
-    private static function numericString(int|float|string $value): string
-    {
-        return is_float($value) ? sprintf('%.17g', $value) : (string) $value;
-    }
-
     /** @return array{0:-1|0|1,1:string,2:int}|null */
     private static function numericParts(string $value): ?array
     {
@@ -162,5 +158,9 @@ final class RepositoryOneOfManyOrder
         return [$sign, $digits, $point];
     }
 
-    private function __construct() {}
+    /** @param int|float|numeric-string $value */
+    private static function numericString(int|float|string $value): string
+    {
+        return is_float($value) ? sprintf('%.17g', $value) : (string) $value;
+    }
 }

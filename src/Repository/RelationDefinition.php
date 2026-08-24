@@ -10,13 +10,21 @@ use InvalidArgumentException;
 final readonly class RelationDefinition
 {
     public const string BELONGS_TO = 'belongs_to';
+
     public const string BELONGS_TO_MANY = 'belongs_to_many';
+
     public const string HAS_MANY = 'has_many';
+
     public const string HAS_ONE = 'has_one';
+
     public const string HAS_ONE_THROUGH = 'has_one_through';
+
     public const string MORPH_MANY = 'morph_many';
+
     public const string MORPH_ONE = 'morph_one';
+
     public const string MORPH_TO = 'morph_to';
+
     public const string MORPH_TO_MANY = 'morph_to_many';
 
     /**
@@ -76,6 +84,11 @@ final readonly class RelationDefinition
         return $this->copy(scope: $scope);
     }
 
+    public function latestOfMany(?string $column = null): self
+    {
+        return $this->ofMany($column, 'max');
+    }
+
     /**
      * @param string|array<string,'max'|'min'>|null $column
      * @param string|callable(QueryBuilder):void $aggregate
@@ -91,11 +104,6 @@ final readonly class RelationDefinition
         return is_array($column)
             ? $this->advancedOfMany($type, $column, $aggregate, $scope)
             : $this->scalarOfMany($type, $column, $aggregate, $scope);
-    }
-
-    public function latestOfMany(?string $column = null): self
-    {
-        return $this->ofMany($column, 'max');
     }
 
     public function oldestOfMany(?string $column = null): self
@@ -158,56 +166,6 @@ final readonly class RelationDefinition
         return $this->withOneOfMany($type, $firstColumn, $orders[$firstColumn], $scope, $orders);
     }
 
-    /** @param null|callable(QueryBuilder):void $scope */
-    private function scalarOfMany(string $type, ?string $column, string|callable $aggregate, ?callable $scope): self
-    {
-        if (!is_string($aggregate)) {
-            throw new InvalidArgumentException('Scalar one-of-many definitions require max or min as the aggregate.');
-        }
-
-        $aggregate = strtolower(trim($aggregate));
-        if (!in_array($aggregate, ['max', 'min'], true)) {
-            throw new InvalidArgumentException('One-of-many aggregate must be max or min.');
-        }
-
-        if ($column !== null) {
-            $column = trim($column);
-            if ($column === '') {
-                throw new InvalidArgumentException('One-of-many column must not be empty.');
-            }
-        }
-
-        return $this->withOneOfMany(
-            $type,
-            $column,
-            $aggregate,
-            $scope,
-            $column === null ? [] : [$column => $aggregate],
-        );
-    }
-
-    /**
-     * @param array<string,'max'|'min'> $criteria
-     * @return non-empty-array<non-empty-string,'max'|'min'>
-     */
-    private function normalizeOrders(array $criteria): array
-    {
-        $orders = [];
-        foreach ($criteria as $column => $aggregate) {
-            $column = trim($column);
-            if ($column === '') {
-                throw new InvalidArgumentException('Advanced one-of-many criteria require non-empty columns mapped to max or min.');
-            }
-            $orders[$column] = $aggregate;
-        }
-
-        if ($orders === []) {
-            throw new InvalidArgumentException('Advanced one-of-many criteria must not be empty.');
-        }
-
-        return $orders;
-    }
-
     /**
      * @param list<string>|null $columns
      * @param null|callable(QueryBuilder):void $scope
@@ -247,6 +205,69 @@ final readonly class RelationDefinition
     }
 
     /**
+     * @param array<string,'max'|'min'> $criteria
+     * @return non-empty-array<non-empty-string,'max'|'min'>
+     */
+    private function normalizeOrders(array $criteria): array
+    {
+        $orders = [];
+        foreach ($criteria as $column => $aggregate) {
+            $column = trim($column);
+            if ($column === '') {
+                throw new InvalidArgumentException('Advanced one-of-many criteria require non-empty columns mapped to max or min.');
+            }
+            $orders[$column] = $aggregate;
+        }
+
+        if ($orders === []) {
+            throw new InvalidArgumentException('Advanced one-of-many criteria must not be empty.');
+        }
+
+        return $orders;
+    }
+
+    /** @param null|callable(QueryBuilder):void $scope */
+    private function scalarOfMany(string $type, ?string $column, string|callable $aggregate, ?callable $scope): self
+    {
+        if (!is_string($aggregate)) {
+            throw new InvalidArgumentException('Scalar one-of-many definitions require max or min as the aggregate.');
+        }
+
+        $aggregate = strtolower(trim($aggregate));
+        if (!in_array($aggregate, ['max', 'min'], true)) {
+            throw new InvalidArgumentException('One-of-many aggregate must be max or min.');
+        }
+
+        if ($column !== null) {
+            $column = trim($column);
+            if ($column === '') {
+                throw new InvalidArgumentException('One-of-many column must not be empty.');
+            }
+        }
+
+        return $this->withOneOfMany(
+            $type,
+            $column,
+            $aggregate,
+            $scope,
+            $column === null ? [] : [$column => $aggregate],
+        );
+    }
+
+    private function toOneType(): string
+    {
+        return match ($this->type) {
+            self::HAS_MANY => self::HAS_ONE,
+            self::MORPH_MANY => self::MORPH_ONE,
+            self::HAS_ONE, self::MORPH_ONE => $this->type,
+            default => throw new InvalidArgumentException(sprintf(
+                'Relation type [%s] cannot be converted to a one-of-many relation.',
+                $this->type,
+            )),
+        };
+    }
+
+    /**
      * @param null|callable(QueryBuilder):void $scope
      * @param array<string,'max'|'min'> $orders
      */
@@ -281,18 +302,5 @@ final readonly class RelationDefinition
             $scope,
             $orders,
         );
-    }
-
-    private function toOneType(): string
-    {
-        return match ($this->type) {
-            self::HAS_MANY => self::HAS_ONE,
-            self::MORPH_MANY => self::MORPH_ONE,
-            self::HAS_ONE, self::MORPH_ONE => $this->type,
-            default => throw new InvalidArgumentException(sprintf(
-                'Relation type [%s] cannot be converted to a one-of-many relation.',
-                $this->type,
-            )),
-        };
     }
 }

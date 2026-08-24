@@ -13,9 +13,9 @@ use Infocyph\DBLayer\Repository\TableRepository;
 
 final class RepositoryEvolutionUser extends TableRepository
 {
-    protected static string $table = 'repository_evolution_users';
-
     protected static string $primaryKey = 'user_key';
+
+    protected static string $table = 'repository_evolution_users';
 
     protected static function casts(): array
     {
@@ -32,20 +32,20 @@ final class RepositoryEvolutionUser extends TableRepository
 
 final class RepositoryEvolutionPagedUser extends TableRepository
 {
-    protected static string $table = 'repository_evolution_users';
+    protected static int $perPage = 2;
 
     protected static string $primaryKey = 'user_key';
 
-    protected static int $perPage = 2;
+    protected static string $table = 'repository_evolution_users';
 }
 
 final class RepositoryEvolutionDefinitionProbe extends TableRepository
 {
     public static int $castCalls = 0;
 
-    protected static string $table = 'repository_evolution_users';
-
     protected static string $primaryKey = 'user_key';
+
+    protected static string $table = 'repository_evolution_users';
 
     protected static function casts(): array
     {
@@ -59,9 +59,9 @@ final class RepositoryEvolutionDefinitionProbe extends TableRepository
 
 final class RepositoryEvolutionScopedUser extends TableRepository
 {
-    protected static string $table = 'repository_evolution_users';
-
     protected static string $primaryKey = 'user_key';
+
+    protected static string $table = 'repository_evolution_users';
 
     /** @return array<string,callable(QueryBuilder):void> */
     protected static function globalScopes(): array
@@ -76,29 +76,29 @@ final class RepositoryEvolutionScopedUser extends TableRepository
 
 final class RepositoryEvolutionPost extends TableRepository
 {
-    protected static string $table = 'repository_evolution_posts';
-
-    protected static string $primaryKey = 'post_key';
-
-    protected static bool $timestamps = true;
-
-    protected static string $createdAt = 'created_on';
-
-    protected static string $updatedAt = 'updated_on';
-
-    protected static array $defaults = [
-        'status' => 'draft',
-    ];
-
     protected static array $creatable = [
         'title',
         'status',
     ];
 
+    protected static string $createdAt = 'created_on';
+
+    protected static array $defaults = [
+        'status' => 'draft',
+    ];
+
+    protected static string $primaryKey = 'post_key';
+
+    protected static string $table = 'repository_evolution_posts';
+
+    protected static bool $timestamps = true;
+
     protected static array $updatable = [
         'title',
         'status',
     ];
+
+    protected static string $updatedAt = 'updated_on';
 }
 
 final class RepositoryEvolutionParent extends TableRepository
@@ -196,13 +196,13 @@ it('compiles declarative repository metadata once per class', function (): void 
 
 it('uses repository page-size metadata across pagination entry points', function (): void {
     $direct = RepositoryEvolutionPagedUser::paginate();
-    $fluent = RepositoryEvolutionPagedUser::query()
+    $fluent = RepositoryEvolutionPagedUser::repositoryQuery()
         ->orderBy('user_key')
         ->paginate();
-    $simple = RepositoryEvolutionPagedUser::query()
+    $simple = RepositoryEvolutionPagedUser::repositoryQuery()
         ->orderBy('user_key')
         ->simplePaginate();
-    $cursor = RepositoryEvolutionPagedUser::query()->cursorPaginate();
+    $cursor = RepositoryEvolutionPagedUser::repositoryQuery()->cursorPaginate();
 
     expect($direct->perPage())->toBe(2)
         ->and($direct->count())->toBe(2)
@@ -241,18 +241,18 @@ it('keeps raw builder access explicit', function (): void {
 });
 
 it('removes named global scopes only for the current repository query', function (): void {
-    $scoped = RepositoryEvolutionScopedUser::query()
+    $scoped = RepositoryEvolutionScopedUser::repositoryQuery()
         ->orderBy('user_key')
         ->get()
         ->toArray();
 
-    $unscoped = RepositoryEvolutionScopedUser::query()
+    $unscoped = RepositoryEvolutionScopedUser::repositoryQuery()
         ->orderBy('user_key')
         ->withoutGlobalScope('active')
         ->get()
         ->toArray();
 
-    $freshScoped = RepositoryEvolutionScopedUser::query()
+    $freshScoped = RepositoryEvolutionScopedUser::repositoryQuery()
         ->orderBy('user_key')
         ->get()
         ->toArray();
@@ -272,7 +272,7 @@ it('routes static named scope removal to the repository query wrapper', function
 });
 
 it('rebuilds the raw builder after named global scope removal', function (): void {
-    $count = RepositoryEvolutionScopedUser::query()
+    $count = RepositoryEvolutionScopedUser::repositoryQuery()
         ->where('user_key', '>', 0)
         ->withoutGlobalScope('active')
         ->raw()
@@ -331,7 +331,7 @@ it('eager loads declared has-many relations in bounded batches', function (): vo
         ['parent_id' => 2, 'name' => 'C', 'active' => 1],
     ]);
 
-    $parents = RepositoryEvolutionParent::query()
+    $parents = RepositoryEvolutionParent::repositoryQuery()
         ->with('children')
         ->orderBy('id')
         ->get()
@@ -348,7 +348,7 @@ it('supports constrained eager relation loading', function (): void {
         ['parent_id' => 1, 'name' => 'B', 'active' => 0],
     ]);
 
-    $parent = RepositoryEvolutionParent::query()
+    $parent = RepositoryEvolutionParent::repositoryQuery()
         ->with([
             'children' => static fn(QueryBuilder $query) => $query->where('active', '=', 1),
         ])
@@ -363,7 +363,7 @@ it('keeps relation projections correct when base columns are narrowed', function
         ['parent_id' => 1, 'name' => 'A', 'active' => 1],
     ]);
 
-    $parent = RepositoryEvolutionParent::query()
+    $parent = RepositoryEvolutionParent::repositoryQuery()
         ->with('children')
         ->first(['name']);
 

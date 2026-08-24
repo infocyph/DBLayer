@@ -10,13 +10,13 @@ use Infocyph\DBLayer\Query\QueryBuilder;
 use InvalidArgumentException;
 
 /** Compute relation aggregates in bounded batches without hydrating full graphs. */
-final class RepositoryRelationAggregator
+final readonly class RepositoryRelationAggregator
 {
     private const array FUNCTIONS = ['avg', 'count', 'max', 'min', 'sum'];
 
     public function __construct(
-        private readonly Connection $parentConnection,
-        private readonly int $batchSize = 500,
+        private Connection $parentConnection,
+        private int $batchSize = 500,
     ) {
         if ($batchSize < 1) {
             throw new InvalidArgumentException('Relation batch size must be at least one.');
@@ -48,11 +48,11 @@ final class RepositoryRelationAggregator
         }
 
         if ($definition->oneOfManyAggregate !== null) {
-            return (new RepositoryOneOfManyAggregator($this->parentConnection, $this->batchSize))
+            return new RepositoryOneOfManyAggregator($this->parentConnection, $this->batchSize)
                 ->aggregate($parents, $definition, $function, $column, $constraint);
         }
         if ($definition->through !== null) {
-            return (new RepositoryThroughRelationAggregator($this->batchSize))
+            return new RepositoryThroughRelationAggregator($this->batchSize)
                 ->aggregate($parents, $definition, $function, $column, $constraint);
         }
 
@@ -80,6 +80,28 @@ final class RepositoryRelationAggregator
             . ':' . RepositorySupport::key($parent[$idColumn] ?? null);
     }
 
+    private function accumulate(mixed $state, string $function, mixed $value): mixed
+    {
+        return match ($function) {
+            'count' => $this->numericInt($state) + 1,
+            'sum' => $this->numericFloat($state) + $this->numericFloat($value),
+            'avg' => $this->accumulateAverage($state, $value),
+            'min' => $state === null || $this->compare($value, $state) < 0 ? $value : $state,
+            'max' => $state === null || $this->compare($value, $state) > 0 ? $value : $state,
+            default => $state,
+        };
+    }
+
+    /** @return array{sum:float,count:int} */
+    private function accumulateAverage(mixed $state, mixed $value): array
+    {
+        $current = is_array($state) ? $state : [];
+        $sum = $this->numericFloat($current['sum'] ?? null);
+        $count = $this->numericInt($current['count'] ?? null);
+
+        return ['sum' => $sum + $this->numericFloat($value), 'count' => $count + 1];
+    }
+
     /**
      * @param list<array<string,mixed>> $parents
      * @param null|callable(QueryBuilder):void $constraint
@@ -105,7 +127,7 @@ final class RepositoryRelationAggregator
         $aggregateExpression = $this->aggregateExpression($function, $column);
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::query()->apply(static function (QueryBuilder $query) use ($definition, $relatedKey, $chunk): void {
+            $query = $related::repositoryQuery()->apply(static function (QueryBuilder $query) use ($definition, $relatedKey, $chunk): void {
                 $query->whereIn($relatedKey, $chunk);
                 if (
                     in_array($definition->type, [RelationDefinition::MORPH_ONE, RelationDefinition::MORPH_MANY], true)
@@ -128,6 +150,50 @@ final class RepositoryRelationAggregator
         return $aggregates;
     }
 
+    private function aggregateExpression(string $function, string $column): Expression
+    {
+        $function = strtoupper($function);
+        $column = $function === 'COUNT' ? '*' : $column;
+
+        return Expression::make(sprintf('%s(%s) AS aggregate', $function, $column));
+    }
+
+    /**
+     * @param array<string,mixed> $result
+     * @param list<mixed> $values
+     * @param null|callable(QueryBuilder):void $constraint
+     */
+    private function aggregateMorphGroup(
+        array &$result,
+        string $type,
+        array $values,
+        RelationDefinition $definition,
+        string $function,
+        string $column,
+        ?callable $constraint,
+    ): void {
+        $related = $definition->morphMap[$type];
+        $relatedKey = RepositorySupport::column($definition->relatedKey);
+        $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
+
+        foreach (array_chunk($values, $batchSize) as $chunk) {
+            $query = $related::repositoryQuery()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
+                $builder->whereIn($relatedKey, $chunk);
+            });
+            $this->applyConstraints($query, $definition, $constraint);
+            $columns = $function === 'count' ? [$relatedKey] : [$relatedKey, RepositorySupport::column($column)];
+
+            foreach ($query->get($columns) as $candidateRow) {
+                $row = RepositorySupport::row($candidateRow);
+                if ($row === null) {
+                    continue;
+                }
+                $identity = 'morph:' . RepositorySupport::key($type) . ':' . RepositorySupport::key($row[$relatedKey] ?? null);
+                $result[$identity] = $function === 'count' ? 1 : $this->singleValueAggregate($function, $row[$column] ?? null);
+            }
+        }
+    }
+
     /**
      * @param list<array<string,mixed>> $parents
      * @param null|callable(QueryBuilder):void $constraint
@@ -148,6 +214,86 @@ final class RepositoryRelationAggregator
         }
 
         return $result;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,mixed>
+     */
+    private function aggregatePivot(
+        array $parents,
+        RelationDefinition $definition,
+        string $function,
+        string $column,
+        ?callable $constraint,
+    ): array {
+        $pivotRows = $this->pivotRows($parents, $definition);
+        if ($pivotRows === []) {
+            return [];
+        }
+
+        $relatedValues = $this->pivotRelatedValues($pivotRows, $definition, $function, $column, $constraint);
+
+        return $this->reducePivot($pivotRows, $relatedValues, $definition, $function);
+    }
+
+    /** @param null|callable(QueryBuilder):void $constraint */
+    private function applyConstraints(RepositoryQuery $query, RelationDefinition $definition, ?callable $constraint): void
+    {
+        if ($definition->scope !== null) {
+            /** @var callable(QueryBuilder):void $scope */
+            $scope = $definition->scope;
+            $query->apply($scope);
+        }
+        if ($constraint !== null) {
+            $query->apply($constraint);
+        }
+    }
+
+    private function applyPivotMorphConstraint(QueryBuilder $query, RelationDefinition $definition): void
+    {
+        if ($definition->type !== RelationDefinition::MORPH_TO_MANY) {
+            return;
+        }
+
+        $query->where(
+            RepositorySupport::column($definition->morphTypeColumn
+                ?? throw new InvalidArgumentException('Polymorphic pivot relation requires a type column.')),
+            '=',
+            $definition->morphAlias
+                ?? throw new InvalidArgumentException('Polymorphic pivot relation requires a morph alias.'),
+        );
+    }
+
+    private function assertColumn(string $column): void
+    {
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_.]*$/D', trim($column)) !== 1) {
+            throw new InvalidArgumentException(sprintf('Invalid aggregate column [%s].', $column));
+        }
+    }
+
+    private function compare(mixed $left, mixed $right): int
+    {
+        if (is_numeric($left) && is_numeric($right)) {
+            return (float) $left <=> (float) $right;
+        }
+        if (is_scalar($left) && is_scalar($right)) {
+            return (string) $left <=> (string) $right;
+        }
+
+        return 0;
+    }
+
+    private function finalize(mixed $state, string $function): mixed
+    {
+        if ($function !== 'avg' || !is_array($state)) {
+            return $function === 'avg' ? null : $state;
+        }
+
+        $count = $this->numericInt($state['count'] ?? null);
+
+        return $count > 0 ? $this->numericFloat($state['sum'] ?? null) / $count : null;
     }
 
     /**
@@ -177,26 +323,39 @@ final class RepositoryRelationAggregator
         return $groups;
     }
 
+    private function numericFloat(mixed $value): float
+    {
+        return is_numeric($value) ? (float) $value : 0.0;
+    }
+
+    private function numericInt(mixed $value): int
+    {
+        return is_numeric($value) ? (int) $value : 0;
+    }
+
     /**
-     * @param array<string,mixed> $result
-     * @param list<mixed> $values
+     * @param list<array<string,mixed>> $pivotRows
      * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,mixed>
      */
-    private function aggregateMorphGroup(
-        array &$result,
-        string $type,
-        array $values,
+    private function pivotRelatedValues(
+        array $pivotRows,
         RelationDefinition $definition,
         string $function,
         string $column,
         ?callable $constraint,
-    ): void {
-        $related = $definition->morphMap[$type];
+    ): array {
+        $pivotRelatedKey = $definition->pivotRelatedKey
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.');
+        $related = $definition->related
+            ?? throw new InvalidArgumentException('Many-to-many relation requires a related repository.');
         $relatedKey = RepositorySupport::column($definition->relatedKey);
+        $relatedIds = $this->values($pivotRows, $pivotRelatedKey);
         $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
+        $values = [];
 
-        foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
+        foreach (array_chunk($relatedIds, $batchSize) as $chunk) {
+            $query = $related::repositoryQuery()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
                 $builder->whereIn($relatedKey, $chunk);
             });
             $this->applyConstraints($query, $definition, $constraint);
@@ -204,35 +363,13 @@ final class RepositoryRelationAggregator
 
             foreach ($query->get($columns) as $candidateRow) {
                 $row = RepositorySupport::row($candidateRow);
-                if ($row === null) {
-                    continue;
+                if ($row !== null) {
+                    $values[RepositorySupport::key($row[$relatedKey] ?? null)] = $function === 'count' ? 1 : ($row[$column] ?? null);
                 }
-                $identity = 'morph:' . RepositorySupport::key($type) . ':' . RepositorySupport::key($row[$relatedKey] ?? null);
-                $result[$identity] = $function === 'count' ? 1 : $this->singleValueAggregate($function, $row[$column] ?? null);
             }
         }
-    }
 
-    /**
-     * @param list<array<string,mixed>> $parents
-     * @param null|callable(QueryBuilder):void $constraint
-     * @return array<string,mixed>
-     */
-    private function aggregatePivot(
-        array $parents,
-        RelationDefinition $definition,
-        string $function,
-        string $column,
-        ?callable $constraint,
-    ): array {
-        $pivotRows = $this->pivotRows($parents, $definition);
-        if ($pivotRows === []) {
-            return [];
-        }
-
-        $relatedValues = $this->pivotRelatedValues($pivotRows, $definition, $function, $column, $constraint);
-
-        return $this->reducePivot($pivotRows, $relatedValues, $definition, $function);
+        return $values;
     }
 
     /**
@@ -264,60 +401,6 @@ final class RepositoryRelationAggregator
         }
 
         return $rows;
-    }
-
-    private function applyPivotMorphConstraint(QueryBuilder $query, RelationDefinition $definition): void
-    {
-        if ($definition->type !== RelationDefinition::MORPH_TO_MANY) {
-            return;
-        }
-
-        $query->where(
-            RepositorySupport::column($definition->morphTypeColumn
-                ?? throw new InvalidArgumentException('Polymorphic pivot relation requires a type column.')),
-            '=',
-            $definition->morphAlias
-                ?? throw new InvalidArgumentException('Polymorphic pivot relation requires a morph alias.'),
-        );
-    }
-
-    /**
-     * @param list<array<string,mixed>> $pivotRows
-     * @param null|callable(QueryBuilder):void $constraint
-     * @return array<string,mixed>
-     */
-    private function pivotRelatedValues(
-        array $pivotRows,
-        RelationDefinition $definition,
-        string $function,
-        string $column,
-        ?callable $constraint,
-    ): array {
-        $pivotRelatedKey = $definition->pivotRelatedKey
-            ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.');
-        $related = $definition->related
-            ?? throw new InvalidArgumentException('Many-to-many relation requires a related repository.');
-        $relatedKey = RepositorySupport::column($definition->relatedKey);
-        $relatedIds = $this->values($pivotRows, $pivotRelatedKey);
-        $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
-        $values = [];
-
-        foreach (array_chunk($relatedIds, $batchSize) as $chunk) {
-            $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
-                $builder->whereIn($relatedKey, $chunk);
-            });
-            $this->applyConstraints($query, $definition, $constraint);
-            $columns = $function === 'count' ? [$relatedKey] : [$relatedKey, RepositorySupport::column($column)];
-
-            foreach ($query->get($columns) as $candidateRow) {
-                $row = RepositorySupport::row($candidateRow);
-                if ($row !== null) {
-                    $values[RepositorySupport::key($row[$relatedKey] ?? null)] = $function === 'count' ? 1 : ($row[$column] ?? null);
-                }
-            }
-        }
-
-        return $values;
     }
 
     /**
@@ -352,89 +435,6 @@ final class RepositoryRelationAggregator
         }
 
         return $states;
-    }
-
-    /** @param null|callable(QueryBuilder):void $constraint */
-    private function applyConstraints(RepositoryQuery $query, RelationDefinition $definition, ?callable $constraint): void
-    {
-        if ($definition->scope !== null) {
-            /** @var callable(QueryBuilder):void $scope */
-            $scope = $definition->scope;
-            $query->apply($scope);
-        }
-        if ($constraint !== null) {
-            $query->apply($constraint);
-        }
-    }
-
-    private function aggregateExpression(string $function, string $column): Expression
-    {
-        $function = strtoupper($function);
-        $column = $function === 'COUNT' ? '*' : $column;
-
-        return Expression::make(sprintf('%s(%s) AS aggregate', $function, $column));
-    }
-
-    private function assertColumn(string $column): void
-    {
-        if (preg_match('/^[A-Za-z_][A-Za-z0-9_.]*$/D', trim($column)) !== 1) {
-            throw new InvalidArgumentException(sprintf('Invalid aggregate column [%s].', $column));
-        }
-    }
-
-    private function accumulate(mixed $state, string $function, mixed $value): mixed
-    {
-        return match ($function) {
-            'count' => $this->numericInt($state) + 1,
-            'sum' => $this->numericFloat($state) + $this->numericFloat($value),
-            'avg' => $this->accumulateAverage($state, $value),
-            'min' => $state === null || $this->compare($value, $state) < 0 ? $value : $state,
-            'max' => $state === null || $this->compare($value, $state) > 0 ? $value : $state,
-            default => $state,
-        };
-    }
-
-    /** @return array{sum:float,count:int} */
-    private function accumulateAverage(mixed $state, mixed $value): array
-    {
-        $current = is_array($state) ? $state : [];
-        $sum = $this->numericFloat($current['sum'] ?? null);
-        $count = $this->numericInt($current['count'] ?? null);
-
-        return ['sum' => $sum + $this->numericFloat($value), 'count' => $count + 1];
-    }
-
-    private function finalize(mixed $state, string $function): mixed
-    {
-        if ($function !== 'avg' || !is_array($state)) {
-            return $function === 'avg' ? null : $state;
-        }
-
-        $count = $this->numericInt($state['count'] ?? null);
-
-        return $count > 0 ? $this->numericFloat($state['sum'] ?? null) / $count : null;
-    }
-
-    private function compare(mixed $left, mixed $right): int
-    {
-        if (is_numeric($left) && is_numeric($right)) {
-            return (float) $left <=> (float) $right;
-        }
-        if (is_scalar($left) && is_scalar($right)) {
-            return (string) $left <=> (string) $right;
-        }
-
-        return 0;
-    }
-
-    private function numericFloat(mixed $value): float
-    {
-        return is_numeric($value) ? (float) $value : 0.0;
-    }
-
-    private function numericInt(mixed $value): int
-    {
-        return is_numeric($value) ? (int) $value : 0;
     }
 
     private function singleValueAggregate(string $function, mixed $value): mixed

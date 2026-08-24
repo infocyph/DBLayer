@@ -29,7 +29,7 @@ final readonly class ImmutableDateCast implements AttributeCast
             return $value;
         }
 
-        return (new DateTimeImmutable($value))->setTime(0, 0);
+        return new DateTimeImmutable($value)->setTime(0, 0);
     }
 
     #[\Override]

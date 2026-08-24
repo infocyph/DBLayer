@@ -39,36 +39,6 @@ final class TableQueryRepository extends RepositoryPagination
         );
     }
 
-    /** @param array<string,string|callable(mixed):mixed|AttributeCast> $casts */
-    #[\Override]
-    public function setCasts(array $casts): static
-    {
-        $this->casts = $casts;
-
-        return $this;
-    }
-
-    public function disableNamedGlobalScope(string $name): static
-    {
-        if (array_key_exists($name, $this->definition->globalScopes)) {
-            $this->disabledGlobalScopes[$name] = true;
-        }
-
-        return $this;
-    }
-
-    /** @param list<string>|null $names */
-    public function disableNamedGlobalScopes(?array $names = null): static
-    {
-        $names ??= array_keys($this->definition->globalScopes);
-
-        foreach ($names as $name) {
-            $this->disableNamedGlobalScope($name);
-        }
-
-        return $this;
-    }
-
     /** @param array<int,array<string,mixed>> $rows */
     #[\Override]
     public function bulkInsert(array $rows): bool
@@ -78,7 +48,7 @@ final class TableQueryRepository extends RepositoryPagination
         }
 
         $prepared = array_map(
-            fn(array $row): array => $this->prepareCreateAttributes($row),
+            $this->prepareCreateAttributes(...),
             $rows,
         );
         $context = ['rows' => $prepared, 'count' => count($prepared)];
@@ -125,6 +95,22 @@ final class TableQueryRepository extends RepositoryPagination
         );
     }
 
+    /** Delete one row by primary key while preserving repository lifecycle. */
+    #[\Override]
+    public function deleteById(mixed $id): int
+    {
+        $affected = parent::deleteById($id);
+        if ($affected > 0) {
+            $this->scheduleAfterCommit('delete', [
+                'id' => $id,
+                'affected' => $affected,
+                'soft' => $this->softDeletes,
+            ]);
+        }
+
+        return $affected;
+    }
+
     /** Delete all rows matching a repository-aware scope. */
     public function deleteWhere(?callable $scope = null): int
     {
@@ -145,17 +131,40 @@ final class TableQueryRepository extends RepositoryPagination
         return $affected;
     }
 
-    /** Delete one row by primary key while preserving repository lifecycle. */
-    #[\Override]
-    public function deleteById(mixed $id): int
+    public function disableNamedGlobalScope(string $name): static
     {
-        $affected = parent::deleteById($id);
+        if (array_key_exists($name, $this->definition->globalScopes)) {
+            $this->disabledGlobalScopes[$name] = true;
+        }
+
+        return $this;
+    }
+
+    /** @param list<string>|null $names */
+    public function disableNamedGlobalScopes(?array $names = null): static
+    {
+        $names ??= array_keys($this->definition->globalScopes);
+
+        foreach ($names as $name) {
+            $this->disableNamedGlobalScope($name);
+        }
+
+        return $this;
+    }
+
+    /** Permanently delete one row by primary key. */
+    #[\Override]
+    public function forceDeleteById(mixed $id): int
+    {
+        $context = ['id' => $id, 'force' => true, 'bulk' => false];
+        $this->dispatchOperationHook('beforeForceDelete', $context);
+
+        $affected = parent::forceDeleteById($id);
+        $context['affected'] = $affected;
+
+        $this->dispatchOperationHook('afterForceDelete', $context);
         if ($affected > 0) {
-            $this->scheduleAfterCommit('delete', [
-                'id' => $id,
-                'affected' => $affected,
-                'soft' => $this->softDeletes,
-            ]);
+            $this->scheduleAfterCommit('force_delete', $context);
         }
 
         return $affected;
@@ -179,19 +188,19 @@ final class TableQueryRepository extends RepositoryPagination
         return $affected;
     }
 
-    /** Permanently delete one row by primary key. */
+    /** Restore one soft-deleted row by primary key. */
     #[\Override]
-    public function forceDeleteById(mixed $id): int
+    public function restoreById(mixed $id): int
     {
-        $context = ['id' => $id, 'force' => true, 'bulk' => false];
-        $this->dispatchOperationHook('beforeForceDelete', $context);
+        $context = ['id' => $id, 'bulk' => false];
+        $this->dispatchOperationHook('beforeRestore', $context);
 
-        $affected = parent::forceDeleteById($id);
+        $affected = parent::restoreById($id);
         $context['affected'] = $affected;
 
-        $this->dispatchOperationHook('afterForceDelete', $context);
+        $this->dispatchOperationHook('afterRestore', $context);
         if ($affected > 0) {
-            $this->scheduleAfterCommit('force_delete', $context);
+            $this->scheduleAfterCommit('restore', $context);
         }
 
         return $affected;
@@ -221,22 +230,13 @@ final class TableQueryRepository extends RepositoryPagination
         return $affected;
     }
 
-    /** Restore one soft-deleted row by primary key. */
+    /** @param array<string,string|callable(mixed):mixed|AttributeCast> $casts */
     #[\Override]
-    public function restoreById(mixed $id): int
+    public function setCasts(array $casts): static
     {
-        $context = ['id' => $id, 'bulk' => false];
-        $this->dispatchOperationHook('beforeRestore', $context);
+        $this->casts = $casts;
 
-        $affected = parent::restoreById($id);
-        $context['affected'] = $affected;
-
-        $this->dispatchOperationHook('afterRestore', $context);
-        if ($affected > 0) {
-            $this->scheduleAfterCommit('restore', $context);
-        }
-
-        return $affected;
+        return $this;
     }
 
     /** @param array<string,mixed> $values */
@@ -255,37 +255,6 @@ final class TableQueryRepository extends RepositoryPagination
                 'payload' => $payload,
                 'affected' => $affected,
             ]);
-        }
-
-        return $affected;
-    }
-
-    /**
-     * Update all rows matching a repository-aware scope.
-     *
-     * @param array<string,mixed> $values
-     */
-    public function updateWhere(array $values, ?callable $scope = null): int
-    {
-        if ($values === []) {
-            return 0;
-        }
-
-        $payload = RepositoryWriteCaster::cast(
-            $this->prepareUpdateAttributes($values),
-            $this->definition->casts,
-            $this->connection,
-        );
-        $context = ['payload' => $payload];
-        $this->dispatchOperationHook('beforeBulkUpdate', $context);
-
-        $query = $this->applyMutationScope($this->builder(), $scope);
-        $affected = $query->update($payload);
-        $context['affected'] = $affected;
-
-        $this->dispatchOperationHook('afterBulkUpdate', $context);
-        if ($affected > 0) {
-            $this->scheduleAfterCommit('bulk_update', $context);
         }
 
         return $affected;
@@ -361,6 +330,37 @@ final class TableQueryRepository extends RepositoryPagination
             $attributes,
             $this->prepareUpdateAttributes($values),
         );
+    }
+
+    /**
+     * Update all rows matching a repository-aware scope.
+     *
+     * @param array<string,mixed> $values
+     */
+    public function updateWhere(array $values, ?callable $scope = null): int
+    {
+        if ($values === []) {
+            return 0;
+        }
+
+        $payload = RepositoryWriteCaster::cast(
+            $this->prepareUpdateAttributes($values),
+            $this->definition->casts,
+            $this->connection,
+        );
+        $context = ['payload' => $payload];
+        $this->dispatchOperationHook('beforeBulkUpdate', $context);
+
+        $query = $this->applyMutationScope($this->builder(), $scope);
+        $affected = $query->update($payload);
+        $context['affected'] = $affected;
+
+        $this->dispatchOperationHook('afterBulkUpdate', $context);
+        if ($affected > 0) {
+            $this->scheduleAfterCommit('bulk_update', $context);
+        }
+
+        return $affected;
     }
 
     /**
@@ -462,6 +462,27 @@ final class TableQueryRepository extends RepositoryPagination
         return $query;
     }
 
+    /**
+     * @param array<string,mixed> $attributes
+     * @param list<string> $allowed
+     */
+    private function assertAllowedAttributes(array $attributes, array $allowed, bool $creating): void
+    {
+        if ($allowed === []) {
+            return;
+        }
+
+        foreach (array_keys($attributes) as $attribute) {
+            if (in_array($attribute, $allowed, true)) {
+                continue;
+            }
+
+            throw $creating
+                ? UnwritableAttributeException::forCreate($attribute)
+                : UnwritableAttributeException::forUpdate($attribute);
+        }
+    }
+
     private function builderWithoutSoftDeleteConstraint(): QueryBuilder
     {
         $withTrashed = $this->withTrashed;
@@ -476,6 +497,13 @@ final class TableQueryRepository extends RepositoryPagination
             $this->withTrashed = $withTrashed;
             $this->onlyTrashed = $onlyTrashed;
         }
+    }
+
+    private function freshTimestamp(): string
+    {
+        return new \DateTimeImmutable('now')->format(
+            $this->connection->getDriver()->dateFormat(),
+        );
     }
 
     /**
@@ -531,34 +559,6 @@ final class TableQueryRepository extends RepositoryPagination
         }
 
         return $attributes;
-    }
-
-    /**
-     * @param array<string,mixed> $attributes
-     * @param list<string> $allowed
-     */
-    private function assertAllowedAttributes(array $attributes, array $allowed, bool $creating): void
-    {
-        if ($allowed === []) {
-            return;
-        }
-
-        foreach (array_keys($attributes) as $attribute) {
-            if (in_array($attribute, $allowed, true)) {
-                continue;
-            }
-
-            throw $creating
-                ? UnwritableAttributeException::forCreate($attribute)
-                : UnwritableAttributeException::forUpdate($attribute);
-        }
-    }
-
-    private function freshTimestamp(): string
-    {
-        return new \DateTimeImmutable('now')->format(
-            $this->connection->getDriver()->dateFormat(),
-        );
     }
 
     /**

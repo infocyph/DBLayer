@@ -15,11 +15,11 @@ use InvalidArgumentException;
  * the related TableRepository so its scopes, casts, cache policy, and other
  * repository read semantics remain intact.
  */
-final class RepositoryRelationLoader
+final readonly class RepositoryRelationLoader
 {
     public function __construct(
-        private readonly Connection $parentConnection,
-        private readonly int $batchSize = 500,
+        private Connection $parentConnection,
+        private int $batchSize = 500,
     ) {
         if ($batchSize < 1) {
             throw new InvalidArgumentException('Relation batch size must be at least one.');
@@ -42,12 +42,12 @@ final class RepositoryRelationLoader
         }
 
         if ($definition->through !== null) {
-            return (new RepositoryThroughRelation($this->batchSize))
+            return new RepositoryThroughRelation($this->batchSize)
                 ->load($parents, $as, $definition, $constraint);
         }
 
         if ($definition->oneOfManyAggregate !== null) {
-            return (new RepositoryOneOfManyRelation($this->batchSize))
+            return new RepositoryOneOfManyRelation($this->batchSize)
                 ->load($parents, $as, $definition, $constraint);
         }
 
@@ -65,6 +65,183 @@ final class RepositoryRelationLoader
                 $definition->type,
             )),
         };
+    }
+
+    /**
+     * @param list<string> $columns
+     * @return list<string>
+     */
+    private function ensureKeySelected(array $columns, string $key): array
+    {
+        if ($columns === ['*'] || in_array('*', $columns, true) || in_array($key, $columns, true)) {
+            return $columns;
+        }
+
+        return [...$columns, $key];
+    }
+
+    /**
+     * @param list<int|float|string|bool> $values
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return list<array<string,mixed>>
+     */
+    private function fetchByValues(
+        array $values,
+        RelationDefinition $definition,
+        ?callable $constraint,
+    ): array {
+        $related = $definition->related
+            ?? throw new InvalidArgumentException('Relation does not have a single related repository class.');
+
+        return $this->fetchForClass(
+            $values,
+            $related,
+            $definition->relatedKey,
+            $definition->columns,
+            $definition->scope,
+            $constraint,
+            in_array($definition->type, [RelationDefinition::MORPH_ONE, RelationDefinition::MORPH_MANY], true)
+                ? $definition->morphTypeColumn
+                : null,
+            in_array($definition->type, [RelationDefinition::MORPH_ONE, RelationDefinition::MORPH_MANY], true)
+                ? $definition->morphAlias
+                : null,
+        );
+    }
+
+    /**
+     * @param list<int|float|string|bool> $values
+     * @param class-string<TableRepository> $related
+     * @param list<string> $columns
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return list<array<string,mixed>>
+     */
+    private function fetchForClass(
+        array $values,
+        string $related,
+        string $relatedKey,
+        array $columns,
+        mixed $scope,
+        ?callable $constraint,
+        ?string $morphTypeColumn = null,
+        ?string $morphAlias = null,
+    ): array {
+        if ($values === []) {
+            return [];
+        }
+
+        $relatedKey = RepositorySupport::column($relatedKey);
+        $morphTypeColumn = $morphTypeColumn === null ? null : RepositorySupport::column($morphTypeColumn);
+        $columns = $this->ensureKeySelected($columns, $relatedKey);
+        $batchSize = max(1, $related::connection()->safeBatchSize(requested: $this->batchSize));
+        $rows = [];
+
+        foreach (array_chunk($values, $batchSize) as $chunk) {
+            $query = $related::repositoryQuery()->apply(
+                static function (QueryBuilder $builder) use ($relatedKey, $chunk, $morphTypeColumn, $morphAlias): void {
+                    $builder->whereIn($relatedKey, $chunk);
+                    if ($morphTypeColumn !== null && $morphAlias !== null) {
+                        $builder->where($morphTypeColumn, '=', $morphAlias);
+                    }
+                },
+            );
+
+            if ($scope !== null) {
+                /** @var callable(QueryBuilder):void $scope */
+                $query->apply($scope);
+            }
+            if ($constraint !== null) {
+                $query->apply($constraint);
+            }
+
+            array_push($rows, ...$this->normalizeRows($query->get($columns)->toArray()));
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param array<string,array<string,int|float|string|bool>> $groupedValues
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,array<string,array<string,mixed>>>
+     */
+    private function fetchMorphRows(
+        array $groupedValues,
+        RelationDefinition $definition,
+        ?callable $constraint,
+    ): array {
+        $indexed = [];
+
+        foreach ($groupedValues as $type => $valuesByKey) {
+            $related = $definition->morphMap[$type];
+            $rows = $this->fetchForClass(
+                array_values($valuesByKey),
+                $related,
+                $definition->relatedKey,
+                $definition->columns,
+                $definition->scope,
+                $constraint,
+            );
+
+            foreach ($rows as $row) {
+                $indexed[$type][RepositorySupport::key($row[$definition->relatedKey] ?? null)] = $row;
+            }
+        }
+
+        return $indexed;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return list<array<string,mixed>>
+     */
+    private function fetchRelated(
+        array $parents,
+        RelationDefinition $definition,
+        ?callable $constraint,
+    ): array {
+        return $this->fetchByValues(
+            $this->values($parents, $definition->parentKey),
+            $definition,
+            $constraint,
+        );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $parents
+     * @return array<string,array<string,int|float|string|bool>>
+     */
+    private function groupMorphValues(
+        array $parents,
+        string $as,
+        RelationDefinition $definition,
+        string $typeColumn,
+        string $idColumn,
+    ): array {
+        $grouped = [];
+
+        foreach ($parents as $parent) {
+            $type = $parent[$typeColumn] ?? null;
+            $id = $parent[$idColumn] ?? null;
+            if ($type === null || $id === null) {
+                continue;
+            }
+            if (!is_string($type) || !array_key_exists($type, $definition->morphMap)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Unmapped morph discriminator [%s] for relation [%s].',
+                    is_scalar($type) ? (string) $type : get_debug_type($type),
+                    $as,
+                ));
+            }
+
+            $value = RepositorySupport::value($id);
+            if ($value !== null) {
+                $grouped[$type][RepositorySupport::key($value)] = $value;
+            }
+        }
+
+        return $grouped;
     }
 
     /**
@@ -204,70 +381,21 @@ final class RepositoryRelationLoader
     }
 
     /**
-     * @param list<array<string,mixed>> $parents
-     * @return array<string,array<string,int|float|string|bool>>
+     * @param array<array-key,mixed> $values
+     * @return list<array<string,mixed>>
      */
-    private function groupMorphValues(
-        array $parents,
-        string $as,
-        RelationDefinition $definition,
-        string $typeColumn,
-        string $idColumn,
-    ): array {
-        $grouped = [];
+    private function normalizeRows(array $values): array
+    {
+        $rows = [];
 
-        foreach ($parents as $parent) {
-            $type = $parent[$typeColumn] ?? null;
-            $id = $parent[$idColumn] ?? null;
-            if ($type === null || $id === null) {
-                continue;
-            }
-            if (!is_string($type) || !array_key_exists($type, $definition->morphMap)) {
-                throw new InvalidArgumentException(sprintf(
-                    'Unmapped morph discriminator [%s] for relation [%s].',
-                    is_scalar($type) ? (string) $type : get_debug_type($type),
-                    $as,
-                ));
-            }
-
-            $value = RepositorySupport::value($id);
-            if ($value !== null) {
-                $grouped[$type][RepositorySupport::key($value)] = $value;
+        foreach ($values as $value) {
+            $row = RepositorySupport::row($value);
+            if ($row !== null) {
+                $rows[] = $row;
             }
         }
 
-        return $grouped;
-    }
-
-    /**
-     * @param array<string,array<string,int|float|string|bool>> $groupedValues
-     * @param null|callable(QueryBuilder):void $constraint
-     * @return array<string,array<string,array<string,mixed>>>
-     */
-    private function fetchMorphRows(
-        array $groupedValues,
-        RelationDefinition $definition,
-        ?callable $constraint,
-    ): array {
-        $indexed = [];
-
-        foreach ($groupedValues as $type => $valuesByKey) {
-            $related = $definition->morphMap[$type];
-            $rows = $this->fetchForClass(
-                array_values($valuesByKey),
-                $related,
-                $definition->relatedKey,
-                $definition->columns,
-                $definition->scope,
-                $constraint,
-            );
-
-            foreach ($rows as $row) {
-                $indexed[$type][RepositorySupport::key($row[$definition->relatedKey] ?? null)] = $row;
-            }
-        }
-
-        return $indexed;
+        return $rows;
     }
 
     /**
@@ -295,134 +423,6 @@ final class RepositoryRelationLoader
         unset($parent);
 
         return $parents;
-    }
-
-    /**
-     * @param list<int|float|string|bool> $values
-     * @param null|callable(QueryBuilder):void $constraint
-     * @return list<array<string,mixed>>
-     */
-    private function fetchByValues(
-        array $values,
-        RelationDefinition $definition,
-        ?callable $constraint,
-    ): array {
-        $related = $definition->related
-            ?? throw new InvalidArgumentException('Relation does not have a single related repository class.');
-
-        return $this->fetchForClass(
-            $values,
-            $related,
-            $definition->relatedKey,
-            $definition->columns,
-            $definition->scope,
-            $constraint,
-            in_array($definition->type, [RelationDefinition::MORPH_ONE, RelationDefinition::MORPH_MANY], true)
-                ? $definition->morphTypeColumn
-                : null,
-            in_array($definition->type, [RelationDefinition::MORPH_ONE, RelationDefinition::MORPH_MANY], true)
-                ? $definition->morphAlias
-                : null,
-        );
-    }
-
-    /**
-     * @param list<int|float|string|bool> $values
-     * @param class-string<TableRepository> $related
-     * @param list<string> $columns
-     * @param null|callable(QueryBuilder):void $constraint
-     * @return list<array<string,mixed>>
-     */
-    private function fetchForClass(
-        array $values,
-        string $related,
-        string $relatedKey,
-        array $columns,
-        mixed $scope,
-        ?callable $constraint,
-        ?string $morphTypeColumn = null,
-        ?string $morphAlias = null,
-    ): array {
-        if ($values === []) {
-            return [];
-        }
-
-        $relatedKey = RepositorySupport::column($relatedKey);
-        $morphTypeColumn = $morphTypeColumn === null ? null : RepositorySupport::column($morphTypeColumn);
-        $columns = $this->ensureKeySelected($columns, $relatedKey);
-        $batchSize = max(1, $related::connection()->safeBatchSize(requested: $this->batchSize));
-        $rows = [];
-
-        foreach (array_chunk($values, $batchSize) as $chunk) {
-            $query = $related::query()->apply(
-                static function (QueryBuilder $builder) use ($relatedKey, $chunk, $morphTypeColumn, $morphAlias): void {
-                    $builder->whereIn($relatedKey, $chunk);
-                    if ($morphTypeColumn !== null && $morphAlias !== null) {
-                        $builder->where($morphTypeColumn, '=', $morphAlias);
-                    }
-                },
-            );
-
-            if ($scope !== null) {
-                /** @var callable(QueryBuilder):void $scope */
-                $query->apply($scope);
-            }
-            if ($constraint !== null) {
-                $query->apply($constraint);
-            }
-
-            array_push($rows, ...$this->normalizeRows($query->get($columns)->toArray()));
-        }
-
-        return $rows;
-    }
-
-    /**
-     * @param list<array<string,mixed>> $parents
-     * @param null|callable(QueryBuilder):void $constraint
-     * @return list<array<string,mixed>>
-     */
-    private function fetchRelated(
-        array $parents,
-        RelationDefinition $definition,
-        ?callable $constraint,
-    ): array {
-        return $this->fetchByValues(
-            $this->values($parents, $definition->parentKey),
-            $definition,
-            $constraint,
-        );
-    }
-
-    /**
-     * @param list<string> $columns
-     * @return list<string>
-     */
-    private function ensureKeySelected(array $columns, string $key): array
-    {
-        if ($columns === ['*'] || in_array('*', $columns, true) || in_array($key, $columns, true)) {
-            return $columns;
-        }
-
-        return [...$columns, $key];
-    }
-
-    /**
-     * @param array<array-key,mixed> $values
-     * @return list<array<string,mixed>>
-     */
-    private function normalizeRows(array $values): array
-    {
-        $rows = [];
-
-        foreach ($values as $value) {
-            $row = RepositorySupport::row($value);
-            if ($row !== null) {
-                $rows[] = $row;
-            }
-        }
-
-        return $rows;
     }
 
     /**

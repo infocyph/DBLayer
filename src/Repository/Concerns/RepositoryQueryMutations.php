@@ -82,6 +82,15 @@ trait RepositoryQueryMutations
         return (string) $id;
     }
 
+    /** Restrict this query to soft-deleted rows. */
+    public function onlyTrashed(): self
+    {
+        $this->tableRepository()->onlyTrashed();
+        $this->rebuildBuilder();
+
+        return $this;
+    }
+
     /** Restore soft-deleted rows matching the current fluent query. */
     public function restore(): int
     {
@@ -110,28 +119,19 @@ trait RepositoryQueryMutations
         return $this->tableRepository()->upsert($values, $uniqueBy, $update);
     }
 
-    /** Include soft-deleted rows for this query only. */
-    public function withTrashed(): self
-    {
-        $this->tableRepository()->withTrashed();
-        $this->rebuildBuilder();
-
-        return $this;
-    }
-
-    /** Restrict this query to soft-deleted rows. */
-    public function onlyTrashed(): self
-    {
-        $this->tableRepository()->onlyTrashed();
-        $this->rebuildBuilder();
-
-        return $this;
-    }
-
     /** Restore default soft-delete visibility for this query. */
     public function withoutTrashed(): self
     {
         $this->tableRepository()->withoutTrashed();
+        $this->rebuildBuilder();
+
+        return $this;
+    }
+
+    /** Include soft-deleted rows for this query only. */
+    public function withTrashed(): self
+    {
+        $this->tableRepository()->withTrashed();
         $this->rebuildBuilder();
 
         return $this;

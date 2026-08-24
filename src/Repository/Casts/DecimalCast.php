@@ -35,6 +35,23 @@ final readonly class DecimalCast implements AttributeCast
         return $this->normalize($value);
     }
 
+    private function increment(string $integer): string
+    {
+        $digits = str_split($integer);
+
+        for ($index = count($digits) - 1; $index >= 0; --$index) {
+            if ($digits[$index] !== '9') {
+                $digits[$index] = (string) ((int) $digits[$index] + 1);
+
+                return implode('', $digits);
+            }
+
+            $digits[$index] = '0';
+        }
+
+        return '1' . implode('', $digits);
+    }
+
     private function normalize(mixed $value): mixed
     {
         if ($value === null) {
@@ -105,23 +122,6 @@ final readonly class DecimalCast implements AttributeCast
         }
 
         return [$this->increment($integer), implode('', $digits)];
-    }
-
-    private function increment(string $integer): string
-    {
-        $digits = str_split($integer);
-
-        for ($index = count($digits) - 1; $index >= 0; --$index) {
-            if ($digits[$index] !== '9') {
-                $digits[$index] = (string) ((int) $digits[$index] + 1);
-
-                return implode('', $digits);
-            }
-
-            $digits[$index] = '0';
-        }
-
-        return '1' . implode('', $digits);
     }
 
     private function withScale(string $integer, string $fraction): string

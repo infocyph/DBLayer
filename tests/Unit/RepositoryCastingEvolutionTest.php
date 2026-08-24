@@ -13,6 +13,7 @@ use stdClass;
 enum RepositoryCastingStatus: string
 {
     case Draft = 'draft';
+
     case Published = 'published';
 }
 
@@ -39,8 +40,6 @@ final class RepositoryPrefixCast implements AttributeCast
 
 final class RepositoryCastingRecord extends TableRepository
 {
-    protected static string $table = 'repository_casting_records';
-
     protected static array $creatable = [
         'status',
         'token',
@@ -49,6 +48,8 @@ final class RepositoryCastingRecord extends TableRepository
         'payload',
         'scheduled_date',
     ];
+
+    protected static string $table = 'repository_casting_records';
 
     protected static function casts(): array
     {
@@ -179,7 +180,7 @@ it('applies repository write casts to set-based fluent updates', function (): vo
         'payload' => (object) ['stage' => 'before'],
     ]);
 
-    $affected = RepositoryCastingRecord::query()
+    $affected = RepositoryCastingRecord::repositoryQuery()
         ->where('id', '=', $record['id'])
         ->update([
             'status' => RepositoryCastingStatus::Published,

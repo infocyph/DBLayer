@@ -15,6 +15,8 @@ use InvalidArgumentException;
  */
 final class RepositoryWriteCaster
 {
+    private function __construct() {}
+
     /**
      * @param array<string,mixed> $attributes
      * @param array<string,string|callable(mixed):mixed|AttributeCast> $casts
@@ -36,46 +38,6 @@ final class RepositoryWriteCaster
         }
 
         return $attributes;
-    }
-
-    /**
-     * @param string|callable(mixed):mixed|AttributeCast $cast
-     * @param array<string,mixed> $context
-     */
-    private static function value(
-        mixed $value,
-        string|callable|AttributeCast $cast,
-        array $context,
-        Connection $connection,
-    ): mixed {
-        if ($cast instanceof AttributeCast) {
-            return $cast->set($value, $context);
-        }
-
-        if (is_string($cast) && enum_exists($cast) && is_subclass_of($cast, BackedEnum::class)) {
-            if ($value === null) {
-                return null;
-            }
-            if ($value instanceof $cast) {
-                return $value->value;
-            }
-            if (!is_int($value) && !is_string($value)) {
-                throw new InvalidArgumentException(sprintf(
-                    'Backed enum [%s] expects an int or string value, %s given.',
-                    $cast,
-                    get_debug_type($value),
-                ));
-            }
-
-            /** @var class-string<BackedEnum> $cast */
-            return $cast::from($value)->value;
-        }
-
-        if (is_callable($cast)) {
-            return $cast($value);
-        }
-
-        return self::named($value, strtolower($cast), $connection);
     }
 
     private static function named(mixed $value, string $cast, Connection $connection): mixed
@@ -136,5 +98,43 @@ final class RepositoryWriteCaster
         return is_scalar($value) ? (string) $value : '';
     }
 
-    private function __construct() {}
+    /**
+     * @param string|callable(mixed):mixed|AttributeCast $cast
+     * @param array<string,mixed> $context
+     */
+    private static function value(
+        mixed $value,
+        string|callable|AttributeCast $cast,
+        array $context,
+        Connection $connection,
+    ): mixed {
+        if ($cast instanceof AttributeCast) {
+            return $cast->set($value, $context);
+        }
+
+        if (is_string($cast) && enum_exists($cast) && is_subclass_of($cast, BackedEnum::class)) {
+            if ($value === null) {
+                return null;
+            }
+            if ($value instanceof $cast) {
+                return $value->value;
+            }
+            if (!is_int($value) && !is_string($value)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Backed enum [%s] expects an int or string value, %s given.',
+                    $cast,
+                    get_debug_type($value),
+                ));
+            }
+
+            /** @var class-string<BackedEnum> $cast */
+            return $cast::from($value)->value;
+        }
+
+        if (is_callable($cast)) {
+            return $cast($value);
+        }
+
+        return self::named($value, strtolower($cast), $connection);
+    }
 }

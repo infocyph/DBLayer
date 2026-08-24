@@ -13,35 +13,11 @@ use InvalidArgumentException;
 
 trait RepositoryQueryRelations
 {
-    /** @param string|array<int|string,string|callable(QueryBuilder):void> ...$relations */
-    public function with(string|array ...$relations): self
+    /** @param null|callable(QueryBuilder):void $constraint */
+    public function whereDoesntHave(string $relation, ?callable $constraint = null): self
     {
-        foreach ($relations as $relation) {
-            if (is_string($relation)) {
-                $this->registerRelation($relation, null);
-                continue;
-            }
-
-            foreach ($relation as $name => $constraint) {
-                if (is_int($name)) {
-                    if (!is_string($constraint)) {
-                        throw new InvalidArgumentException('Numeric relation entries must contain relation names.');
-                    }
-
-                    $this->registerRelation($constraint, null);
-                    continue;
-                }
-
-                if (!is_callable($constraint)) {
-                    throw new InvalidArgumentException(sprintf(
-                        'Relation constraint for [%s] must be callable.',
-                        $name,
-                    ));
-                }
-
-                $this->registerRelation($name, $constraint);
-            }
-        }
+        $definition = $this->directRelationDefinition($relation);
+        new RepositoryRelationFilter($this->connection)->apply($this, $definition, $constraint, true);
 
         return $this;
     }
@@ -50,16 +26,7 @@ trait RepositoryQueryRelations
     public function whereHas(string $relation, ?callable $constraint = null): self
     {
         $definition = $this->directRelationDefinition($relation);
-        (new RepositoryRelationFilter($this->connection))->apply($this, $definition, $constraint);
-
-        return $this;
-    }
-
-    /** @param null|callable(QueryBuilder):void $constraint */
-    public function whereDoesntHave(string $relation, ?callable $constraint = null): self
-    {
-        $definition = $this->directRelationDefinition($relation);
-        (new RepositoryRelationFilter($this->connection))->apply($this, $definition, $constraint, true);
+        new RepositoryRelationFilter($this->connection)->apply($this, $definition, $constraint);
 
         return $this;
     }
@@ -87,6 +54,79 @@ trait RepositoryQueryRelations
                 $query->where($column, $operator, $value);
             },
         );
+    }
+
+    /** @param string|array<int|string,string|callable(QueryBuilder):void> ...$relations */
+    public function with(string|array ...$relations): self
+    {
+        foreach ($relations as $relation) {
+            if (is_string($relation)) {
+                $this->registerRelation($relation, null);
+
+                continue;
+            }
+
+            foreach ($relation as $name => $constraint) {
+                if (is_int($name)) {
+                    if (!is_string($constraint)) {
+                        throw new InvalidArgumentException('Numeric relation entries must contain relation names.');
+                    }
+
+                    $this->registerRelation($constraint, null);
+
+                    continue;
+                }
+
+                if (!is_callable($constraint)) {
+                    throw new InvalidArgumentException(sprintf(
+                        'Relation constraint for [%s] must be callable.',
+                        $name,
+                    ));
+                }
+
+                $this->registerRelation($name, $constraint);
+            }
+        }
+
+        return $this;
+    }
+
+    private function directRelationDefinition(string $name): RelationDefinition
+    {
+        if (str_contains($name, '.')) {
+            throw new InvalidArgumentException('Relation aggregates and existence filters currently require a direct relation name.');
+        }
+
+        return $this->relationDefinition($name);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return array{0:list<array<string,mixed>>,1:array<int,int>}
+     */
+    private function flattenNestedRows(array $rows, string $name, bool $many): array
+    {
+        $flat = [];
+        $sizes = [];
+
+        foreach ($rows as $index => $row) {
+            $value = $row[$name] ?? ($many ? [] : null);
+            $items = $many ? $this->relationRows($value) : $this->singleRelationRows($value);
+            $sizes[$index] = count($items);
+            array_push($flat, ...$items);
+        }
+
+        return [$flat, $sizes];
+    }
+
+    private function isManyRelation(RelationDefinition $definition): bool
+    {
+        return in_array($definition->type, [
+            RelationDefinition::BELONGS_TO_MANY,
+            RelationDefinition::HAS_MANY,
+            RelationDefinition::MORPH_MANY,
+            RelationDefinition::MORPH_TO_MANY,
+        ], true);
     }
 
     /**
@@ -137,91 +177,11 @@ trait RepositoryQueryRelations
             return $rows;
         }
 
-        $projected = $related::query()
+        $projected = $related::repositoryQuery()
             ->with($this->relationRequestArray($nested))
             ->project($flat);
 
         return $this->restoreNestedRows($rows, $name, $many, $sizes, $projected);
-    }
-
-    private function isManyRelation(RelationDefinition $definition): bool
-    {
-        return in_array($definition->type, [
-            RelationDefinition::BELONGS_TO_MANY,
-            RelationDefinition::HAS_MANY,
-            RelationDefinition::MORPH_MANY,
-            RelationDefinition::MORPH_TO_MANY,
-        ], true);
-    }
-
-    /**
-     * @param list<array<string,mixed>> $rows
-     * @return array{0:list<array<string,mixed>>,1:array<int,int>}
-     */
-    private function flattenNestedRows(array $rows, string $name, bool $many): array
-    {
-        $flat = [];
-        $sizes = [];
-
-        foreach ($rows as $index => $row) {
-            $value = $row[$name] ?? ($many ? [] : null);
-            $items = $many ? $this->relationRows($value) : $this->singleRelationRows($value);
-            $sizes[$index] = count($items);
-            array_push($flat, ...$items);
-        }
-
-        return [$flat, $sizes];
-    }
-
-    /** @return list<array<string,mixed>> */
-    private function relationRows(mixed $value): array
-    {
-        if (!is_array($value)) {
-            return [];
-        }
-
-        $rows = [];
-        foreach ($value as $candidate) {
-            $row = RepositorySupport::row($candidate);
-            if ($row !== null) {
-                $rows[] = $row;
-            }
-        }
-
-        return $rows;
-    }
-
-    /** @return list<array<string,mixed>> */
-    private function singleRelationRows(mixed $value): array
-    {
-        $row = RepositorySupport::row($value);
-
-        return $row === null ? [] : [$row];
-    }
-
-    /**
-     * @param list<array<string,mixed>> $rows
-     * @param array<int,int> $sizes
-     * @param list<array<string,mixed>> $projected
-     * @return list<array<string,mixed>>
-     */
-    private function restoreNestedRows(
-        array $rows,
-        string $name,
-        bool $many,
-        array $sizes,
-        array $projected,
-    ): array {
-        $offset = 0;
-        foreach ($rows as $index => &$row) {
-            $size = $sizes[$index] ?? 0;
-            $slice = array_slice($projected, $offset, $size);
-            $row[$name] = $many ? $slice : ($slice[0] ?? null);
-            $offset += $size;
-        }
-        unset($row);
-
-        return $rows;
     }
 
     /**
@@ -251,7 +211,7 @@ trait RepositoryQueryRelations
 
         foreach ($groups as $type => $entries) {
             $related = $definition->morphMap[$type];
-            $projected = $related::query()
+            $projected = $related::repositoryQuery()
                 ->with($this->relationRequestArray($nested))
                 ->project(array_map(
                     static fn(array $entry): array => $entry['row'],
@@ -287,6 +247,20 @@ trait RepositoryQueryRelations
         $this->requestedRelations[$path] = $constraint;
     }
 
+    private function relationDefinition(string $name): RelationDefinition
+    {
+        $definition = $this->definition->relations[$name] ?? null;
+
+        if (!$definition instanceof RelationDefinition) {
+            throw new InvalidArgumentException(sprintf(
+                'Relation [%s] is not defined for this repository.',
+                $name,
+            ));
+        }
+
+        return $definition;
+    }
+
     /**
      * @return array<string,array{constraint:null|callable(QueryBuilder):void,nested:array<string,null|callable(QueryBuilder):void>}>
      */
@@ -310,6 +284,21 @@ trait RepositoryQueryRelations
         return $groups;
     }
 
+    /** @return list<string> */
+    private function relationParentColumns(RelationDefinition $definition): array
+    {
+        if ($definition->type !== RelationDefinition::MORPH_TO) {
+            return [$definition->parentKey];
+        }
+
+        return array_values(array_unique([
+            $definition->morphTypeColumn
+                ?? throw new InvalidArgumentException('Morph-to relation requires a type column.'),
+            $definition->morphIdColumn
+                ?? throw new InvalidArgumentException('Morph-to relation requires an id column.'),
+        ]));
+    }
+
     /**
      * @param array<string,null|callable(QueryBuilder):void> $relations
      * @return array<int|string,string|callable(QueryBuilder):void>
@@ -328,41 +317,54 @@ trait RepositoryQueryRelations
         return $request;
     }
 
-    private function directRelationDefinition(string $name): RelationDefinition
+    /** @return list<array<string,mixed>> */
+    private function relationRows(mixed $value): array
     {
-        if (str_contains($name, '.')) {
-            throw new InvalidArgumentException('Relation aggregates and existence filters currently require a direct relation name.');
+        if (!is_array($value)) {
+            return [];
         }
 
-        return $this->relationDefinition($name);
+        $rows = [];
+        foreach ($value as $candidate) {
+            $row = RepositorySupport::row($candidate);
+            if ($row !== null) {
+                $rows[] = $row;
+            }
+        }
+
+        return $rows;
     }
 
-    private function relationDefinition(string $name): RelationDefinition
-    {
-        $definition = $this->definition->relations[$name] ?? null;
-
-        if (!$definition instanceof RelationDefinition) {
-            throw new InvalidArgumentException(sprintf(
-                'Relation [%s] is not defined for this repository.',
-                $name,
-            ));
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @param array<int,int> $sizes
+     * @param list<array<string,mixed>> $projected
+     * @return list<array<string,mixed>>
+     */
+    private function restoreNestedRows(
+        array $rows,
+        string $name,
+        bool $many,
+        array $sizes,
+        array $projected,
+    ): array {
+        $offset = 0;
+        foreach ($rows as $index => &$row) {
+            $size = $sizes[$index] ?? 0;
+            $slice = array_slice($projected, $offset, $size);
+            $row[$name] = $many ? $slice : ($slice[0] ?? null);
+            $offset += $size;
         }
+        unset($row);
 
-        return $definition;
+        return $rows;
     }
 
-    /** @return list<string> */
-    private function relationParentColumns(RelationDefinition $definition): array
+    /** @return list<array<string,mixed>> */
+    private function singleRelationRows(mixed $value): array
     {
-        if ($definition->type !== RelationDefinition::MORPH_TO) {
-            return [$definition->parentKey];
-        }
+        $row = RepositorySupport::row($value);
 
-        return array_values(array_unique([
-            $definition->morphTypeColumn
-                ?? throw new InvalidArgumentException('Morph-to relation requires a type column.'),
-            $definition->morphIdColumn
-                ?? throw new InvalidArgumentException('Morph-to relation requires an id column.'),
-        ]));
+        return $row === null ? [] : [$row];
     }
 }
