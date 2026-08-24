@@ -8,6 +8,7 @@ use Infocyph\DBLayer\Pagination\LengthAwarePaginator;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository;
+use InvalidArgumentException;
 
 /**
  * Repository pagination with repository-processed row results.
@@ -25,7 +26,7 @@ abstract class RepositoryPagination extends Repository
         $perPage = $this->resolvePerPage($perPage);
         $page = max(1, $page ?? 1);
         $total = $this->count($scope);
-        $items = $this->get(
+        $items = array_values($this->get(
             static function (QueryBuilder $query) use ($scope, $page, $perPage): void {
                 if ($scope !== null) {
                     $scope($query);
@@ -33,7 +34,7 @@ abstract class RepositoryPagination extends Repository
 
                 $query->forPage($page, $perPage);
             },
-        )->toArray();
+        )->toArray());
 
         return new LengthAwarePaginator($items, $total, $perPage, $page);
     }
@@ -48,7 +49,7 @@ abstract class RepositoryPagination extends Repository
     {
         $perPage = $this->resolvePerPage($perPage);
         $page = max(1, $page ?? 1);
-        $items = $this->get(
+        $items = array_values($this->get(
             static function (QueryBuilder $query) use ($scope, $page, $perPage): void {
                 if ($scope !== null) {
                     $scope($query);
@@ -58,7 +59,7 @@ abstract class RepositoryPagination extends Repository
                     ->offset(($page - 1) * $perPage)
                     ->limit($perPage + 1);
             },
-        )->toArray();
+        )->toArray());
 
         $hasMore = count($items) > $perPage;
         if ($hasMore) {
@@ -79,7 +80,7 @@ abstract class RepositoryPagination extends Repository
         $perPage ??= $this->defaultPerPage();
 
         if ($perPage < 1) {
-            throw new \InvalidArgumentException('Pagination size must be at least one.');
+            throw new InvalidArgumentException('Pagination size must be at least one.');
         }
 
         return $perPage;
