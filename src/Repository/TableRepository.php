@@ -35,6 +35,9 @@ abstract class TableRepository
     /** @var array<string,mixed> Default attributes merged into create payloads. */
     protected static array $defaults = [];
 
+    /** Maximum eager-relation path depth accepted by this repository. */
+    protected static int $maxRelationDepth = 3;
+
     /** Default page size for repository pagination. */
     protected static int $perPage = 15;
 
@@ -79,16 +82,19 @@ abstract class TableRepository
         ));
     }
 
+    /** Get the intentionally raw QueryBuilder escape hatch. */
     public static function builder(?string $connection = null): QueryBuilder
     {
         return static::query($connection)->raw();
     }
 
+    /** Get the connection instance used by this repository class. */
     public static function connection(?string $connection = null): Connection
     {
         return DB::connection(static::resolveConnectionName($connection));
     }
 
+    /** Get the immutable metadata definition compiled for this repository class. */
     public static function definition(): RepositoryDefinition
     {
         $class = static::class;
@@ -99,8 +105,7 @@ abstract class TableRepository
 
         $scopes = static::globalScopes();
         $scopes['__configure_query'] = static function (QueryBuilder $query): void {
-            $configured = static::configureQuery($query);
-            unset($configured);
+            static::configureQuery($query);
         };
 
         return self::$definitionCache[$class] = new RepositoryDefinition(
@@ -108,6 +113,7 @@ abstract class TableRepository
             table: static::tableName(),
             primaryKey: static::primaryKeyName(),
             perPage: static::$perPage,
+            maxRelationDepth: static::$maxRelationDepth,
             defaults: static::$defaults,
             creatable: static::$creatable,
             updatable: static::$updatable,
@@ -120,11 +126,18 @@ abstract class TableRepository
         );
     }
 
+    /**
+     * Forget this class's compiled metadata definition.
+     *
+     * Normal applications should not need this. It exists for tests and for
+     * intentionally dynamic repository metadata during bootstrap.
+     */
     public static function flushDefinition(): void
     {
         unset(self::$definitionCache[static::class]);
     }
 
+    /** Build a repository-aware fluent query. */
     public static function query(?string $connection = null): RepositoryQuery
     {
         $definition = static::definition();
@@ -139,16 +152,19 @@ abstract class TableRepository
         );
     }
 
+    /** Explicit alias for the raw QueryBuilder escape hatch. */
     public static function rawQuery(?string $connection = null): QueryBuilder
     {
         return static::builder($connection);
     }
 
+    /** Alias for repository() to match common naming preference. */
     public static function repo(?string $connection = null): QueryRepository
     {
         return static::repository($connection);
     }
 
+    /** Build a repository for this table definition. */
     public static function repository(?string $connection = null): QueryRepository
     {
         $definition = static::definition();
@@ -165,6 +181,7 @@ abstract class TableRepository
         return static::configureRepository($repository);
     }
 
+    /** Public table metadata for relation definitions and tooling. */
     public static function table(): string
     {
         return static::definition()->table;
@@ -191,12 +208,17 @@ abstract class TableRepository
         return DB::statement($query, $bindings, static::resolveConnectionName($connection));
     }
 
+    /** Run a transaction on this repository class configured connection. */
     public static function transaction(callable $callback, int $attempts = 1, ?string $connection = null): mixed
     {
         return DB::transaction($callback, $attempts, static::resolveConnectionName($connection));
     }
 
     /**
+     * Declarative repository casts.
+     *
+     * Metadata returned by this method is compiled once per repository class.
+     *
      * @return array<string,string|callable(mixed):mixed|\Infocyph\DBLayer\Repository\Casts\AttributeCast>
      */
     protected static function casts(): array
@@ -204,33 +226,53 @@ abstract class TableRepository
         return [];
     }
 
+    /**
+     * Existing query-default hook. Defaults declared here are applied through
+     * the repository constraint pipeline for every repository read path.
+     */
     protected static function configureQuery(QueryBuilder $query): QueryBuilder
     {
         return $query;
     }
 
+    /** Override in subclasses to apply reusable runtime repository policies. */
     protected static function configureRepository(QueryRepository $repository): QueryRepository
     {
         return $repository;
     }
 
+    /** Resolve configured connection name. */
     protected static function connectionName(): ?string
     {
         return static::$connection;
     }
 
-    /** @return array<array-key,callable(QueryBuilder):void> */
+    /**
+     * Declarative named global query scopes.
+     *
+     * Metadata returned by this method is compiled once per repository class.
+     * Scope callbacks themselves execute for every fresh query.
+     *
+     * @return array<array-key,callable(QueryBuilder):void>
+     */
     protected static function globalScopes(): array
     {
         return [];
     }
 
-    /** @return array<string,RelationDefinition> */
+    /**
+     * Declarative eager-loadable relations.
+     *
+     * Metadata returned by this method is compiled once per repository class.
+     *
+     * @return array<string,RelationDefinition>
+     */
     protected static function relations(): array
     {
         return [];
     }
 
+    /** Resolve and validate configured primary-key column. */
     protected static function primaryKeyName(): string
     {
         $primaryKey = trim(static::$primaryKey);
@@ -245,11 +287,13 @@ abstract class TableRepository
         return $primaryKey;
     }
 
+    /** Resolve explicit connection override or repository-class default. */
     protected static function resolveConnectionName(?string $connection = null): ?string
     {
         return $connection ?? static::connectionName();
     }
 
+    /** Resolve and validate configured table name. */
     protected static function tableName(): string
     {
         $table = trim(static::$table);
