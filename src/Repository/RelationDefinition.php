@@ -54,13 +54,12 @@ final readonly class RelationDefinition
         public array $oneOfManyOrders = [],
     ) {
         foreach ($oneOfManyOrders as $column => $aggregate) {
-            if (trim($column) === '' || !in_array($aggregate, ['max', 'min'], true)) {
+            if (trim($column) === '') {
                 throw new InvalidArgumentException('Advanced one-of-many orders require non-empty columns mapped to max or min.');
             }
         }
     }
 
-    /** Return a copy with an alternate pivot projection key. */
     public function asPivot(string $accessor): self
     {
         $accessor = trim($accessor);
@@ -71,24 +70,13 @@ final readonly class RelationDefinition
         return $this->copy(pivotAccessor: $accessor);
     }
 
-    /**
-     * Return a copy with constrained related-row selection.
-     *
-     * @param callable(QueryBuilder):void $scope
-     */
+    /** @param callable(QueryBuilder):void $scope */
     public function constrain(callable $scope): self
     {
         return $this->copy(scope: $scope);
     }
 
     /**
-     * Choose one related row using max/min sortable criteria.
-     *
-     * A scalar/null column defines one ordering criterion. An associative array
-     * defines lexicographic advanced criteria, e.g.
-     * ``['published_at' => 'max', 'id' => 'max']``. When an array is used, the
-     * second argument may be the candidate-selection scope.
-     *
      * @param string|array<string,'max'|'min'>|null $column
      * @param string|callable(QueryBuilder):void $aggregate
      * @param null|callable(QueryBuilder):void $scope
@@ -100,61 +88,9 @@ final readonly class RelationDefinition
     ): self {
         $type = $this->toOneType();
 
-        if (is_array($column)) {
-            if ($column === []) {
-                throw new InvalidArgumentException('Advanced one-of-many criteria must not be empty.');
-            }
-
-            if (!is_string($aggregate) && is_callable($aggregate)) {
-                $scope = $aggregate;
-            } elseif (!is_string($aggregate) || strtolower(trim($aggregate)) !== 'max') {
-                throw new InvalidArgumentException('Advanced one-of-many uses the second argument as an optional scope.');
-            }
-
-            $orders = [];
-            foreach ($column as $orderColumn => $orderAggregate) {
-                $orderColumn = trim($orderColumn);
-                $orderAggregate = strtolower(trim($orderAggregate));
-                if ($orderColumn === '' || !in_array($orderAggregate, ['max', 'min'], true)) {
-                    throw new InvalidArgumentException('Advanced one-of-many criteria require non-empty columns mapped to max or min.');
-                }
-                $orders[$orderColumn] = $orderAggregate;
-            }
-
-            $firstColumn = array_key_first($orders);
-            $firstAggregate = $orders[$firstColumn];
-
-            return $this->withOneOfMany(
-                $type,
-                $firstColumn,
-                $firstAggregate,
-                $scope,
-                $orders,
-            );
-        }
-
-        if (!is_string($aggregate)) {
-            throw new InvalidArgumentException('Scalar one-of-many definitions require max or min as the aggregate.');
-        }
-
-        $aggregate = strtolower(trim($aggregate));
-        if (!in_array($aggregate, ['max', 'min'], true)) {
-            throw new InvalidArgumentException('One-of-many aggregate must be max or min.');
-        }
-
-        if ($column !== null && trim($column) === '') {
-            throw new InvalidArgumentException('One-of-many column must not be empty.');
-        }
-
-        $column = $column === null ? null : trim($column);
-
-        return $this->withOneOfMany(
-            $type,
-            $column,
-            $aggregate,
-            $scope,
-            $column === null ? [] : [$column => $aggregate],
-        );
+        return is_array($column)
+            ? $this->advancedOfMany($type, $column, $aggregate, $scope)
+            : $this->scalarOfMany($type, $column, $aggregate, $scope);
     }
 
     public function latestOfMany(?string $column = null): self
@@ -167,27 +103,18 @@ final readonly class RelationDefinition
         return $this->ofMany($column, 'min');
     }
 
-    /** Convert a many relation into its one-relation equivalent. */
     public function one(): self
     {
         return $this->copy(type: $this->toOneType());
     }
 
-    /**
-     * Return a copy with an explicit related-column projection.
-     *
-     * @param list<string> $columns
-     */
+    /** @param list<string> $columns */
     public function select(array $columns): self
     {
         return $this->copy(columns: $columns);
     }
 
-    /**
-     * Project selected pivot attributes onto many-to-many relation rows.
-     *
-     * @param string|list<string> ...$columns
-     */
+    /** @param string|list<string> ...$columns */
     public function withPivot(string|array ...$columns): self
     {
         if ($this->pivotTable === null) {
@@ -206,6 +133,77 @@ final readonly class RelationDefinition
         }
 
         return $this->copy(pivotColumns: array_keys($resolved));
+    }
+
+    /**
+     * @param array<string,'max'|'min'> $criteria
+     * @param string|callable(QueryBuilder):void $aggregate
+     * @param null|callable(QueryBuilder):void $scope
+     */
+    private function advancedOfMany(string $type, array $criteria, string|callable $aggregate, ?callable $scope): self
+    {
+        if ($criteria === []) {
+            throw new InvalidArgumentException('Advanced one-of-many criteria must not be empty.');
+        }
+
+        if (!is_string($aggregate)) {
+            $scope = $aggregate;
+        } elseif (strtolower(trim($aggregate)) !== 'max') {
+            throw new InvalidArgumentException('Advanced one-of-many uses the second argument as an optional scope.');
+        }
+
+        $orders = $this->normalizeOrders($criteria);
+        $firstColumn = array_key_first($orders);
+
+        return $this->withOneOfMany($type, $firstColumn, $orders[$firstColumn], $scope, $orders);
+    }
+
+    /**
+     * @param null|callable(QueryBuilder):void $scope
+     */
+    private function scalarOfMany(string $type, ?string $column, string|callable $aggregate, ?callable $scope): self
+    {
+        if (!is_string($aggregate)) {
+            throw new InvalidArgumentException('Scalar one-of-many definitions require max or min as the aggregate.');
+        }
+
+        $aggregate = strtolower(trim($aggregate));
+        if (!in_array($aggregate, ['max', 'min'], true)) {
+            throw new InvalidArgumentException('One-of-many aggregate must be max or min.');
+        }
+
+        if ($column !== null) {
+            $column = trim($column);
+            if ($column === '') {
+                throw new InvalidArgumentException('One-of-many column must not be empty.');
+            }
+        }
+
+        return $this->withOneOfMany(
+            $type,
+            $column,
+            $aggregate,
+            $scope,
+            $column === null ? [] : [$column => $aggregate],
+        );
+    }
+
+    /**
+     * @param array<string,'max'|'min'> $criteria
+     * @return non-empty-array<non-empty-string,'max'|'min'>
+     */
+    private function normalizeOrders(array $criteria): array
+    {
+        $orders = [];
+        foreach ($criteria as $column => $aggregate) {
+            $column = trim($column);
+            if ($column === '') {
+                throw new InvalidArgumentException('Advanced one-of-many criteria require non-empty columns mapped to max or min.');
+            }
+            $orders[$column] = $aggregate;
+        }
+
+        return $orders;
     }
 
     /**
