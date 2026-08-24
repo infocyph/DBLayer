@@ -20,12 +20,9 @@ abstract class RepositoryPagination extends Repository
      * @param callable(QueryBuilder):void|null $scope
      */
     #[\Override]
-    public function paginate(int $perPage = 15, ?int $page = null, ?callable $scope = null): LengthAwarePaginator
+    public function paginate(?int $perPage = null, ?int $page = null, ?callable $scope = null): LengthAwarePaginator
     {
-        if ($perPage < 1) {
-            throw new \InvalidArgumentException('Pagination size must be at least one.');
-        }
-
+        $perPage = $this->resolvePerPage($perPage);
         $page = max(1, $page ?? 1);
         $total = $this->count($scope);
         $items = $this->get(
@@ -47,12 +44,9 @@ abstract class RepositoryPagination extends Repository
      * @param callable(QueryBuilder):void|null $scope
      */
     #[\Override]
-    public function simplePaginate(int $perPage = 15, ?int $page = null, ?callable $scope = null): SimplePaginator
+    public function simplePaginate(?int $perPage = null, ?int $page = null, ?callable $scope = null): SimplePaginator
     {
-        if ($perPage < 1) {
-            throw new \InvalidArgumentException('Pagination size must be at least one.');
-        }
-
+        $perPage = $this->resolvePerPage($perPage);
         $page = max(1, $page ?? 1);
         $items = $this->get(
             static function (QueryBuilder $query) use ($scope, $page, $perPage): void {
@@ -72,5 +66,22 @@ abstract class RepositoryPagination extends Repository
         }
 
         return new SimplePaginator($items, $perPage, $page, $hasMore);
+    }
+
+    /** Default page size for repository-specific pagination. */
+    protected function defaultPerPage(): int
+    {
+        return 15;
+    }
+
+    private function resolvePerPage(?int $perPage): int
+    {
+        $perPage ??= $this->defaultPerPage();
+
+        if ($perPage < 1) {
+            throw new \InvalidArgumentException('Pagination size must be at least one.');
+        }
+
+        return $perPage;
     }
 }
