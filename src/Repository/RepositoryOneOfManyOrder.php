@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Repository;
 
-/**
- * Resolve and compare deterministic one-of-many ordering criteria.
- */
+/** Resolve and compare deterministic one-of-many ordering criteria. */
 final class RepositoryOneOfManyOrder
 {
     /** @return array<string,'asc'|'desc'> */
@@ -34,12 +32,6 @@ final class RepositoryOneOfManyOrder
     }
 
     /**
-     * Compare two persisted rows in winner order.
-     *
-     * A negative result means $left should appear before $right. Numeric strings
-     * are compared as exact decimals instead of being coerced through float, so
-     * large DECIMAL identifiers/amounts retain ordering precision.
-     *
      * @param array<string,mixed> $left
      * @param array<string,mixed> $right
      * @param array<string,'asc'|'desc'> $orders
@@ -47,21 +39,19 @@ final class RepositoryOneOfManyOrder
     public static function compare(array $left, array $right, array $orders): int
     {
         foreach ($orders as $column => $direction) {
-            $comparison = self::compareValues(
-                $left[$column] ?? null,
-                $right[$column] ?? null,
-            );
-            if ($comparison === 0) {
-                continue;
+            $comparison = self::compareValues($left[$column] ?? null, $right[$column] ?? null);
+            if ($comparison !== 0) {
+                return $direction === 'desc' ? -$comparison : $comparison;
             }
-
-            return $direction === 'desc' ? -$comparison : $comparison;
         }
 
         return 0;
     }
 
-    /** @param array<string,'asc'|'desc'> $orders @return list<string> */
+    /**
+     * @param array<string,'asc'|'desc'> $orders
+     * @return list<string>
+     */
     public static function columns(array $orders): array
     {
         return array_keys($orders);
@@ -79,7 +69,9 @@ final class RepositoryOneOfManyOrder
             return 1;
         }
 
-        if (self::isNumericValue($left) && self::isNumericValue($right)) {
+        if (self::isNumeric($left) && self::isNumeric($right)) {
+            /** @var int|float|numeric-string $left */
+            /** @var int|float|numeric-string $right */
             return self::compareNumericValues($left, $right);
         }
 
@@ -94,14 +86,18 @@ final class RepositoryOneOfManyOrder
         return strcmp(serialize($left), serialize($right)) <=> 0;
     }
 
-    private static function isNumericValue(mixed $value): bool
+    private static function isNumeric(mixed $value): bool
     {
         return is_int($value)
             || is_float($value)
             || (is_string($value) && is_numeric($value));
     }
 
-    private static function compareNumericValues(mixed $left, mixed $right): int
+    /**
+     * @param int|float|numeric-string $left
+     * @param int|float|numeric-string $right
+     */
+    private static function compareNumericValues(int|float|string $left, int|float|string $right): int
     {
         $leftParts = self::numericParts(self::numericString($left));
         $rightParts = self::numericParts(self::numericString($right));
@@ -132,13 +128,10 @@ final class RepositoryOneOfManyOrder
         return $leftSign < 0 ? -$magnitude : $magnitude;
     }
 
-    private static function numericString(mixed $value): string
+    /** @param int|float|numeric-string $value */
+    private static function numericString(int|float|string $value): string
     {
-        if (is_float($value)) {
-            return sprintf('%.17g', $value);
-        }
-
-        return (string) $value;
+        return is_float($value) ? sprintf('%.17g', $value) : (string) $value;
     }
 
     /** @return array{0:-1|0|1,1:string,2:int}|null */
@@ -163,7 +156,7 @@ final class RepositoryOneOfManyOrder
             return [0, '0', 0];
         }
 
-        $sign = ($matches[1] ?? '') === '-' ? -1 : 1;
+        $sign = $matches[1] === '-' ? -1 : 1;
         $point = strlen($integer) - $leadingZeros + $exponent;
 
         return [$sign, $digits, $point];
