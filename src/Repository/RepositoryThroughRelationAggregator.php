@@ -42,7 +42,7 @@ final class RepositoryThroughRelationAggregator
 
     /**
      * @param list<array<string,mixed>> $parents
-     * @return array{0:array<string,string>,1:list<mixed>}
+     * @return array{0:array<string,string>,1:list<int|float|string|bool>}
      */
     private function throughMap(array $parents, RelationDefinition $definition): array
     {
@@ -57,8 +57,9 @@ final class RepositoryThroughRelationAggregator
             return [[], []];
         }
 
+        /** @var list<array<string,mixed>> $rows */
         $rows = [];
-        $batchSize = $through::connection()->safeBatchSize(requested: $this->batchSize);
+        $batchSize = max(1, $through::connection()->safeBatchSize(requested: $this->batchSize));
         foreach (array_chunk($parentValues, $batchSize) as $chunk) {
             $query = $through::query()->apply(static function (QueryBuilder $builder) use ($parentKey, $chunk): void {
                 $builder->whereIn($parentKey, $chunk);
@@ -86,7 +87,7 @@ final class RepositoryThroughRelationAggregator
     /**
      * @param null|callable(QueryBuilder):void $constraint
      * @param array<string,string> $parentByThrough
-     * @param list<mixed> $relatedValues
+     * @param list<int|float|string|bool> $relatedValues
      * @return array<string,mixed>
      */
     private function aggregateAverage(
@@ -122,7 +123,7 @@ final class RepositoryThroughRelationAggregator
     /**
      * @param null|callable(QueryBuilder):void $constraint
      * @param array<string,string> $parentByThrough
-     * @param list<mixed> $relatedValues
+     * @param list<int|float|string|bool> $relatedValues
      * @return array<string,mixed>
      */
     private function aggregateScalar(
@@ -150,7 +151,7 @@ final class RepositoryThroughRelationAggregator
 
     /**
      * @param null|callable(QueryBuilder):void $constraint
-     * @param list<mixed> $relatedValues
+     * @param list<int|float|string|bool> $relatedValues
      * @return iterable<array<string,mixed>>
      */
     private function aggregateRows(
@@ -163,7 +164,7 @@ final class RepositoryThroughRelationAggregator
         $related = $definition->related
             ?? throw new InvalidArgumentException('Through aggregate requires a related repository.');
         $relatedKey = RepositorySupport::column($definition->relatedKey);
-        $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
+        $batchSize = max(1, $related::connection()->safeBatchSize(requested: $this->batchSize));
 
         foreach (array_chunk($relatedValues, $batchSize) as $chunk) {
             $query = $related::query()->apply(static function (QueryBuilder $builder) use ($relatedKey, $chunk): void {
@@ -212,7 +213,10 @@ final class RepositoryThroughRelationAggregator
         }
     }
 
-    /** @param array<string,string> $parentByThrough */
+    /**
+     * @param array<string,mixed> $row
+     * @param array<string,string> $parentByThrough
+     */
     private function parentIdentity(array $row, RelationDefinition $definition, array $parentByThrough): ?string
     {
         $throughIdentity = RepositorySupport::key($row[$definition->relatedKey] ?? null);
@@ -256,7 +260,7 @@ final class RepositoryThroughRelationAggregator
 
     /**
      * @param list<array<string,mixed>> $rows
-     * @return list<mixed>
+     * @return list<int|float|string|bool>
      */
     private function values(array $rows, string $column): array
     {
