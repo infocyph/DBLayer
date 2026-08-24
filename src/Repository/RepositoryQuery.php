@@ -36,12 +36,11 @@ final class RepositoryQuery
     /** @var array<string,null|callable(QueryBuilder):void> */
     private array $requestedRelations = [];
 
-    /** @param array<string,RelationDefinition> $relations */
     public function __construct(
         private readonly Repository $repository,
         private QueryBuilder $builder,
         private readonly Connection $connection,
-        private readonly array $relations = [],
+        private readonly RepositoryDefinition $definition,
     ) {}
 
     /** @param array<int,mixed> $arguments */
@@ -84,13 +83,13 @@ final class RepositoryQuery
     }
 
     public function cursorPaginate(
-        int $perPage = 15,
+        ?int $perPage = null,
         ?string $cursor = null,
         ?string $uniqueColumn = null,
         ?string $direction = null,
     ): CursorPaginator {
         return $this->repository->cursorPaginate(
-            $perPage,
+            $this->resolvePerPage($perPage),
             $cursor,
             $uniqueColumn,
             $direction,
@@ -128,9 +127,13 @@ final class RepositoryQuery
         return new Collection($this->projectRows($rows));
     }
 
-    public function paginate(int $perPage = 15, ?int $page = null): LengthAwarePaginator
+    public function paginate(?int $perPage = null, ?int $page = null): LengthAwarePaginator
     {
-        $paginator = $this->repository->paginate($perPage, $page, $this->scope());
+        $paginator = $this->repository->paginate(
+            $this->resolvePerPage($perPage),
+            $page,
+            $this->scope(),
+        );
 
         return new LengthAwarePaginator(
             $this->projectRows($paginator->items()),
@@ -150,9 +153,13 @@ final class RepositoryQuery
         return $this->repository;
     }
 
-    public function simplePaginate(int $perPage = 15, ?int $page = null): SimplePaginator
+    public function simplePaginate(?int $perPage = null, ?int $page = null): SimplePaginator
     {
-        $paginator = $this->repository->simplePaginate($perPage, $page, $this->scope());
+        $paginator = $this->repository->simplePaginate(
+            $this->resolvePerPage($perPage),
+            $page,
+            $this->scope(),
+        );
 
         return new SimplePaginator(
             $this->projectRows($paginator->items()),
@@ -389,7 +396,7 @@ final class RepositoryQuery
 
     private function relationDefinition(string $name): RelationDefinition
     {
-        $definition = $this->relations[$name] ?? null;
+        $definition = $this->definition->relations[$name] ?? null;
 
         if (!$definition instanceof RelationDefinition) {
             throw new InvalidArgumentException(sprintf(
@@ -410,6 +417,17 @@ final class RepositoryQuery
             $value === null => 'null:',
             default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
         };
+    }
+
+    private function resolvePerPage(?int $perPage): int
+    {
+        $perPage ??= $this->definition->perPage;
+
+        if ($perPage < 1) {
+            throw new InvalidArgumentException('Pagination size must be at least one.');
+        }
+
+        return $perPage;
     }
 
     private function scope(): callable
