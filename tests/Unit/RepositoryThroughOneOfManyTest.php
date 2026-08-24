@@ -307,6 +307,23 @@ it('selects latest oldest and custom one-of-many rows deterministically', functi
         ->and($user['top_active_post']['title'])->toBe('Older U1');
 });
 
+it('uses primary key as a deterministic one-of-many tie breaker', function (): void {
+    DB::table('repository_through_posts')->insert([
+        'user_id' => 1,
+        'title' => 'Latest Tie Winner',
+        'score' => 10,
+        'active' => 1,
+        'created_at' => '2026-01-03 00:00:00',
+    ]);
+
+    $user = RepositoryThroughUser::query()
+        ->with('latest_post')
+        ->where('id', '=', 1)
+        ->first();
+
+    expect($user['latest_post']['title'])->toBe('Latest Tie Winner');
+});
+
 it('supports polymorphic one-of-many selection with explicit morph aliases', function (): void {
     $user = RepositoryThroughUser::query()
         ->with('latest_image')
