@@ -38,7 +38,7 @@ final class RepositoryQuery
      */
     public function __construct(
         private readonly Repository $repository,
-        private readonly QueryBuilder $builder,
+        private QueryBuilder $builder,
         private readonly Connection $connection,
         private readonly array $relations = [],
     ) {}
@@ -205,6 +205,38 @@ final class RepositoryQuery
     }
 
     /**
+     * Disable one named global scope for this query only.
+     */
+    public function withoutGlobalScope(string $name): self
+    {
+        if (!$this->repository instanceof TableQueryRepository) {
+            return $this;
+        }
+
+        $this->repository->withoutGlobalScope($name);
+        $this->rebuildBuilder();
+
+        return $this;
+    }
+
+    /**
+     * Disable selected named global scopes, or all named scopes when omitted.
+     *
+     * @param list<string>|null $names
+     */
+    public function withoutGlobalScopes(?array $names = null): self
+    {
+        if (!$this->repository instanceof TableQueryRepository) {
+            return $this;
+        }
+
+        $this->repository->withoutGlobalScopes($names);
+        $this->rebuildBuilder();
+
+        return $this;
+    }
+
+    /**
      * @param list<array<string,mixed>> $rows
      * @return list<array<string,mixed>>
      */
@@ -280,6 +312,19 @@ final class RepositoryQuery
         }
 
         return $rows;
+    }
+
+    /**
+     * Rebuild the raw builder after repository-scope state changes and replay
+     * already-recorded fluent operations in their original order.
+     */
+    private function rebuildBuilder(): void
+    {
+        $this->builder = $this->repository->builder();
+
+        foreach ($this->operations as $operation) {
+            $this->builder->{$operation['method']}(...$operation['arguments']);
+        }
     }
 
     /**
