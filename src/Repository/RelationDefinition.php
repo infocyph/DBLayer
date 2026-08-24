@@ -105,9 +105,9 @@ final readonly class RelationDefinition
                 throw new InvalidArgumentException('Advanced one-of-many criteria must not be empty.');
             }
 
-            if (is_callable($aggregate)) {
+            if (!is_string($aggregate) && is_callable($aggregate)) {
                 $scope = $aggregate;
-            } elseif (strtolower(trim($aggregate)) !== 'max') {
+            } elseif (!is_string($aggregate) || strtolower(trim($aggregate)) !== 'max') {
                 throw new InvalidArgumentException('Advanced one-of-many uses the second argument as an optional scope.');
             }
 
