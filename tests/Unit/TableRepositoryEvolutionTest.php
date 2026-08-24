@@ -28,6 +28,33 @@ final class RepositoryEvolutionUser extends TableRepository
     }
 }
 
+final class RepositoryEvolutionPagedUser extends TableRepository
+{
+    protected static string $table = 'repository_evolution_users';
+
+    protected static string $primaryKey = 'user_key';
+
+    protected static int $perPage = 2;
+}
+
+final class RepositoryEvolutionDefinitionProbe extends TableRepository
+{
+    public static int $castCalls = 0;
+
+    protected static string $table = 'repository_evolution_users';
+
+    protected static string $primaryKey = 'user_key';
+
+    protected static function casts(): array
+    {
+        self::$castCalls++;
+
+        return [
+            'active' => 'boolean',
+        ];
+    }
+}
+
 final class RepositoryEvolutionScopedUser extends TableRepository
 {
     protected static string $table = 'repository_evolution_users';
@@ -94,6 +121,9 @@ final class RepositoryEvolutionChild extends TableRepository
 }
 
 beforeEach(function (): void {
+    RepositoryEvolutionDefinitionProbe::flushDefinition();
+    RepositoryEvolutionDefinitionProbe::$castCalls = 0;
+
     DB::purge();
     DB::setSecurityDefaults([], false);
     DB::addConnection([
@@ -144,6 +174,42 @@ beforeEach(function (): void {
 
 afterEach(function (): void {
     DB::purge();
+});
+
+it('compiles declarative repository metadata once per class', function (): void {
+    $first = RepositoryEvolutionDefinitionProbe::definition();
+    $second = RepositoryEvolutionDefinitionProbe::definition();
+
+    expect($second)->toBe($first)
+        ->and($first->table)->toBe('repository_evolution_users')
+        ->and($first->primaryKey)->toBe('user_key')
+        ->and(RepositoryEvolutionDefinitionProbe::$castCalls)->toBe(1);
+
+    RepositoryEvolutionDefinitionProbe::flushDefinition();
+    $third = RepositoryEvolutionDefinitionProbe::definition();
+
+    expect($third)->not->toBe($first)
+        ->and(RepositoryEvolutionDefinitionProbe::$castCalls)->toBe(2);
+});
+
+it('uses repository page-size metadata across pagination entry points', function (): void {
+    $direct = RepositoryEvolutionPagedUser::paginate();
+    $fluent = RepositoryEvolutionPagedUser::query()
+        ->orderBy('user_key')
+        ->paginate();
+    $simple = RepositoryEvolutionPagedUser::query()
+        ->orderBy('user_key')
+        ->simplePaginate();
+    $cursor = RepositoryEvolutionPagedUser::query()->cursorPaginate();
+
+    expect($direct->perPage())->toBe(2)
+        ->and($direct->count())->toBe(2)
+        ->and($fluent->perPage())->toBe(2)
+        ->and($fluent->count())->toBe(2)
+        ->and($simple->perPage())->toBe(2)
+        ->and($simple->count())->toBe(2)
+        ->and($cursor->perPage())->toBe(2)
+        ->and($cursor->count())->toBe(2);
 });
 
 it('applies query defaults consistently to repository and fluent static reads', function (): void {
