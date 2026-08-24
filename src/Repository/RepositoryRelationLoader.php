@@ -41,6 +41,19 @@ final class RepositoryRelationLoader
             return $parents;
         }
 
+        if (in_array($definition->type, [
+            RelationDefinition::HAS_ONE_THROUGH,
+            RelationDefinition::HAS_MANY_THROUGH,
+        ], true)) {
+            return (new RepositoryThroughRelation($this->parentConnection, $this->batchSize))
+                ->load($parents, $as, $definition, $constraint);
+        }
+
+        if ($definition->oneOfManyAggregate !== null) {
+            return (new RepositoryOneOfManyRelation($this->batchSize))
+                ->load($parents, $as, $definition, $constraint);
+        }
+
         return match ($definition->type) {
             RelationDefinition::BELONGS_TO,
             RelationDefinition::HAS_ONE,
