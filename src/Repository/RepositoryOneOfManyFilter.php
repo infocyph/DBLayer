@@ -60,7 +60,9 @@ final class RepositoryOneOfManyFilter
 
         foreach (array_chunk($ids, $batchSize) as $chunk) {
             $query = $related::query()->apply(
-                static fn(QueryBuilder $builder): mixed => $builder->whereIn($primaryKey, $chunk),
+                static function (QueryBuilder $builder) use ($primaryKey, $chunk): void {
+                    $builder->whereIn($primaryKey, $chunk);
+                },
             );
             $query->apply($constraint);
 
