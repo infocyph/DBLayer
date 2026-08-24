@@ -12,9 +12,7 @@ final readonly class RelationDefinition
     public const string BELONGS_TO = 'belongs_to';
     public const string BELONGS_TO_MANY = 'belongs_to_many';
     public const string HAS_MANY = 'has_many';
-    public const string HAS_MANY_THROUGH = 'has_many_through';
     public const string HAS_ONE = 'has_one';
-    public const string HAS_ONE_THROUGH = 'has_one_through';
     public const string MORPH_MANY = 'morph_many';
     public const string MORPH_ONE = 'morph_one';
     public const string MORPH_TO = 'morph_to';
@@ -117,9 +115,7 @@ final readonly class RelationDefinition
         return $this->ofMany($column, 'min');
     }
 
-    /**
-     * Convert a many relation into its one-relation equivalent.
-     */
+    /** Convert a many relation into its one-relation equivalent. */
     public function one(): self
     {
         return $this->copy(type: $this->toOneType());
@@ -205,9 +201,8 @@ final readonly class RelationDefinition
     {
         return match ($this->type) {
             self::HAS_MANY => self::HAS_ONE,
-            self::HAS_MANY_THROUGH => self::HAS_ONE_THROUGH,
             self::MORPH_MANY => self::MORPH_ONE,
-            self::HAS_ONE, self::HAS_ONE_THROUGH, self::MORPH_ONE => $this->type,
+            self::HAS_ONE, self::MORPH_ONE => $this->type,
             default => throw new InvalidArgumentException(sprintf(
                 'Relation type [%s] cannot be converted to a one-of-many relation.',
                 $this->type,
