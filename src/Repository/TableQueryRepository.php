@@ -6,6 +6,7 @@ namespace Infocyph\DBLayer\Repository;
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Exceptions\UnwritableAttributeException;
+use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\ResultProcessor;
 
@@ -84,6 +85,23 @@ final class TableQueryRepository extends RepositoryPagination
     public function create(array $attributes): array
     {
         return parent::create($this->prepareCreateAttributes($attributes));
+    }
+
+    #[\Override]
+    public function cursorPaginate(
+        ?int $perPage = null,
+        ?string $cursor = null,
+        ?string $uniqueColumn = null,
+        ?string $direction = null,
+        ?callable $scope = null,
+    ): CursorPaginator {
+        return parent::cursorPaginate(
+            $perPage ?? $this->defaultPerPage(),
+            $cursor,
+            $uniqueColumn,
+            $direction,
+            $scope,
+        );
     }
 
     /**
