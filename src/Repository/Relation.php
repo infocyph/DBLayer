@@ -71,7 +71,7 @@ final class Relation
         string $secondLocalKey = 'id',
     ): RelationDefinition {
         return new RelationDefinition(
-            RelationDefinition::HAS_MANY_THROUGH,
+            RelationDefinition::HAS_MANY,
             $related,
             $localKey,
             $secondKey,
@@ -110,7 +110,7 @@ final class Relation
         string $secondLocalKey = 'id',
     ): RelationDefinition {
         return new RelationDefinition(
-            RelationDefinition::HAS_ONE_THROUGH,
+            RelationDefinition::HAS_ONE,
             $related,
             $localKey,
             $secondKey,
