@@ -20,6 +20,9 @@ use InvalidArgumentException;
  */
 abstract class TableRepository
 {
+    /** @var array<class-string,RepositoryDefinition> */
+    private static array $definitionCache = [];
+
     /** Optional named connection. */
     protected static ?string $connection = null;
 
@@ -31,6 +34,9 @@ abstract class TableRepository
 
     /** @var array<string,mixed> Default attributes merged into create payloads. */
     protected static array $defaults = [];
+
+    /** Default page size for repository pagination. */
+    protected static int $perPage = 15;
 
     /** Primary-key column used by repository identity operations. */
     protected static string $primaryKey = 'id';
@@ -85,9 +91,54 @@ abstract class TableRepository
         return DB::connection(static::resolveConnectionName($connection));
     }
 
+    /**
+     * Get the immutable metadata definition compiled for this repository class.
+     */
+    public static function definition(): RepositoryDefinition
+    {
+        $class = static::class;
+
+        if (isset(self::$definitionCache[$class])) {
+            return self::$definitionCache[$class];
+        }
+
+        $scopes = static::globalScopes();
+        $scopes['__configure_query'] = static function (QueryBuilder $query): void {
+            static::configureQuery($query);
+        };
+
+        return self::$definitionCache[$class] = new RepositoryDefinition(
+            repositoryClass: $class,
+            table: static::tableName(),
+            primaryKey: static::primaryKeyName(),
+            perPage: static::$perPage,
+            defaults: static::$defaults,
+            creatable: static::$creatable,
+            updatable: static::$updatable,
+            timestamps: static::$timestamps,
+            createdAt: static::timestampColumn(static::$createdAt, 'created_at'),
+            updatedAt: static::timestampColumn(static::$updatedAt, 'updated_at'),
+            casts: static::casts(),
+            globalScopes: $scopes,
+            relations: static::relations(),
+        );
+    }
+
+    /**
+     * Forget this class's compiled metadata definition.
+     *
+     * Normal applications should not need this. It exists for tests and for
+     * intentionally dynamic repository metadata during bootstrap.
+     */
+    public static function flushDefinition(): void
+    {
+        unset(self::$definitionCache[static::class]);
+    }
+
     /** Build a repository-aware fluent query. */
     public static function query(?string $connection = null): RepositoryQuery
     {
+        $definition = static::definition();
         $repository = static::repository($connection);
         $resolvedConnection = static::connection($connection);
 
@@ -95,7 +146,7 @@ abstract class TableRepository
             $repository,
             $repository->builder(),
             $resolvedConnection,
-            static::relations(),
+            $definition,
         );
     }
 
@@ -114,48 +165,16 @@ abstract class TableRepository
     /** Build a repository for this table definition. */
     public static function repository(?string $connection = null): QueryRepository
     {
+        $definition = static::definition();
         $repository = new TableQueryRepository(
             static::connection($connection),
-            static::tableName(),
-            static::primaryKeyName(),
+            $definition,
             DB::resultProcessor(),
-            static::$defaults,
-            static::$creatable,
-            static::$updatable,
-            static::$timestamps,
-            static::timestampColumn(static::$createdAt, 'created_at'),
-            static::timestampColumn(static::$updatedAt, 'updated_at'),
         );
 
-        $casts = static::casts();
-        if ($casts !== []) {
-            $repository->setCasts($casts);
+        if ($definition->casts !== []) {
+            $repository->setCasts($definition->casts);
         }
-
-        foreach (static::globalScopes() as $name => $scope) {
-            if (!is_callable($scope)) {
-                throw new InvalidArgumentException(sprintf(
-                    '%s global scope [%s] must be callable.',
-                    static::class,
-                    (string) $name,
-                ));
-            }
-
-            $repository->registerNamedGlobalScope(
-                is_string($name) ? $name : 'scope.' . $name,
-                $scope,
-            );
-        }
-
-        // Preserve configureQuery() as a compatibility/default-query hook, but
-        // route it through the same repository constraint pipeline so direct
-        // Repository terminals and fluent repository queries cannot diverge.
-        $repository->registerNamedGlobalScope(
-            '__configure_query',
-            static function (QueryBuilder $query): void {
-                static::configureQuery($query);
-            },
-        );
 
         return static::configureRepository($repository);
     }
@@ -163,7 +182,7 @@ abstract class TableRepository
     /** Public table metadata for relation definitions and tooling. */
     public static function table(): string
     {
-        return static::tableName();
+        return static::definition()->table;
     }
 
     /** @param array<int,mixed> $bindings */
@@ -196,6 +215,8 @@ abstract class TableRepository
     /**
      * Declarative repository casts.
      *
+     * Metadata returned by this method is compiled once per repository class.
+     *
      * @return array<string,string|callable(mixed):mixed|\Infocyph\DBLayer\Repository\Casts\AttributeCast>
      */
     protected static function casts(): array
@@ -212,7 +233,7 @@ abstract class TableRepository
         return $query;
     }
 
-    /** Override in subclasses to apply reusable repository policies. */
+    /** Override in subclasses to apply reusable runtime repository policies. */
     protected static function configureRepository(QueryRepository $repository): QueryRepository
     {
         return $repository;
@@ -227,8 +248,8 @@ abstract class TableRepository
     /**
      * Declarative named global query scopes.
      *
-     * Prefer associative names so individual scopes can be disabled per query.
-     * Numeric entries remain supported and receive generated names.
+     * Metadata returned by this method is compiled once per repository class.
+     * Scope callbacks themselves execute for every fresh query.
      *
      * @return array<array-key,callable(QueryBuilder):void>
      */
@@ -237,7 +258,13 @@ abstract class TableRepository
         return [];
     }
 
-    /** @return array<string,RelationDefinition> Declarative eager-loadable relations. */
+    /**
+     * Declarative eager-loadable relations.
+     *
+     * Metadata returned by this method is compiled once per repository class.
+     *
+     * @return array<string,RelationDefinition>
+     */
     protected static function relations(): array
     {
         return [];
