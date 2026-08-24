@@ -9,6 +9,7 @@ use Infocyph\DBLayer\Exceptions\UnwritableAttributeException;
 use Infocyph\DBLayer\Pagination\CursorPaginator;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\ResultProcessor;
+use Infocyph\DBLayer\Repository\Concerns\RepositoryOperationLifecycle;
 use InvalidArgumentException;
 
 /**
@@ -19,6 +20,8 @@ use InvalidArgumentException;
  */
 final class TableQueryRepository extends RepositoryPagination
 {
+    use RepositoryOperationLifecycle;
+
     /** @var array<string,true> */
     private array $disabledGlobalScopes = [];
 
@@ -63,10 +66,22 @@ final class TableQueryRepository extends RepositoryPagination
             return true;
         }
 
-        return parent::bulkInsert(array_map(
+        $prepared = array_map(
             fn(array $row): array => $this->prepareCreateAttributes($row),
             $rows,
-        ));
+        );
+        $context = ['rows' => $prepared, 'count' => count($prepared)];
+        $this->dispatchOperationHook('beforeBulkInsert', $context);
+
+        $inserted = parent::bulkInsert($prepared);
+        if (!$inserted) {
+            return false;
+        }
+
+        $this->dispatchOperationHook('afterBulkInsert', $context);
+        $this->scheduleAfterCommit('bulk_insert', $context);
+
+        return true;
     }
 
     /**
@@ -76,7 +91,10 @@ final class TableQueryRepository extends RepositoryPagination
     #[\Override]
     public function create(array $attributes): array
     {
-        return parent::create($this->prepareCreateAttributes($attributes));
+        $created = parent::create($this->prepareCreateAttributes($attributes));
+        $this->scheduleAfterCommit('create', ['row' => $created]);
+
+        return $created;
     }
 
     #[\Override]
@@ -96,6 +114,120 @@ final class TableQueryRepository extends RepositoryPagination
         );
     }
 
+    /** Delete all rows matching a repository-aware scope. */
+    public function deleteWhere(?callable $scope = null): int
+    {
+        $context = ['soft' => $this->softDeletes];
+        $this->dispatchOperationHook('beforeBulkDelete', $context);
+
+        $query = $this->applyMutationScope($this->builder(), $scope);
+        $affected = $this->softDeletes
+            ? $query->update([$this->softDeleteColumn => $this->freshTimestamp()])
+            : $query->delete();
+
+        $context['affected'] = $affected;
+        $this->dispatchOperationHook('afterBulkDelete', $context);
+        if ($affected > 0) {
+            $this->scheduleAfterCommit('bulk_delete', $context);
+        }
+
+        return $affected;
+    }
+
+    /** Delete one row by primary key while preserving repository lifecycle. */
+    #[\Override]
+    public function deleteById(mixed $id): int
+    {
+        $affected = parent::deleteById($id);
+        if ($affected > 0) {
+            $this->scheduleAfterCommit('delete', [
+                'id' => $id,
+                'affected' => $affected,
+                'soft' => $this->softDeletes,
+            ]);
+        }
+
+        return $affected;
+    }
+
+    /** Permanently delete rows matching a repository-aware scope. */
+    public function forceDeleteWhere(?callable $scope = null): int
+    {
+        $context = ['force' => true, 'bulk' => true];
+        $this->dispatchOperationHook('beforeForceDelete', $context);
+
+        $query = $this->applyMutationScope($this->builderWithoutSoftDeleteConstraint(), $scope);
+        $affected = $query->delete();
+        $context['affected'] = $affected;
+
+        $this->dispatchOperationHook('afterForceDelete', $context);
+        if ($affected > 0) {
+            $this->scheduleAfterCommit('force_delete', $context);
+        }
+
+        return $affected;
+    }
+
+    /** Permanently delete one row by primary key. */
+    #[\Override]
+    public function forceDeleteById(mixed $id): int
+    {
+        $context = ['id' => $id, 'force' => true, 'bulk' => false];
+        $this->dispatchOperationHook('beforeForceDelete', $context);
+
+        $affected = parent::forceDeleteById($id);
+        $context['affected'] = $affected;
+
+        $this->dispatchOperationHook('afterForceDelete', $context);
+        if ($affected > 0) {
+            $this->scheduleAfterCommit('force_delete', $context);
+        }
+
+        return $affected;
+    }
+
+    /** Restore all matching soft-deleted rows. */
+    public function restoreWhere(?callable $scope = null): int
+    {
+        if (!$this->softDeletes) {
+            return 0;
+        }
+
+        $context = ['bulk' => true];
+        $this->dispatchOperationHook('beforeRestore', $context);
+
+        $query = $this->builderWithoutSoftDeleteConstraint()
+            ->whereNotNull($this->softDeleteColumn);
+        $query = $this->applyMutationScope($query, $scope);
+        $affected = $query->update([$this->softDeleteColumn => null]);
+        $context['affected'] = $affected;
+
+        $this->dispatchOperationHook('afterRestore', $context);
+        if ($affected > 0) {
+            $this->scheduleAfterCommit('restore', $context);
+        }
+
+        return $affected;
+    }
+
+    /** Restore one soft-deleted row by primary key. */
+    #[\Override]
+    public function restoreById(mixed $id): int
+    {
+        $context = ['id' => $id, 'bulk' => false];
+        $this->dispatchOperationHook('beforeRestore', $context);
+
+        $affected = parent::restoreById($id);
+        $context['affected'] = $affected;
+
+        $this->dispatchOperationHook('afterRestore', $context);
+        if ($affected > 0) {
+            $this->scheduleAfterCommit('restore', $context);
+        }
+
+        return $affected;
+    }
+
     /** @param array<string,mixed> $values */
     #[\Override]
     public function updateById(mixed $id, array $values): int
@@ -104,7 +236,40 @@ final class TableQueryRepository extends RepositoryPagination
             return 0;
         }
 
-        return parent::updateById($id, $this->prepareUpdateAttributes($values));
+        $payload = $this->prepareUpdateAttributes($values);
+        $affected = parent::updateById($id, $payload);
+        if ($affected > 0) {
+            $this->scheduleAfterCommit('update', [
+                'id' => $id,
+                'payload' => $payload,
+                'affected' => $affected,
+            ]);
+        }
+
+        return $affected;
+    }
+
+    /** Update all rows matching a repository-aware scope. */
+    public function updateWhere(array $values, ?callable $scope = null): int
+    {
+        if ($values === []) {
+            return 0;
+        }
+
+        $payload = $this->prepareUpdateAttributes($values);
+        $context = ['payload' => $payload];
+        $this->dispatchOperationHook('beforeBulkUpdate', $context);
+
+        $query = $this->applyMutationScope($this->builder(), $scope);
+        $affected = $query->update($payload);
+        $context['affected'] = $affected;
+
+        $this->dispatchOperationHook('afterBulkUpdate', $context);
+        if ($affected > 0) {
+            $this->scheduleAfterCommit('bulk_update', $context);
+        }
+
+        return $affected;
     }
 
     /** @param array<string,mixed> $values */
@@ -119,12 +284,24 @@ final class TableQueryRepository extends RepositoryPagination
             return false;
         }
 
-        return parent::updateByIdWithVersion(
+        $payload = $this->prepareUpdateAttributes($values);
+        $updated = parent::updateByIdWithVersion(
             $id,
-            $this->prepareUpdateAttributes($values),
+            $payload,
             $expectedVersion,
             $versionColumn,
         );
+
+        if ($updated) {
+            $this->scheduleAfterCommit('update', [
+                'id' => $id,
+                'payload' => $payload,
+                'optimistic' => true,
+                'version_column' => $versionColumn,
+            ]);
+        }
+
+        return $updated;
     }
 
     /**
@@ -200,12 +377,27 @@ final class TableQueryRepository extends RepositoryPagination
             array_keys($prepared[0]),
             $uniqueBy,
         );
+        $context = [
+            'rows' => $prepared,
+            'unique_by' => $uniqueBy,
+            'update' => $updateColumns,
+        ];
+        $this->dispatchOperationHook('beforeUpsert', $context);
 
-        return parent::upsert(
+        $upserted = parent::upsert(
             $many ? $prepared : $prepared[0],
             $uniqueBy,
             $updateColumns,
         );
+
+        if (!$upserted) {
+            return false;
+        }
+
+        $this->dispatchOperationHook('afterUpsert', $context);
+        $this->scheduleAfterCommit('upsert', $context);
+
+        return true;
     }
 
     #[\Override]
@@ -240,6 +432,31 @@ final class TableQueryRepository extends RepositoryPagination
     protected function table(): string
     {
         return $this->definition->table;
+    }
+
+    private function applyMutationScope(QueryBuilder $query, ?callable $scope): QueryBuilder
+    {
+        if ($scope !== null) {
+            $scope($query);
+        }
+
+        return $query;
+    }
+
+    private function builderWithoutSoftDeleteConstraint(): QueryBuilder
+    {
+        $withTrashed = $this->withTrashed;
+        $onlyTrashed = $this->onlyTrashed;
+
+        $this->withTrashed = true;
+        $this->onlyTrashed = false;
+
+        try {
+            return $this->builder();
+        } finally {
+            $this->withTrashed = $withTrashed;
+            $this->onlyTrashed = $onlyTrashed;
+        }
     }
 
     /**
