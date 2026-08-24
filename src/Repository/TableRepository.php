@@ -20,6 +20,12 @@ use InvalidArgumentException;
  */
 abstract class TableRepository
 {
+    private const array QUERY_SCOPED_STATIC_METHODS = [
+        'onlyTrashed',
+        'withoutTrashed',
+        'withTrashed',
+    ];
+
     /** @var array<class-string,RepositoryDefinition> */
     private static array $definitionCache = [];
 
@@ -57,14 +63,18 @@ abstract class TableRepository
     protected static string $updatedAt = 'updated_at';
 
     /**
-     * Forward unknown static calls by priority:
-     * 1) Repository API
-     * 2) Repository-aware QueryBuilder API
+     * Forward unknown static calls. Query-local repository modes that collide
+     * with Repository methods are intentionally routed to RepositoryQuery first;
+     * all remaining calls retain repository-before-builder priority.
      *
      * @param array<int,mixed> $arguments
      */
     public static function __callStatic(string $method, array $arguments): mixed
     {
+        if (in_array($method, self::QUERY_SCOPED_STATIC_METHODS, true)) {
+            return static::query()->$method(...$arguments);
+        }
+
         $repository = static::repository();
         if (method_exists($repository, $method)) {
             return $repository->$method(...$arguments);
