@@ -271,6 +271,56 @@ final readonly class RepositoryDefinition
             $this->assertIdentifier((string) $relation->pivotRelatedKey, 'pivot related key');
         }
 
+        if (in_array($relation->type, [
+            RelationDefinition::HAS_ONE_THROUGH,
+            RelationDefinition::HAS_MANY_THROUGH,
+        ], true)) {
+            if ($relation->through === null || !is_a($relation->through, TableRepository::class, true)) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s through relation [%s] must target an intermediate TableRepository class.',
+                    $this->repositoryClass,
+                    $name,
+                ));
+            }
+
+            $this->assertIdentifier((string) $relation->throughParentKey, 'through parent key');
+            $this->assertIdentifier((string) $relation->throughKey, 'through local key');
+        }
+
+        if ($relation->oneOfManyAggregate !== null) {
+            if (!in_array($relation->type, [
+                RelationDefinition::HAS_ONE,
+                RelationDefinition::HAS_ONE_THROUGH,
+                RelationDefinition::MORPH_ONE,
+            ], true)) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s relation [%s] uses one-of-many metadata on an unsupported relation type.',
+                    $this->repositoryClass,
+                    $name,
+                ));
+            }
+
+            if (!in_array($relation->oneOfManyAggregate, ['max', 'min'], true)) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s relation [%s] has an invalid one-of-many aggregate.',
+                    $this->repositoryClass,
+                    $name,
+                ));
+            }
+
+            if ($relation->oneOfManyColumn !== null) {
+                $this->assertIdentifier($relation->oneOfManyColumn, 'one-of-many column');
+            }
+
+            if ($relation->oneOfManyScope !== null && !is_callable($relation->oneOfManyScope)) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s relation [%s] has an invalid one-of-many scope.',
+                    $this->repositoryClass,
+                    $name,
+                ));
+            }
+        }
+
         foreach ($relation->pivotColumns as $column) {
             $this->assertIdentifier($column, 'pivot column');
         }
