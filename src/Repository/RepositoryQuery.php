@@ -18,8 +18,8 @@ use InvalidArgumentException;
  * Repository-aware fluent query wrapper.
  *
  * Fluent QueryBuilder calls are recorded and replayed through Repository
- * terminal operations. Explicit eager relations are projected after the base
- * repository read through the existing bounded RelationLoader.
+ * terminal operations. Explicit eager relations preserve both parent and
+ * related repository policies without introducing lazy relation behavior.
  */
 final class RepositoryQuery
 {
@@ -27,6 +27,11 @@ final class RepositoryQuery
      * @var list<array{method:string,arguments:array<int,mixed>}>
      */
     private array $operations = [];
+
+    /**
+     * @var list<callable(QueryBuilder):void>
+     */
+    private array $queryScopes = [];
 
     /**
      * @var array<string,null|callable(QueryBuilder):void>
@@ -70,6 +75,20 @@ final class RepositoryQuery
         }
 
         return $result;
+    }
+
+    /**
+     * Apply an explicit QueryBuilder scope while retaining repository terminal
+     * processing and raw-builder parity.
+     *
+     * @param callable(QueryBuilder):void $scope
+     */
+    public function apply(callable $scope): self
+    {
+        $scope($this->builder);
+        $this->queryScopes[] = $scope;
+
+        return $this;
     }
 
     public function count(): int
@@ -242,11 +261,7 @@ final class RepositoryQuery
      */
     private function loadRelations(array $rows): array
     {
-        if ($rows === []) {
-            return $rows;
-        }
-
-        $loader = new RelationLoader($this->connection);
+        $loader = new RepositoryRelationLoader($this->connection);
 
         foreach ($this->requestedRelations as $name => $constraint) {
             $definition = $this->relations[$name] ?? null;
@@ -257,58 +272,7 @@ final class RepositoryQuery
                 ));
             }
 
-            $related = $definition->related;
-            if (!is_a($related, TableRepository::class, true)) {
-                throw new InvalidArgumentException(sprintf(
-                    'Related repository [%s] must extend %s.',
-                    $related,
-                    TableRepository::class,
-                ));
-            }
-
-            $scope = $this->relationScope($definition, $constraint);
-            $table = $related::table();
-
-            $rows = match ($definition->type) {
-                RelationDefinition::BELONGS_TO,
-                RelationDefinition::HAS_ONE => $loader->one(
-                    $rows,
-                    $definition->parentKey,
-                    $table,
-                    $definition->relatedKey,
-                    $name,
-                    $definition->columns,
-                    $scope,
-                ),
-                RelationDefinition::HAS_MANY => $loader->many(
-                    $rows,
-                    $definition->parentKey,
-                    $table,
-                    $definition->relatedKey,
-                    $name,
-                    $definition->columns,
-                    $scope,
-                ),
-                RelationDefinition::BELONGS_TO_MANY => $loader->manyToMany(
-                    $rows,
-                    $definition->parentKey,
-                    $definition->pivotTable
-                        ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot table.'),
-                    $definition->pivotParentKey
-                        ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot parent key.'),
-                    $definition->pivotRelatedKey
-                        ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.'),
-                    $table,
-                    $definition->relatedKey,
-                    $name,
-                    $definition->columns,
-                    $scope,
-                ),
-                default => throw new InvalidArgumentException(sprintf(
-                    'Unsupported relation type [%s].',
-                    $definition->type,
-                )),
-            };
+            $rows = $loader->load($rows, $name, $definition, $constraint);
         }
 
         return $rows;
@@ -316,7 +280,7 @@ final class RepositoryQuery
 
     /**
      * Rebuild the raw builder after repository-scope state changes and replay
-     * already-recorded fluent operations in their original order.
+     * already-recorded fluent operations and explicit query scopes.
      */
     private function rebuildBuilder(): void
     {
@@ -325,28 +289,10 @@ final class RepositoryQuery
         foreach ($this->operations as $operation) {
             $this->builder->{$operation['method']}(...$operation['arguments']);
         }
-    }
 
-    /**
-     * @param null|callable(QueryBuilder):void $constraint
-     * @return null|callable(QueryBuilder):void
-     */
-    private function relationScope(RelationDefinition $definition, ?callable $constraint): ?callable
-    {
-        if ($definition->scope === null) {
-            return $constraint;
+        foreach ($this->queryScopes as $scope) {
+            $scope($this->builder);
         }
-
-        if ($constraint === null) {
-            return $definition->scope;
-        }
-
-        $base = $definition->scope;
-
-        return static function (QueryBuilder $query) use ($base, $constraint): void {
-            $base($query);
-            $constraint($query);
-        };
     }
 
     /**
@@ -355,10 +301,15 @@ final class RepositoryQuery
     private function scope(): callable
     {
         $operations = $this->operations;
+        $scopes = $this->queryScopes;
 
-        return static function (QueryBuilder $query) use ($operations): void {
+        return static function (QueryBuilder $query) use ($operations, $scopes): void {
             foreach ($operations as $operation) {
                 $query->{$operation['method']}(...$operation['arguments']);
+            }
+
+            foreach ($scopes as $scope) {
+                $scope($query);
             }
         };
     }
