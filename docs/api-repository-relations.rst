@@ -124,6 +124,33 @@ The candidate scope is applied before winner selection. DBLayer uses the related
 repository primary key as a deterministic tie breaker when the selected column
 has equal values.
 
+Advanced Multi-Column One Of Many
+---------------------------------
+
+``ofMany()`` also accepts an ordered associative criteria map. Criteria are
+compared lexicographically in declaration order:
+
+.. code-block:: php
+
+   'current_price' => $prices->ofMany(
+       [
+           'published_at' => 'max',
+           'id' => 'max',
+       ],
+       static function (QueryBuilder $query): void {
+           $query->where('published_at', '<', $now);
+       },
+   );
+
+The example first chooses the maximum ``published_at`` candidate and then the
+maximum ``id`` among rows tied on that timestamp. Each criterion may use
+``max`` or ``min``. If the related primary key is not explicitly present in the
+criteria, DBLayer appends it internally using the final criterion direction so
+the winner remains deterministic.
+
+The candidate-selection scope is evaluated before the criteria. This is the
+explicit mechanism for changing the set of rows eligible to become the winner.
+
 One-of-many relations are valid for normal ``hasMany`` relations, polymorphic
 ``morphMany`` relations, and through relations.
 
@@ -142,8 +169,35 @@ One-of-many relations are valid for normal ``hasMany`` relations, polymorphic
        secondKey: 'user_id',
    )->latestOfMany('created_at');
 
-Winner-First Filtering
-----------------------
+Candidate Scope vs Winner Constraint
+------------------------------------
+
+One-of-many deliberately distinguishes candidate selection from later relation
+constraints:
+
+- ``ofMany(..., scope)`` changes which rows may become the winner.
+- a constraint passed to ``with()``, ``withCount()`` / other aggregate helpers,
+  ``whereHas()``, or ``whereRelation()`` is evaluated against the selected
+  winner and cannot promote an older/non-winning row.
+
+.. code-block:: php
+
+   'latest_order' => $orders->latestOfMany('created_at');
+
+   $users = User::query()
+       ->with([
+           'latest_order' => static function (QueryBuilder $query): void {
+               $query->where('status', '=', 'paid');
+           },
+       ])
+       ->get();
+
+If the latest order is not ``paid``, ``latest_order`` is ``null`` for that
+projection even when an older paid order exists. To choose the latest *paid*
+order instead, put the ``paid`` predicate in the ``ofMany()`` candidate scope.
+
+Winner-First Filtering and Aggregates
+-------------------------------------
 
 Existence constraints on one-of-many relations are evaluated against the
 selected winner, not against every historical related row.
@@ -155,8 +209,7 @@ selected winner, not against every historical related row.
        ->get();
 
 If an older order is ``paid`` but the selected latest order is not, that user
-does not match. This is intentionally different from applying the predicate to
-all candidate rows before winner selection.
+does not match.
 
 One-of-many aggregate projections likewise operate on the selected row only:
 
@@ -168,7 +221,8 @@ One-of-many aggregate projections likewise operate on the selected row only:
        ->get();
 
 The count is therefore ``0`` or ``1`` and other aggregate projections use the
-selected row value.
+selected row value. A constrained aggregate filters the selected winner; it does
+not select a replacement historical row.
 
 Narrow Projections
 ------------------
@@ -182,9 +236,10 @@ One-of-many and through relations may narrow final related columns with
        ->latestOfMany('created_at')
        ->select(['status', 'amount']);
 
-DBLayer automatically selects relation keys, ordering columns, and primary-key
-tie breakers internally when required. Those internal columns are removed from
-the final explicitly narrowed relation payload unless the caller selected them.
+DBLayer automatically selects relation keys, every one-of-many ordering column,
+and the primary-key tie breaker internally when required. Those internal columns
+are removed from the final explicitly narrowed relation payload unless the
+caller selected them.
 
 Performance Boundary
 --------------------
