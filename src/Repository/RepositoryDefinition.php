@@ -48,6 +48,7 @@ final readonly class RepositoryDefinition
         public string $table,
         public string $primaryKey,
         public int $perPage,
+        public int $maxRelationDepth = 3,
         array $defaults = [],
         array $creatable = [],
         array $updatable = [],
@@ -66,6 +67,13 @@ final readonly class RepositoryDefinition
         if ($perPage < 1) {
             throw new InvalidArgumentException(sprintf(
                 '%s must define $perPage as a positive integer.',
+                $repositoryClass,
+            ));
+        }
+
+        if ($maxRelationDepth < 1) {
+            throw new InvalidArgumentException(sprintf(
+                '%s must define $maxRelationDepth as a positive integer.',
                 $repositoryClass,
             ));
         }
@@ -215,9 +223,77 @@ final readonly class RepositoryDefinition
                 ));
             }
 
+            $this->validateRelation($name, $relation);
             $normalized[$name] = $relation;
         }
 
         return $normalized;
+    }
+
+    private function validateRelation(string $name, RelationDefinition $relation): void
+    {
+        $this->assertRelationColumns($name, $relation);
+
+        if ($relation->type === RelationDefinition::MORPH_TO) {
+            if ($relation->related !== null || $relation->morphMap === []) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s morph-to relation [%s] requires only an explicit morph map.',
+                    $this->repositoryClass,
+                    $name,
+                ));
+            }
+
+            foreach ($relation->morphMap as $alias => $related) {
+                if (trim($alias) === '' || !is_a($related, TableRepository::class, true)) {
+                    throw new InvalidArgumentException(sprintf(
+                        '%s morph-to relation [%s] contains an invalid morph-map entry.',
+                        $this->repositoryClass,
+                        $name,
+                    ));
+                }
+            }
+
+            return;
+        }
+
+        if ($relation->related === null || !is_a($relation->related, TableRepository::class, true)) {
+            throw new InvalidArgumentException(sprintf(
+                '%s relation [%s] must target a TableRepository class.',
+                $this->repositoryClass,
+                $name,
+            ));
+        }
+
+        if ($relation->pivotTable !== null) {
+            $this->assertIdentifier($relation->pivotTable, 'pivot table');
+            $this->assertIdentifier((string) $relation->pivotParentKey, 'pivot parent key');
+            $this->assertIdentifier((string) $relation->pivotRelatedKey, 'pivot related key');
+        }
+
+        foreach ($relation->pivotColumns as $column) {
+            $this->assertIdentifier($column, 'pivot column');
+        }
+    }
+
+    private function assertRelationColumns(string $name, RelationDefinition $relation): void
+    {
+        $this->assertIdentifier($relation->parentKey, sprintf('relation [%s] parent key', $name));
+        $this->assertIdentifier($relation->relatedKey, sprintf('relation [%s] related key', $name));
+
+        if ($relation->morphTypeColumn !== null) {
+            $this->assertIdentifier($relation->morphTypeColumn, sprintf('relation [%s] morph type column', $name));
+        }
+
+        if ($relation->morphIdColumn !== null) {
+            $this->assertIdentifier($relation->morphIdColumn, sprintf('relation [%s] morph id column', $name));
+        }
+
+        if ($relation->morphAlias !== null && trim($relation->morphAlias) === '') {
+            throw new InvalidArgumentException(sprintf(
+                '%s relation [%s] morph alias must not be empty.',
+                $this->repositoryClass,
+                $name,
+            ));
+        }
     }
 }
