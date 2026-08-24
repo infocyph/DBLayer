@@ -168,16 +168,30 @@ abstract class TableRepository
             $repository->setCasts($casts);
         }
 
-        foreach (static::globalScopes() as $scope) {
-            $repository->addGlobalScope($scope);
+        foreach (static::globalScopes() as $name => $scope) {
+            if (!is_callable($scope)) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s global scope [%s] must be callable.',
+                    static::class,
+                    (string) $name,
+                ));
+            }
+
+            $repository->addNamedGlobalScope(
+                is_string($name) ? $name : 'scope.' . $name,
+                $scope,
+            );
         }
 
-        // Keep the existing customization hook, but apply it as a universal
-        // repository scope so direct Repository terminals and fluent queries
-        // cannot diverge.
-        $repository->addGlobalScope(static function (QueryBuilder $query): void {
-            static::configureQuery($query);
-        });
+        // Preserve configureQuery() as a compatibility/default-query hook, but
+        // route it through the same repository constraint pipeline so direct
+        // Repository terminals and fluent repository queries cannot diverge.
+        $repository->addNamedGlobalScope(
+            '__configure_query',
+            static function (QueryBuilder $query): void {
+                static::configureQuery($query);
+            },
+        );
 
         return static::configureRepository($repository);
     }
@@ -240,8 +254,8 @@ abstract class TableRepository
     }
 
     /**
-     * Existing query-default hook. Defaults declared here are now applied as a
-     * repository scope so every repository read path observes them.
+     * Existing query-default hook. Defaults declared here are applied through
+     * the repository constraint pipeline for every repository read path.
      */
     protected static function configureQuery(QueryBuilder $query): QueryBuilder
     {
@@ -265,7 +279,10 @@ abstract class TableRepository
     }
 
     /**
-     * Declarative global query scopes.
+     * Declarative named global query scopes.
+     *
+     * Prefer associative names so individual scopes can be disabled per query.
+     * Numeric entries remain supported and receive generated names.
      *
      * @return array<array-key,callable(QueryBuilder):void>
      */
