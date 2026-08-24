@@ -28,6 +28,23 @@ final class RepositoryEvolutionUser extends TableRepository
     }
 }
 
+final class RepositoryEvolutionScopedUser extends TableRepository
+{
+    protected static string $table = 'repository_evolution_users';
+
+    protected static string $primaryKey = 'user_key';
+
+    /** @return array<string,callable(QueryBuilder):void> */
+    protected static function globalScopes(): array
+    {
+        return [
+            'active' => static function (QueryBuilder $query): void {
+                $query->where('active', '=', 1);
+            },
+        ];
+    }
+}
+
 final class RepositoryEvolutionPost extends TableRepository
 {
     protected static string $table = 'repository_evolution_posts';
@@ -153,6 +170,38 @@ it('keeps raw builder access explicit', function (): void {
         ->get();
 
     expect(array_column($rawRows, 'name'))->toBe(['Active One', 'Active Two']);
+});
+
+it('removes named global scopes only for the current repository query', function (): void {
+    $scoped = RepositoryEvolutionScopedUser::query()
+        ->orderBy('user_key')
+        ->get()
+        ->toArray();
+
+    $unscoped = RepositoryEvolutionScopedUser::query()
+        ->orderBy('user_key')
+        ->withoutGlobalScope('active')
+        ->get()
+        ->toArray();
+
+    $freshScoped = RepositoryEvolutionScopedUser::query()
+        ->orderBy('user_key')
+        ->get()
+        ->toArray();
+
+    expect(array_column($scoped, 'name'))->toBe(['Active One', 'Active Two'])
+        ->and(array_column($unscoped, 'name'))->toBe(['Active One', 'Inactive', 'Active Two'])
+        ->and(array_column($freshScoped, 'name'))->toBe(['Active One', 'Active Two']);
+});
+
+it('rebuilds the raw builder after named global scope removal', function (): void {
+    $count = RepositoryEvolutionScopedUser::query()
+        ->where('user_key', '>', 0)
+        ->withoutGlobalScope('active')
+        ->raw()
+        ->count();
+
+    expect($count)->toBe(3);
 });
 
 it('applies repository defaults and custom timestamps on create', function (): void {
