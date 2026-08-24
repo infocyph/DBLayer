@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Repository\Casts\AttributeCast;
 use Infocyph\DBLayer\Repository\TableRepository;
+use stdClass;
 
 enum RepositoryCastingStatus: string
 {
@@ -44,6 +45,9 @@ final class RepositoryCastingRecord extends TableRepository
         'status',
         'token',
         'published_at',
+        'amount',
+        'payload',
+        'scheduled_date',
     ];
 
     protected static function casts(): array
@@ -52,6 +56,9 @@ final class RepositoryCastingRecord extends TableRepository
             'status' => RepositoryCastingStatus::class,
             'token' => new RepositoryPrefixCast(),
             'published_at' => 'immutable_datetime',
+            'amount' => 'decimal:2',
+            'payload' => 'object',
+            'scheduled_date' => 'immutable_date',
         ];
     }
 }
@@ -69,12 +76,16 @@ beforeEach(function (): void {
             id integer primary key autoincrement,
             status text not null,
             token text not null,
-            published_at text null
+            published_at text null,
+            amount text null,
+            payload text null,
+            scheduled_date text null
         )',
     );
 });
 
 afterEach(function (): void {
+    RepositoryCastingRecord::flushDefinition();
     DB::purge();
 });
 
@@ -115,4 +126,47 @@ it('hydrates immutable datetime values while keeping repository writes driver-fo
 
     expect($record['published_at'])->toBeInstanceOf(DateTimeImmutable::class)
         ->and($record['published_at']->format('Y-m-d H:i:s'))->toBe('2026-08-24 12:30:00');
+});
+
+it('compiles fixed-scale decimal casts once in repository metadata', function (): void {
+    $record = RepositoryCastingRecord::create([
+        'status' => RepositoryCastingStatus::Draft,
+        'token' => 'secret',
+        'amount' => '12345678901234567890.126',
+    ]);
+
+    $raw = DB::table('repository_casting_records')->first();
+
+    expect($raw['amount'])->toBe('12345678901234567890.13')
+        ->and($record['amount'])->toBe('12345678901234567890.13');
+});
+
+it('casts json payloads to objects and persists object values as json', function (): void {
+    $payload = (object) ['name' => 'DBLayer', 'version' => 6];
+
+    $record = RepositoryCastingRecord::create([
+        'status' => RepositoryCastingStatus::Draft,
+        'token' => 'secret',
+        'payload' => $payload,
+    ]);
+
+    $raw = DB::table('repository_casting_records')->first();
+
+    expect($raw['payload'])->toBe('{"name":"DBLayer","version":6}')
+        ->and($record['payload'])->toBeInstanceOf(stdClass::class)
+        ->and($record['payload']->name)->toBe('DBLayer');
+});
+
+it('supports immutable date aliases with date-only persistence', function (): void {
+    $record = RepositoryCastingRecord::create([
+        'status' => RepositoryCastingStatus::Draft,
+        'token' => 'secret',
+        'scheduled_date' => new DateTimeImmutable('2026-08-24 18:45:11'),
+    ]);
+
+    $raw = DB::table('repository_casting_records')->first();
+
+    expect($raw['scheduled_date'])->toBe('2026-08-24')
+        ->and($record['scheduled_date'])->toBeInstanceOf(DateTimeImmutable::class)
+        ->and($record['scheduled_date']->format('Y-m-d H:i:s'))->toBe('2026-08-24 00:00:00');
 });
