@@ -18,6 +18,12 @@ use Infocyph\DBLayer\Query\ResultProcessor;
  */
 final class TableQueryRepository extends Repository
 {
+    /** @var array<string,callable(QueryBuilder):void> */
+    private array $namedGlobalScopes = [];
+
+    /** @var array<string,true> */
+    private array $disabledGlobalScopes = [];
+
     /**
      * @param array<string,mixed> $defaults
      * @param list<string> $creatable
@@ -40,6 +46,19 @@ final class TableQueryRepository extends Repository
             $connection->getExecutorInstance(),
             $results,
         );
+    }
+
+    /**
+     * Add or replace one named global scope.
+     *
+     * @param callable(QueryBuilder):void $scope
+     */
+    public function addNamedGlobalScope(string $name, callable $scope): static
+    {
+        $this->namedGlobalScopes[$name] = $scope;
+        unset($this->disabledGlobalScopes[$name]);
+
+        return $this;
     }
 
     /**
@@ -66,6 +85,34 @@ final class TableQueryRepository extends Repository
     public function create(array $attributes): array
     {
         return parent::create($this->prepareCreateAttributes($attributes));
+    }
+
+    /**
+     * Disable one named global scope for this repository instance.
+     */
+    public function withoutGlobalScope(string $name): static
+    {
+        if (array_key_exists($name, $this->namedGlobalScopes)) {
+            $this->disabledGlobalScopes[$name] = true;
+        }
+
+        return $this;
+    }
+
+    /**
+     * Disable selected named scopes, or every named scope when names are null.
+     *
+     * @param list<string>|null $names
+     */
+    public function withoutGlobalScopes(?array $names = null): static
+    {
+        $names ??= array_keys($this->namedGlobalScopes);
+
+        foreach ($names as $name) {
+            $this->withoutGlobalScope($name);
+        }
+
+        return $this;
     }
 
     /**
@@ -176,6 +223,22 @@ final class TableQueryRepository extends Repository
             $uniqueBy,
             $updateColumns,
         );
+    }
+
+    #[\Override]
+    protected function applyRepositoryConstraints(QueryBuilder $query): QueryBuilder
+    {
+        $query = parent::applyRepositoryConstraints($query);
+
+        foreach ($this->namedGlobalScopes as $name => $scope) {
+            if (isset($this->disabledGlobalScopes[$name])) {
+                continue;
+            }
+
+            $scope($query);
+        }
+
+        return $query;
     }
 
     #[\Override]
