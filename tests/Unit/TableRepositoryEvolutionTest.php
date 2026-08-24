@@ -194,6 +194,15 @@ it('removes named global scopes only for the current repository query', function
         ->and(array_column($freshScoped, 'name'))->toBe(['Active One', 'Active Two']);
 });
 
+it('routes static named scope removal to the repository query wrapper', function (): void {
+    $rows = RepositoryEvolutionScopedUser::withoutGlobalScope('active')
+        ->orderBy('user_key')
+        ->get()
+        ->toArray();
+
+    expect(array_column($rows, 'name'))->toBe(['Active One', 'Inactive', 'Active Two']);
+});
+
 it('rebuilds the raw builder after named global scope removal', function (): void {
     $count = RepositoryEvolutionScopedUser::query()
         ->where('user_key', '>', 0)
@@ -278,4 +287,18 @@ it('supports constrained eager relation loading', function (): void {
         ->first();
 
     expect(array_column($parent['children'], 'name'))->toBe(['A']);
+});
+
+it('keeps relation projections correct when base columns are narrowed', function (): void {
+    DB::table('repository_evolution_parents')->insert(['name' => 'One']);
+    DB::table('repository_evolution_children')->insert([
+        ['parent_id' => 1, 'name' => 'A', 'active' => 1],
+    ]);
+
+    $parent = RepositoryEvolutionParent::query()
+        ->with('children')
+        ->first(['name']);
+
+    expect($parent['name'])->toBe('One')
+        ->and(array_column($parent['children'], 'name'))->toBe(['A']);
 });
