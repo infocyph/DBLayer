@@ -48,7 +48,13 @@ final class RepositoryThroughRelation
             return $parents;
         }
 
-        [$relatedRows, $internalColumns] = $this->relatedRows($throughRows, $throughKey, $definition, $constraint);
+        $oneOfMany = $definition->oneOfManyAggregate !== null;
+        [$relatedRows, $internalColumns] = $this->relatedRows(
+            $throughRows,
+            $throughKey,
+            $definition,
+            $oneOfMany ? null : $constraint,
+        );
         $parentByThrough = [];
 
         foreach ($throughRows as $throughRow) {
@@ -60,7 +66,11 @@ final class RepositoryThroughRelation
             $parentByThrough[$this->key($throughValue)] = $this->key($parentValue);
         }
 
+        $related = $this->requireRelated($definition);
+        $relatedPrimaryKey = $related::definition()->primaryKey;
         $matches = [];
+        $winnerIds = [];
+
         foreach ($relatedRows as $relatedRow) {
             $throughIdentity = $this->key($relatedRow[$definition->relatedKey] ?? null);
             $parentIdentity = $parentByThrough[$throughIdentity] ?? null;
@@ -71,13 +81,36 @@ final class RepositoryThroughRelation
             $projected = $this->withoutInternalColumns($relatedRow, $internalColumns);
             if ($this->isMany($definition)) {
                 $matches[$parentIdentity][] = $projected;
-            } else {
-                $matches[$parentIdentity] ??= $projected;
+                continue;
+            }
+
+            if (isset($matches[$parentIdentity])) {
+                continue;
+            }
+
+            $matches[$parentIdentity] = $projected;
+            if ($oneOfMany && array_key_exists($relatedPrimaryKey, $relatedRow)) {
+                $winnerIds[$parentIdentity] = $relatedRow[$relatedPrimaryKey];
             }
         }
 
+        $allowed = $oneOfMany
+            ? $this->allowedWinnerIds($related, $relatedPrimaryKey, $winnerIds, $constraint)
+            : [];
+
         foreach ($parents as &$parent) {
             $parentIdentity = $this->key($parent[$definition->parentKey] ?? null);
+
+            if ($oneOfMany) {
+                $winnerId = $winnerIds[$parentIdentity] ?? null;
+                $parent[$as] = $winnerId !== null
+                    && isset($allowed[$this->key($winnerId)])
+                    && isset($matches[$parentIdentity])
+                    ? $matches[$parentIdentity]
+                    : null;
+                continue;
+            }
+
             $parent[$as] = $matches[$parentIdentity]
                 ?? ($this->isMany($definition) ? [] : null);
         }
@@ -137,6 +170,50 @@ final class RepositoryThroughRelation
         }
 
         return $values;
+    }
+
+    /**
+     * @param class-string<TableRepository> $related
+     * @param array<string,mixed> $winnerIds
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,true>
+     */
+    private function allowedWinnerIds(
+        string $related,
+        string $primaryKey,
+        array $winnerIds,
+        ?callable $constraint,
+    ): array {
+        $allowed = [];
+        $ids = array_values($winnerIds);
+
+        foreach ($ids as $id) {
+            $allowed[$this->key($id)] = true;
+        }
+
+        if ($constraint === null || $ids === []) {
+            return $allowed;
+        }
+
+        $allowed = [];
+        $connection = $related::connection();
+        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+
+        foreach (array_chunk($ids, $batchSize) as $chunk) {
+            $query = $related::query()->apply(
+                static fn(QueryBuilder $builder): mixed => $builder->whereIn($primaryKey, $chunk),
+            );
+            $query->apply($constraint);
+
+            foreach ($query->raw()->select($primaryKey)->cursor() as $row) {
+                if (!is_array($row) || !array_key_exists($primaryKey, $row)) {
+                    continue;
+                }
+                $allowed[$this->key($row[$primaryKey])] = true;
+            }
+        }
+
+        return $allowed;
     }
 
     /**
