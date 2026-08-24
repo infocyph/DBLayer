@@ -41,7 +41,7 @@ final class RepositoryThroughRelation
         [$throughRows, $throughParentKey, $throughKey] = $this->throughRows($parents, $definition);
         if ($throughRows === []) {
             foreach ($parents as &$parent) {
-                $parent[$as] = $definition->type === RelationDefinition::HAS_MANY_THROUGH ? [] : null;
+                $parent[$as] = $this->isMany($definition) ? [] : null;
             }
             unset($parent);
 
@@ -68,7 +68,7 @@ final class RepositoryThroughRelation
                 continue;
             }
 
-            if ($definition->type === RelationDefinition::HAS_MANY_THROUGH) {
+            if ($this->isMany($definition)) {
                 $matches[$parentIdentity][] = $relatedRow;
             } else {
                 $matches[$parentIdentity] ??= $relatedRow;
@@ -78,7 +78,7 @@ final class RepositoryThroughRelation
         foreach ($parents as &$parent) {
             $parentIdentity = $this->key($parent[$definition->parentKey] ?? null);
             $parent[$as] = $matches[$parentIdentity]
-                ?? ($definition->type === RelationDefinition::HAS_MANY_THROUGH ? [] : null);
+                ?? ($this->isMany($definition) ? [] : null);
         }
         unset($parent);
 
@@ -345,6 +345,11 @@ final class RepositoryThroughRelation
     {
         return $definition->related
             ?? throw new InvalidArgumentException('Through relation requires a related repository.');
+    }
+
+    private function isMany(RelationDefinition $definition): bool
+    {
+        return $definition->type === RelationDefinition::HAS_MANY;
     }
 
     private function key(mixed $value): string
