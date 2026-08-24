@@ -17,28 +17,13 @@ use Infocyph\DBLayer\Query\ResultProcessor;
  */
 final class TableQueryRepository extends RepositoryPagination
 {
-    /** @var array<string,callable(QueryBuilder):void> */
-    private array $namedGlobalScopes = [];
-
     /** @var array<string,true> */
     private array $disabledGlobalScopes = [];
 
-    /**
-     * @param array<string,mixed> $defaults
-     * @param list<string> $creatable
-     * @param list<string> $updatable
-     */
     public function __construct(
         Connection $connection,
-        private readonly string $tableName,
-        private readonly string $primaryKeyName,
+        private readonly RepositoryDefinition $definition,
         ResultProcessor $results,
-        private readonly array $defaults = [],
-        private readonly array $creatable = [],
-        private readonly array $updatable = [],
-        private readonly bool $timestamps = false,
-        private readonly string $createdAt = 'created_at',
-        private readonly string $updatedAt = 'updated_at',
     ) {
         parent::__construct(
             $connection,
@@ -48,27 +33,11 @@ final class TableQueryRepository extends RepositoryPagination
     }
 
     /**
-     * Register or replace one named global scope.
-     *
-     * Internal repository-definition API; public query ergonomics live on
-     * RepositoryQuery to avoid TableRepository static-dispatch collisions.
-     *
-     * @param callable(QueryBuilder):void $scope
-     */
-    public function registerNamedGlobalScope(string $name, callable $scope): static
-    {
-        $this->namedGlobalScopes[$name] = $scope;
-        unset($this->disabledGlobalScopes[$name]);
-
-        return $this;
-    }
-
-    /**
      * Disable one named global scope for this repository instance.
      */
     public function disableNamedGlobalScope(string $name): static
     {
-        if (array_key_exists($name, $this->namedGlobalScopes)) {
+        if (array_key_exists($name, $this->definition->globalScopes)) {
             $this->disabledGlobalScopes[$name] = true;
         }
 
@@ -82,7 +51,7 @@ final class TableQueryRepository extends RepositoryPagination
      */
     public function disableNamedGlobalScopes(?array $names = null): static
     {
-        $names ??= array_keys($this->namedGlobalScopes);
+        $names ??= array_keys($this->definition->globalScopes);
 
         foreach ($names as $name) {
             $this->disableNamedGlobalScope($name);
@@ -174,10 +143,11 @@ final class TableQueryRepository extends RepositoryPagination
             return $existing;
         }
 
-        if (array_key_exists($this->primaryKeyName, $existing)) {
-            $this->updateById($existing[$this->primaryKeyName], $values);
+        if (array_key_exists($this->definition->primaryKey, $existing)) {
+            $id = $existing[$this->definition->primaryKey];
+            $this->updateById($id, $values);
 
-            return $this->find($existing[$this->primaryKeyName]) ?? $existing;
+            return $this->find($id) ?? $existing;
         }
 
         return parent::updateOrCreate(
@@ -232,7 +202,7 @@ final class TableQueryRepository extends RepositoryPagination
     {
         $query = parent::applyRepositoryConstraints($query);
 
-        foreach ($this->namedGlobalScopes as $name => $scope) {
+        foreach ($this->definition->globalScopes as $name => $scope) {
             if (isset($this->disabledGlobalScopes[$name])) {
                 continue;
             }
@@ -244,15 +214,21 @@ final class TableQueryRepository extends RepositoryPagination
     }
 
     #[\Override]
+    protected function defaultPerPage(): int
+    {
+        return $this->definition->perPage;
+    }
+
+    #[\Override]
     protected function primaryKey(): string
     {
-        return $this->primaryKeyName;
+        return $this->definition->primaryKey;
     }
 
     #[\Override]
     protected function table(): string
     {
-        return $this->tableName;
+        return $this->definition->table;
     }
 
     /**
@@ -261,17 +237,17 @@ final class TableQueryRepository extends RepositoryPagination
      */
     private function prepareCreateAttributes(array $attributes): array
     {
-        $this->assertAllowedAttributes($attributes, $this->creatable, true);
+        $this->assertAllowedAttributes($attributes, $this->definition->creatable, true);
 
-        $payload = array_replace($this->defaults, $attributes);
+        $payload = array_replace($this->definition->defaults, $attributes);
 
-        if (!$this->timestamps) {
+        if (!$this->definition->timestamps) {
             return $payload;
         }
 
         $timestamp = $this->freshTimestamp();
-        $payload[$this->createdAt] ??= $timestamp;
-        $payload[$this->updatedAt] ??= $timestamp;
+        $payload[$this->definition->createdAt] ??= $timestamp;
+        $payload[$this->definition->updatedAt] ??= $timestamp;
 
         return $payload;
     }
@@ -282,10 +258,10 @@ final class TableQueryRepository extends RepositoryPagination
      */
     private function prepareUpdateAttributes(array $attributes): array
     {
-        $this->assertAllowedAttributes($attributes, $this->updatable, false);
+        $this->assertAllowedAttributes($attributes, $this->definition->updatable, false);
 
-        if ($this->timestamps) {
-            $attributes[$this->updatedAt] = $this->freshTimestamp();
+        if ($this->definition->timestamps) {
+            $attributes[$this->definition->updatedAt] = $this->freshTimestamp();
         }
 
         return $attributes;
@@ -333,25 +309,26 @@ final class TableQueryRepository extends RepositoryPagination
         if ($requested !== null) {
             $this->assertAllowedAttributes(
                 array_fill_keys($requested, true),
-                $this->updatable,
+                $this->definition->updatable,
                 false,
             );
 
-            if (!$this->timestamps || in_array($this->updatedAt, $requested, true)) {
+            if (!$this->definition->timestamps
+                || in_array($this->definition->updatedAt, $requested, true)) {
                 return $requested;
             }
 
-            return [...$requested, $this->updatedAt];
+            return [...$requested, $this->definition->updatedAt];
         }
 
-        if (!$this->timestamps) {
+        if (!$this->definition->timestamps) {
             return null;
         }
 
         return array_values(array_filter(
             $columns,
             fn(string $column): bool => !in_array($column, $uniqueBy, true)
-                && $column !== $this->createdAt,
+                && $column !== $this->definition->createdAt,
         ));
     }
 }
