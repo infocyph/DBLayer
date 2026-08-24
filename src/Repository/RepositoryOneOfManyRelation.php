@@ -10,6 +10,10 @@ use InvalidArgumentException;
 /**
  * Resolve one-of-many relations by ordering each bounded related-key batch and
  * keeping the first row for each parent relation key.
+ *
+ * Definition and one-of-many scopes constrain the candidate set. A per-query
+ * eager constraint is applied after winner selection so it cannot promote an
+ * older/non-winning row.
  */
 final class RepositoryOneOfManyRelation
 {
@@ -69,9 +73,6 @@ final class RepositoryOneOfManyRelation
             if ($definition->oneOfManyScope !== null) {
                 $query->apply($definition->oneOfManyScope);
             }
-            if ($constraint !== null) {
-                $query->apply($constraint);
-            }
 
             $query->apply(static function (QueryBuilder $builder) use ($orders): void {
                 RepositoryOneOfManyOrder::apply($builder, $orders);
@@ -82,18 +83,80 @@ final class RepositoryOneOfManyRelation
                     continue;
                 }
                 $identity = $this->key($row[$definition->relatedKey] ?? null);
-                if (!isset($indexed[$identity])) {
-                    $indexed[$identity] = $this->withoutInternalColumns($row, $internalColumns);
+                $winnerId = $row[$relatedDefinition->primaryKey] ?? null;
+                if ($winnerId === null || isset($indexed[$identity])) {
+                    continue;
                 }
+
+                $indexed[$identity] = [
+                    'id' => $winnerId,
+                    'row' => $this->withoutInternalColumns($row, $internalColumns),
+                ];
             }
         }
 
+        $allowed = $this->allowedWinnerIds(
+            $related,
+            $relatedDefinition->primaryKey,
+            $indexed,
+            $constraint,
+        );
+
         foreach ($parents as &$parent) {
-            $parent[$as] = $indexed[$this->key($parent[$definition->parentKey] ?? null)] ?? null;
+            $identity = $this->key($parent[$definition->parentKey] ?? null);
+            $winner = $indexed[$identity] ?? null;
+            $parent[$as] = $winner !== null && isset($allowed[$this->key($winner['id'])])
+                ? $winner['row']
+                : null;
         }
         unset($parent);
 
         return $parents;
+    }
+
+    /**
+     * @param class-string<TableRepository> $related
+     * @param array<string,array{id:mixed,row:array<string,mixed>}> $indexed
+     * @param null|callable(QueryBuilder):void $constraint
+     * @return array<string,true>
+     */
+    private function allowedWinnerIds(
+        string $related,
+        string $primaryKey,
+        array $indexed,
+        ?callable $constraint,
+    ): array {
+        $allowed = [];
+        $ids = [];
+
+        foreach ($indexed as $winner) {
+            $allowed[$this->key($winner['id'])] = true;
+            $ids[] = $winner['id'];
+        }
+
+        if ($constraint === null || $ids === []) {
+            return $allowed;
+        }
+
+        $allowed = [];
+        $connection = $related::connection();
+        $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
+
+        foreach (array_chunk($ids, $batchSize) as $chunk) {
+            $query = $related::query()->apply(
+                static fn(QueryBuilder $builder): mixed => $builder->whereIn($primaryKey, $chunk),
+            );
+            $query->apply($constraint);
+
+            foreach ($query->raw()->select($primaryKey)->cursor() as $row) {
+                if (!is_array($row) || !array_key_exists($primaryKey, $row)) {
+                    continue;
+                }
+                $allowed[$this->key($row[$primaryKey])] = true;
+            }
+        }
+
+        return $allowed;
     }
 
     /** @param list<array<string,mixed>> $parents @return list<array<string,mixed>> */
