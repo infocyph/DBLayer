@@ -12,16 +12,11 @@ use Infocyph\DBLayer\Query\Repository as QueryRepository;
 use InvalidArgumentException;
 
 /**
- * TableRepository
+ * Repository-oriented static API for one database table.
  *
- * Repository-oriented static API on top of Repository + QueryBuilder + DB facade.
- *
- * This class is intentionally NOT an ORM:
- * - no identity map
- * - no dirty tracking
- * - no relationship loader
- *
- * It is a convenience delegation layer for table-centric repository workflows.
+ * This remains intentionally non-ORM: rows are arrays/DTOs, there is no
+ * identity map, dirty tracking, unit-of-work, or implicit lazy relationship
+ * loading.
  */
 abstract class TableRepository
 {
@@ -31,6 +26,11 @@ abstract class TableRepository
     protected static ?string $connection = null;
 
     /**
+     * Primary-key column used by repository identity operations.
+     */
+    protected static string $primaryKey = 'id';
+
+    /**
      * Backing table name.
      */
     protected static string $table = '';
@@ -38,7 +38,7 @@ abstract class TableRepository
     /**
      * Forward unknown static calls by priority:
      * 1) Repository API
-     * 2) QueryBuilder API
+     * 2) Repository-aware QueryBuilder API
      *
      * @param array<int,mixed> $arguments
      */
@@ -50,7 +50,7 @@ abstract class TableRepository
         }
 
         $query = static::query();
-        if (method_exists($query, $method)) {
+        if (method_exists($query, $method) || method_exists($query->raw(), $method)) {
             return $query->$method(...$arguments);
         }
 
@@ -62,11 +62,11 @@ abstract class TableRepository
     }
 
     /**
-     * Alias for query().
+     * Get the intentionally raw QueryBuilder escape hatch.
      */
     public static function builder(?string $connection = null): QueryBuilder
     {
-        return static::query($connection);
+        return static::query($connection)->raw();
     }
 
     /**
@@ -78,14 +78,21 @@ abstract class TableRepository
     }
 
     /**
-     * Build a query builder for this repository class.
-     *
-     * Uses repository->builder() so repository-level policy can be applied
-     * before returning the builder instance.
+     * Build a repository-aware fluent query.
      */
-    public static function query(?string $connection = null): QueryBuilder
+    public static function query(?string $connection = null): RepositoryQuery
     {
-        return static::configureQuery(static::repository($connection)->builder());
+        $repository = static::repository($connection);
+
+        return new RepositoryQuery($repository, $repository->builder());
+    }
+
+    /**
+     * Explicit alias for the raw QueryBuilder escape hatch.
+     */
+    public static function rawQuery(?string $connection = null): QueryBuilder
+    {
+        return static::builder($connection);
     }
 
     /**
@@ -97,11 +104,32 @@ abstract class TableRepository
     }
 
     /**
-     * Build a repository for this repository class.
+     * Build a repository for this table definition.
      */
     public static function repository(?string $connection = null): QueryRepository
     {
-        $repository = DB::repository(static::tableName(), static::resolveConnectionName($connection));
+        $repository = new TableQueryRepository(
+            static::connection($connection),
+            static::tableName(),
+            static::primaryKeyName(),
+            DB::resultProcessor(),
+        );
+
+        $casts = static::casts();
+        if ($casts !== []) {
+            $repository->setCasts($casts);
+        }
+
+        foreach (static::globalScopes() as $scope) {
+            $repository->addGlobalScope($scope);
+        }
+
+        // Keep the existing customization hook, but apply it as a universal
+        // repository scope so direct Repository terminals and fluent queries
+        // cannot diverge.
+        $repository->addGlobalScope(static function (QueryBuilder $query): void {
+            static::configureQuery($query);
+        });
 
         return static::configureRepository($repository);
     }
@@ -146,7 +174,18 @@ abstract class TableRepository
     }
 
     /**
-     * Override in subclasses to apply reusable query defaults.
+     * Declarative repository casts.
+     *
+     * @return array<string,string|callable(mixed):mixed>
+     */
+    protected static function casts(): array
+    {
+        return [];
+    }
+
+    /**
+     * Existing query-default hook. Defaults declared here are now applied as a
+     * repository scope so every repository read path observes them.
      */
     protected static function configureQuery(QueryBuilder $query): QueryBuilder
     {
@@ -154,7 +193,7 @@ abstract class TableRepository
     }
 
     /**
-     * Override in subclasses to apply reusable repository defaults.
+     * Override in subclasses to apply reusable repository policies.
      */
     protected static function configureRepository(QueryRepository $repository): QueryRepository
     {
@@ -167,6 +206,33 @@ abstract class TableRepository
     protected static function connectionName(): ?string
     {
         return static::$connection;
+    }
+
+    /**
+     * Declarative global query scopes.
+     *
+     * @return array<array-key,callable(QueryBuilder):void>
+     */
+    protected static function globalScopes(): array
+    {
+        return [];
+    }
+
+    /**
+     * Resolve and validate configured primary-key column.
+     */
+    protected static function primaryKeyName(): string
+    {
+        $primaryKey = trim(static::$primaryKey);
+
+        if ($primaryKey === '') {
+            throw new InvalidArgumentException(sprintf(
+                '%s must define a non-empty static $primaryKey value.',
+                static::class,
+            ));
+        }
+
+        return $primaryKey;
     }
 
     /**
