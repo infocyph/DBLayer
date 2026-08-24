@@ -137,6 +137,12 @@ abstract class TableRepository
         unset(self::$definitionCache[static::class]);
     }
 
+    /** Build an explicit bounded pruning service for this repository. */
+    public static function pruner(?string $connection = null): RepositoryPruner
+    {
+        return new RepositoryPruner(static::class, $connection);
+    }
+
     /** Build a repository-aware fluent query. */
     public static function query(?string $connection = null): RepositoryQuery
     {
