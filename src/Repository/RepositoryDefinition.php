@@ -271,11 +271,16 @@ final readonly class RepositoryDefinition
             $this->assertIdentifier((string) $relation->pivotRelatedKey, 'pivot related key');
         }
 
-        if (in_array($relation->type, [
-            RelationDefinition::HAS_ONE_THROUGH,
-            RelationDefinition::HAS_MANY_THROUGH,
-        ], true)) {
-            if ($relation->through === null || !is_a($relation->through, TableRepository::class, true)) {
+        if ($relation->through !== null) {
+            if (!in_array($relation->type, [RelationDefinition::HAS_ONE, RelationDefinition::HAS_MANY], true)) {
+                throw new InvalidArgumentException(sprintf(
+                    '%s through relation [%s] must use has-one or has-many cardinality.',
+                    $this->repositoryClass,
+                    $name,
+                ));
+            }
+
+            if (!is_a($relation->through, TableRepository::class, true)) {
                 throw new InvalidArgumentException(sprintf(
                     '%s through relation [%s] must target an intermediate TableRepository class.',
                     $this->repositoryClass,
