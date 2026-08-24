@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Repository;
 
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use InvalidArgumentException;
 
@@ -113,8 +114,7 @@ final class RepositoryRelationAggregator
         $connection = $related::connection();
         $batchSize = $connection->safeBatchSize(requested: $this->batchSize);
         $aggregates = [];
-        $sqlFunction = strtoupper($function);
-        $aggregateColumn = $function === 'count' ? '*' : $column;
+        $aggregateExpression = $this->aggregateExpression($function, $column);
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
             $query = $related::query()->apply(
@@ -132,8 +132,7 @@ final class RepositoryRelationAggregator
             $this->applyConstraints($query, $definition, $constraint);
 
             $rows = $query->raw()
-                ->select($definition->relatedKey)
-                ->selectRaw(sprintf('%s(%s) AS aggregate', $sqlFunction, $aggregateColumn))
+                ->select($definition->relatedKey, $aggregateExpression)
                 ->groupBy($definition->relatedKey)
                 ->get();
 
@@ -320,6 +319,14 @@ final class RepositoryRelationAggregator
         if ($constraint !== null) {
             $query->apply($constraint);
         }
+    }
+
+    private function aggregateExpression(string $function, string $column): Expression
+    {
+        $function = strtoupper($function);
+        $column = strtolower($function) === 'COUNT' ? '*' : $column;
+
+        return Expression::make(sprintf('%s(%s) AS aggregate', $function, $column));
     }
 
     private function assertColumn(string $column): void
