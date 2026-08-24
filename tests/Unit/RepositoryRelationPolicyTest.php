@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+namespace Infocyph\DBLayer\Tests\Unit;
+
 use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Repository\Relation;
