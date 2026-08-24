@@ -7,7 +7,6 @@ namespace Infocyph\DBLayer\Repository;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Exceptions\UnwritableAttributeException;
 use Infocyph\DBLayer\Query\QueryBuilder;
-use Infocyph\DBLayer\Query\Repository;
 use Infocyph\DBLayer\Query\ResultProcessor;
 
 /**
@@ -16,7 +15,7 @@ use Infocyph\DBLayer\Query\ResultProcessor;
  * Keeps table-definition policy in the repository layer without introducing
  * entity state or Active Record behavior.
  */
-final class TableQueryRepository extends Repository
+final class TableQueryRepository extends RepositoryPagination
 {
     /** @var array<string,callable(QueryBuilder):void> */
     private array $namedGlobalScopes = [];
