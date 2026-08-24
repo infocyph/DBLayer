@@ -18,8 +18,8 @@ use InvalidArgumentException;
  * Repository-aware fluent query wrapper.
  *
  * Fluent QueryBuilder calls are recorded and replayed through Repository
- * terminal operations. Explicit eager relations preserve both parent and
- * related repository policies without introducing lazy relation behavior.
+ * terminal operations. Explicit relation projections preserve repository
+ * policy without introducing implicit lazy queries or entity state.
  */
 final class RepositoryQuery
 {
@@ -32,6 +32,11 @@ final class RepositoryQuery
      * @var list<callable(QueryBuilder):void>
      */
     private array $queryScopes = [];
+
+    /**
+     * @var array<string,array{relation:string,constraint:null|callable(QueryBuilder):void}>
+     */
+    private array $requestedCounts = [];
 
     /**
      * @var array<string,null|callable(QueryBuilder):void>
@@ -126,11 +131,11 @@ final class RepositoryQuery
     {
         $row = $this->repository->first($this->scope(), $columns);
 
-        if ($row === null || $this->requestedRelations === []) {
-            return $row;
+        if ($row === null) {
+            return null;
         }
 
-        return $this->loadRelations([$row])[0] ?? $row;
+        return $this->projectRows([$row])[0] ?? $row;
     }
 
     /**
@@ -140,18 +145,21 @@ final class RepositoryQuery
      */
     public function get(array $columns = ['*']): Collection
     {
-        $rows = $this->repository->get($this->scope(), $columns);
+        $rows = $this->repository->get($this->scope(), $columns)->toArray();
 
-        if ($this->requestedRelations === []) {
-            return $rows;
-        }
-
-        return new Collection($this->loadRelations($rows->toArray()));
+        return new Collection($this->projectRows($rows));
     }
 
     public function paginate(int $perPage = 15, ?int $page = null): LengthAwarePaginator
     {
-        return $this->repository->paginate($perPage, $page, $this->scope());
+        $paginator = $this->repository->paginate($perPage, $page, $this->scope());
+
+        return new LengthAwarePaginator(
+            $this->projectRows($paginator->items()),
+            $paginator->total() ?? 0,
+            $paginator->perPage(),
+            $paginator->currentPage(),
+        );
     }
 
     /**
@@ -172,7 +180,14 @@ final class RepositoryQuery
 
     public function simplePaginate(int $perPage = 15, ?int $page = null): SimplePaginator
     {
-        return $this->repository->simplePaginate($perPage, $page, $this->scope());
+        $paginator = $this->repository->simplePaginate($perPage, $page, $this->scope());
+
+        return new SimplePaginator(
+            $this->projectRows($paginator->items()),
+            $paginator->perPage(),
+            $paginator->currentPage(),
+            $paginator->hasMorePages(),
+        );
     }
 
     public function value(string $column): mixed
@@ -182,10 +197,6 @@ final class RepositoryQuery
 
     /**
      * Explicitly eager-load one or more declared relations.
-     *
-     * Examples:
-     *   ->with('user', 'comments')
-     *   ->with(['comments' => fn ($q) => $q->where('approved', 1)])
      *
      * @param string|array<string|int,string|callable(QueryBuilder):void> ...$relations
      */
@@ -217,6 +228,49 @@ final class RepositoryQuery
                 }
 
                 $this->requestedRelations[$name] = $constraint;
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Add relation counts without hydrating related rows.
+     *
+     * Supports aliases such as:
+     *   ->withCount('comments')
+     *   ->withCount(['comments as pending_comments_count' => fn ($q) => ...])
+     *
+     * @param string|array<string|int,string|callable(QueryBuilder):void> ...$relations
+     */
+    public function withCount(string|array ...$relations): self
+    {
+        foreach ($relations as $relation) {
+            if (is_string($relation)) {
+                $this->registerCount($relation, null);
+
+                continue;
+            }
+
+            foreach ($relation as $expression => $constraint) {
+                if (is_int($expression)) {
+                    if (!is_string($constraint)) {
+                        throw new InvalidArgumentException('Numeric relation-count entries must contain relation names.');
+                    }
+
+                    $this->registerCount($constraint, null);
+
+                    continue;
+                }
+
+                if (!is_callable($constraint)) {
+                    throw new InvalidArgumentException(sprintf(
+                        'Relation count constraint for [%s] must be callable.',
+                        $expression,
+                    ));
+                }
+
+                $this->registerCount($expression, $constraint);
             }
         }
 
@@ -256,26 +310,63 @@ final class RepositoryQuery
     }
 
     /**
+     * Attach requested relation counts to parent rows.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function loadCounts(array $rows): array
+    {
+        if ($rows === [] || $this->requestedCounts === []) {
+            return $rows;
+        }
+
+        $counter = new RepositoryRelationCounter($this->connection);
+
+        foreach ($this->requestedCounts as $alias => $request) {
+            $definition = $this->relationDefinition($request['relation']);
+            $counts = $counter->count($rows, $definition, $request['constraint']);
+
+            foreach ($rows as &$row) {
+                $row[$alias] = $counts[$this->relationKey($row[$definition->parentKey] ?? null)] ?? 0;
+            }
+            unset($row);
+        }
+
+        return $rows;
+    }
+
+    /**
      * @param list<array<string,mixed>> $rows
      * @return list<array<string,mixed>>
      */
     private function loadRelations(array $rows): array
     {
+        if ($rows === [] || $this->requestedRelations === []) {
+            return $rows;
+        }
+
         $loader = new RepositoryRelationLoader($this->connection);
 
         foreach ($this->requestedRelations as $name => $constraint) {
-            $definition = $this->relations[$name] ?? null;
-            if (!$definition instanceof RelationDefinition) {
-                throw new InvalidArgumentException(sprintf(
-                    'Relation [%s] is not defined for this repository.',
-                    $name,
-                ));
-            }
-
-            $rows = $loader->load($rows, $name, $definition, $constraint);
+            $rows = $loader->load(
+                $rows,
+                $name,
+                $this->relationDefinition($name),
+                $constraint,
+            );
         }
 
         return $rows;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function projectRows(array $rows): array
+    {
+        return $this->loadCounts($this->loadRelations($rows));
     }
 
     /**
@@ -293,6 +384,58 @@ final class RepositoryQuery
         foreach ($this->queryScopes as $scope) {
             $scope($this->builder);
         }
+    }
+
+    /**
+     * @param null|callable(QueryBuilder):void $constraint
+     */
+    private function registerCount(string $expression, ?callable $constraint): void
+    {
+        $parts = preg_split('/\s+as\s+/i', trim($expression), 2);
+        $relation = trim((string) ($parts[0] ?? ''));
+        $alias = trim((string) ($parts[1] ?? ($relation . '_count')));
+
+        if ($relation === '' || $alias === '') {
+            throw new InvalidArgumentException('Relation count name and alias must be non-empty.');
+        }
+
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $alias)) {
+            throw new InvalidArgumentException(sprintf(
+                'Invalid relation count alias [%s].',
+                $alias,
+            ));
+        }
+
+        $this->relationDefinition($relation);
+        $this->requestedCounts[$alias] = [
+            'relation' => $relation,
+            'constraint' => $constraint,
+        ];
+    }
+
+    private function relationDefinition(string $name): RelationDefinition
+    {
+        $definition = $this->relations[$name] ?? null;
+
+        if (!$definition instanceof RelationDefinition) {
+            throw new InvalidArgumentException(sprintf(
+                'Relation [%s] is not defined for this repository.',
+                $name,
+            ));
+        }
+
+        return $definition;
+    }
+
+    private function relationKey(mixed $value): string
+    {
+        return match (true) {
+            is_int($value), is_string($value) => 'scalar:' . $value,
+            is_float($value) => 'float:' . serialize($value),
+            is_bool($value) => 'bool:' . ($value ? '1' : '0'),
+            $value === null => 'null:',
+            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
+        };
     }
 
     /**
