@@ -194,7 +194,9 @@ trait QueryBuilderCaching
 
         $cache = $this->connection->queryCache();
         $this->connection->afterCommit(
-            static fn(): mixed => $cache->invalidateTags($tags),
+            static function () use ($cache, $tags): void {
+                $cache->invalidateTags($tags);
+            },
         );
     }
 
