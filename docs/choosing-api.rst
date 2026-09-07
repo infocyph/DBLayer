@@ -1,33 +1,42 @@
-Choosing DB, QueryBuilder, and Repository
-=========================================
+Choosing DB, Connection, QueryBuilder, and Repository
+=====================================================
 
 Introduction
 ------------
 
-DBLayer intentionally exposes three layers:
+DBLayer exposes complementary layers rather than one mandatory entrypoint:
 
-- ``DB``: process-level orchestration and infrastructure controls.
+- ``DB``: optional process-level static orchestration/convenience facade.
+- ``Connection``: exact database runtime instance and execution-state boundary.
 - ``QueryBuilder``: per-query SQL composition.
 - ``Repository``: reusable table-level rules and behavior.
+- ``ConnectionRepository``: instance-first repository base for scoped runtimes.
 
-You usually use all three in one application, but for different reasons.
 ``SchemaManager``, ``MigrationRunner``, ``SeedRunner``, and ``RelationLoader``
-are explicit opt-in modules alongside these layers. They are constructed only
-for schema/deployment work or bounded relation projection.
+remain explicit opt-in modules alongside these layers.
 
-Entry Path (How Most Apps Work)
--------------------------------
+Choose the Ownership Model First
+--------------------------------
 
-Most codebases enter through ``DB`` first, then branch:
+Facade-oriented application
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. stay on ``DB`` for infra concerns (transaction boundaries, retries,
-   connection capabilities, telemetry/profiler/pooling), or
-2. move to ``DB::table()`` for ad-hoc SQL composition, or
-3. move to ``DB::repository()`` for reusable table rules, or
-4. explicitly request ``DB::relations()``/``DB::schema()`` for those optional
-   operations.
+Use ``DB`` as the entrypoint when process/request-level static orchestration is
+intentional and convenient. Typical flows are ``DB::table()``,
+``DB::repository()``, ``DB::transaction()``, and the facade's observability,
+cache, and pool helpers.
 
-This is the normal and intended flow in DBLayer.
+Execution-scoped application
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use explicit ``Connection`` ownership when a framework/runtime already owns a
+request, job, coroutine, or Fiber execution scope. Build queries from the exact
+connection, construct ``ConnectionRepository`` subclasses from it, and own a
+``ConnectionLease`` when pooling is selected.
+
+Do not register an execution-owned connection in the static facade merely to
+obtain a QueryBuilder, ResultProcessor, transaction manager, or query cache.
+DBLayer exposes instance-native paths for those concerns.
 
 Quick Decision Matrix
 ---------------------
@@ -38,107 +47,112 @@ Quick Decision Matrix
    * - You Need
      - Use
      - Why
-   * - Start/commit transactions, manage connections, inspect capabilities
+   * - Process-level named connection registry and convenience orchestration
      - ``DB``
-     - Infrastructure concerns live at the facade layer.
+     - Static facade is concise when its lifecycle matches the application.
+   * - One exact connection owned by a request/job/Fiber scope
+     - ``Connection``
+     - Keeps mutable transaction/sticky/deadline/cache state execution-owned.
+   * - Persistent pooled connection with explicit checkout ownership
+     - ``PoolManager::checkout()`` / ``ConnectionLease``
+     - Lease token proves the active reuse generation and prevents stale release.
    * - Compose a one-off complex query (joins, CTEs, custom select/having)
      - ``QueryBuilder``
      - Maximum query-shaping flexibility.
-   * - Reuse tenant/soft-delete/hooks/default-order rules across services
+   * - Reuse tenant/soft-delete/hooks/default-order rules
      - ``Repository``
      - Centralized table policy avoids duplicated filters.
+   * - Build a repository directly from an owned connection
+     - ``ConnectionRepository``
+     - Derives DBLayer's executor/result processor without static facade state.
    * - Raw SQL execution with bindings
-     - ``DB::select()``, ``DB::statement()`` and related helpers
-     - Fluent builder is optional; raw SQL stays first-class.
+     - ``Connection`` or ``DB`` raw helpers
+     - Raw SQL remains first-class in either ownership model.
    * - Long-running table scan with stable pagination
      - ``QueryBuilder::chunkById()`` or ``Repository::chunkById()``
      - Keyset chunking is safer than offset paging under writes.
-   * - Attach related rows to an already selected parent list
-     - ``DB::relations()``
-     - Bounded set-based projection avoids hidden N+1 queries.
    * - Create/alter schema or execute deployment manifests
-     - ``DB::schema()``, ``MigrationRunner``, ``SeedRunner``
+     - ``SchemaManager``, ``MigrationRunner``, ``SeedRunner``
      - DDL and deployment work remains explicit and outside ordinary queries.
 
 Mental Model
 ------------
 
-- ``DB`` answers: "How should this run?"
+- ``DB`` answers: "Do I want process-level static convenience?"
+- ``Connection`` answers: "Which exact database runtime owns this execution?"
 - ``QueryBuilder`` answers: "What SQL should be emitted?"
 - ``Repository`` answers: "What table rules must always apply?"
-
-If the question is about operational behavior (timeouts, retries, transactions,
-telemetry), start at ``DB``. If it is about SQL shape, start at builder. If it
-is about consistent table policies, start at repository.
+- ``PoolManager``/``ConnectionLease`` answer: "Who owns this pooled connection
+  reuse generation?"
 
 Practical Scenarios
 -------------------
 
-1. Health/Readiness check
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Use the facade:
-
-.. code-block:: php
-
-   $ok = DB::ping();
-   $version = DB::version();
-
-2. API list endpoint with dynamic filters
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Use builder for ad-hoc query shape:
+1. Conventional facade application
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: php
 
    $rows = DB::table('users')
-       ->select('id', 'email', 'name')
-       ->when($onlyActive, fn ($q) => $q->where('active', '=', 1))
-       ->when($role !== null, fn ($q) => $q->where('role', '=', $role))
+       ->where('active', '=', 1)
        ->orderBy('id', 'desc')
-       ->forPage($page, 20)
+       ->limit(20)
        ->get();
 
-3. Multi-tenant table access used in many services
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Use repository so tenant rules are centralized:
+2. Scoped runtime with direct connection
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: php
 
-   $users = DB::repository('users')->forTenant($tenantId);
-   $active = $users->get(fn ($q) => $q->where('active', '=', 1));
+   $connection = new Connection($config, 'main');
 
-4. Soft-delete + restore workflow
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   $rows = $connection->table('users')
+       ->where('active', '=', 1)
+       ->get();
 
-Use repository feature toggles:
+The host runtime owns ``$connection`` until its execution cleanup boundary.
+
+3. Scoped repository
+~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: php
 
-   $users = DB::repository('users')->enableSoftDeletes();
-   $users->deleteById($id);
-   $users->restoreById($id);
+   final class UserRepository extends ConnectionRepository
+   {
+       protected function table(): string
+       {
+           return 'users';
+       }
+   }
 
-5. Cross-table reporting query
+   $users = (new UserRepository($connection))
+       ->forTenant($tenantId)
+       ->enableSoftDeletes();
+
+   $active = $users->get(
+       static fn ($q) => $q->where('active', '=', 1),
+   );
+
+4. Persistent pooled execution
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use builder for joins and aggregate shaping:
-
 .. code-block:: php
 
-   $rows = DB::table('orders')->as('o')
-       ->joinAs('users', 'u', 'o.user_id', '=', 'u.id')
-       ->select('u.email')
-       ->selectRaw('count(*) as orders_count')
-       ->groupBy('u.email')
-       ->having('orders_count', '>=', 5)
-       ->get();
+   $lease = $poolManager->checkout('main');
 
-6. Transaction boundary with retry attempts
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   try {
+       $connection = $lease->connection();
+       $rows = $connection->table('events')->limit(100)->get();
+   } finally {
+       $lease->release();
+   }
 
-Use facade transaction orchestration; repository/builder calls can live inside:
+Use ``PoolManager::using()`` when callback-scoped ownership is sufficient.
+
+5. Transaction boundary
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Facade model:
 
 .. code-block:: php
 
@@ -147,27 +161,51 @@ Use facade transaction orchestration; repository/builder calls can live inside:
        DB::table('accounts')->where('id', '=', 2)->update(['balance' => 1100]);
    }, attempts: 3);
 
-7. Capability-aware write path
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Instance-owned model uses the transaction engine on the exact ``Connection``.
+Keep all work in that transaction bound to the same connection instance.
 
-Use facade capabilities to branch behavior:
+6. Optimistic conditional update
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use repository versioned writes rather than application-level read-before-write
+logic:
 
 .. code-block:: php
 
-   if (DB::supportsReturning()) {
-       $row = DB::table('users')->insertReturning(['email' => $email]);
-   } else {
-       DB::table('users')->insert(['email' => $email]);
-   }
+   $updated = $users->updateByIdWithVersion(
+       $id,
+       ['payload' => $newPayload],
+       $expectedRevision,
+       'revision',
+   );
+
+Higher layers own the meaning of the revision conflict; DBLayer owns the atomic
+conditional write primitive.
+
+7. Query result caching
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Facade applications can configure cache through ``DB::setCache()``. Scoped
+runtimes should attach the backend to the exact connection:
+
+.. code-block:: php
+
+   $connection->setQueryCache($cache);
+
+   $row = $connection->table('users')
+       ->where('id', '=', $id)
+       ->cacheFor(60)
+       ->first();
+
+Structured write invalidation follows the same exact connection and runs after
+successful top-level commit.
 
 8. Large table backfill job
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use bounded keyset batches from builder or repository:
-
 .. code-block:: php
 
-   DB::table('events')
+   $connection->table('events')
        ->orderBy('id')
        ->chunkById(1000, function (array $rows): bool {
            // process rows
@@ -178,74 +216,24 @@ For row-by-row handling with the same bounded query lifetime:
 
 .. code-block:: php
 
-   foreach (DB::table('events')->lazyById(1000, 'id', $checkpoint) as $event) {
+   foreach ($connection->table('events')->lazyById(1000, 'id', $checkpoint) as $event) {
        // process and persist $event['id'] as the next restart checkpoint
    }
 
 Use ``unbufferedStream()`` only when a single occupied connection is acceptable.
 MySQL disables client buffering; PostgreSQL uses server-cursor fetch batches.
 
-Repository-Style App Service Pattern
-------------------------------------
+Static TableRepository Surface
+------------------------------
 
-If you want repository-oriented naming in your app, wrap DBLayer repository with
-composition:
-
-.. code-block:: php
-
-   use Infocyph\DBLayer\DB;
-   use Infocyph\DBLayer\Query\Repository;
-
-   final class UserRepository
-   {
-       public function __construct(private readonly Repository $repo) {}
-
-       public static function make(int $tenantId): self
-       {
-           $repo = DB::repository('users')
-               ->forTenant($tenantId)
-               ->enableSoftDeletes()
-               ->setDefaultOrder('id', 'desc');
-
-           return new self($repo);
-       }
-
-       public function findActiveByEmail(string $email): ?array
-       {
-           return $this->repo->first(
-               fn ($q) => $q->where('active', '=', 1)->where('email', '=', $email)
-           );
-       }
-   }
-
-This keeps domain naming explicit without turning DBLayer into an ORM
-system.
-
-Laravel-Like Static Repository Facade (Still Repo Style)
---------------------------------------------------------
-
-If you want a class that *feels* like a static repository API (``User::find()``,
-``User::create()``, ``User::query()``), you can build one on top of repository.
-This is still not ORM behavior; it is repository delegation.
-
-DBLayer includes this base class directly:
-
-- ``Infocyph\DBLayer\Repository\TableRepository``
+If you intentionally want a Laravel-like static repository surface, DBLayer's
+``TableRepository`` remains available:
 
 .. code-block:: php
 
    use Infocyph\DBLayer\Repository\TableRepository;
-   use Infocyph\DBLayer\Query\Repository;
 
-   abstract class AppTableRepository extends TableRepository
-   {
-       protected static function configureRepository(Repository $repository): Repository
-       {
-           return $repository->enableSoftDeletes();
-       }
-   }
-
-   final class User extends AppTableRepository
+   final class User extends TableRepository
    {
        protected static string $table = 'users';
        protected static ?string $connection = 'main';
@@ -253,81 +241,32 @@ DBLayer includes this base class directly:
 
    $one = User::find(1);
    $recent = User::query()->orderBy('id', 'desc')->limit(20)->get();
-   $tenantActive = User::forTenant(10)->get(fn ($q) => $q->where('active', '=', 1));
-   $reportRows = User::query('reporting')->limit(20)->get();
 
-What this gives:
-
-- repository-oriented class ergonomics
-- table and connection mapping in one class
-- full repository features (tenant scope, soft deletes, optimistic locking,
-  hooks, casts)
-
-What this intentionally does not give:
-
-- ORM relations/identity map/dirty tracking/unit-of-work
-
-TableRepository Scenarios
--------------------------
-
-Read-Repository Connection Split
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: php
-
-   final class UserReadRepository extends TableRepository
-   {
-       protected static string $table = 'users';
-       protected static ?string $connection = 'reporting';
-   }
-
-Policy Method Pattern
-~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: php
-
-   final class User extends TableRepository
-   {
-       protected static string $table = 'users';
-
-       public static function activeForTenant(int $tenantId)
-       {
-           return static::forTenant($tenantId)
-               ->get(fn ($q) => $q->where('active', '=', 1));
-       }
-   }
-
-One-Off Query Shape
-~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: php
-
-   $recentEmails = User::query()
-       ->select('email')
-       ->where('created_at', '>=', $since)
-       ->orderBy('id', 'desc')
-       ->limit(100)
-       ->pluck('email');
+This is repository delegation, not ORM identity-map/unit-of-work behavior.
 
 Common Pitfalls
 ---------------
 
-- Treating ``DB`` and ``Repository`` as interchangeable abstractions. They have
-  different responsibilities.
-- Repeating tenant/soft-delete filters manually in every builder query instead
-  of centralizing them in a repository.
-- Using offset paging for long-running jobs where ``chunkById()`` would be
-  safer.
+- Assuming the static ``DB`` facade is mandatory when the host already owns an
+  execution-scoped connection lifecycle.
+- Building a second pool, transaction manager, query cache, retry engine, or
+  schema layer in the host instead of composing DBLayer's native mechanisms.
+- Repeating tenant/soft-delete filters manually instead of centralizing them in
+  a repository.
+- Using ``PoolManager::get()``/bare references as the normal persistent-runtime
+  ownership API instead of tokenized ``checkout()`` leases.
 - Mixing optimistic-locking writes with blind updates on the same rows.
+- Replacing native ``upsert()``/conditional update semantics with
+  SELECT-before-write application code.
 
 Related Guides
 --------------
 
-- See ``table-repository`` for class-based repository-oriented usage patterns.
-- See ``examples-cookbook`` for ready-to-use end-to-end snippets.
+- See ``connections`` for replicas, leases, pooling, and reuse sanitation.
+- See ``caching`` for connection-owned query-cache semantics.
+- See ``repository`` and ``api-repository`` for repository policy and
+  ``ConnectionRepository``.
+- See ``table-repository`` for static class-based repository usage.
 - See ``query-builder`` for SQL composition patterns.
-- See ``repository`` for policy features and lifecycle hooks.
-- See ``relation-loading`` for explicit bounded row projection.
 - See ``schema-migrations`` for DDL, migration, and seeding contracts.
 - See ``transactions`` for retry and nested transaction behavior.
-- See ``connections`` for replicas, sticky reads, and pooling.
