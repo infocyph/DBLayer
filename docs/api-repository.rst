@@ -121,7 +121,7 @@ Repository reads can opt into ``cacheFor()``. They use the query cache owned by
 the repository's exact connection and receive database-scoped table tags plus
 tenant and primary-key record tags where applicable. Successful structured
 mutations schedule invalidation after the owning connection's successful
- top-level commit.
+top-level commit.
 
 Scopes and Features
 -------------------
