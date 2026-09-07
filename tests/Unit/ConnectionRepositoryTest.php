@@ -33,7 +33,8 @@ it('builds a repository from only its scoped connection', function (): void {
     };
 
     expect($repository->find(1))->toBe(['id' => 1, 'value' => 'one'])
-        ->and($repository->pluck('value'))->toBe([1 => 'one', 2 => 'two']);
+        ->and($repository->pluck('value'))->toBe(['one', 'two'])
+        ->and($repository->pluck('value', 'id'))->toBe([1 => 'one', 2 => 'two']);
 });
 
 it('still accepts explicit executor and result processor overrides', function (): void {
