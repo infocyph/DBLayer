@@ -207,9 +207,7 @@ class DB
         static::$connections[$name] = new Connection($configObject, $name);
         static::$pool?->addConfig($name, $configObject);
 
-        if (static::$defaultConnection === null) {
-            static::$defaultConnection = $name;
-        }
+        static::$defaultConnection ??= $name;
 
         return static::$connections[$name];
     }
@@ -239,9 +237,7 @@ class DB
      */
     public static function cache(): CacheInterface
     {
-        if (static::$cache === null) {
-            static::$cache = Cache::memory('dblayer');
-        }
+        static::$cache ??= Cache::memory('dblayer');
 
         return static::$cache;
     }
@@ -292,9 +288,7 @@ class DB
         }
 
         // Shared singleton: lazily (re)instantiate if missing.
-        if (!isset(static::$connections[$name])) {
-            static::$connections[$name] = new Connection($config, $name);
-        }
+        static::$connections[$name] ??= new Connection($config, $name);
 
         return static::$connections[$name];
     }
@@ -715,9 +709,7 @@ class DB
      */
     public static function poolManager(array $poolConfig = []): PoolManager
     {
-        if (static::$poolManager === null) {
-            static::$poolManager = new PoolManager(static::pool($poolConfig));
-        }
+        static::$poolManager ??= new PoolManager(static::pool($poolConfig));
 
         return static::$poolManager;
     }
@@ -727,9 +719,7 @@ class DB
      */
     public static function profiler(): Profiler
     {
-        if (static::$profiler === null) {
-            static::$profiler = new Profiler();
-        }
+        static::$profiler ??= new Profiler();
 
         return static::$profiler;
     }
@@ -903,9 +893,7 @@ class DB
      */
     public static function resultProcessor(): ResultProcessor
     {
-        if (static::$resultProcessor === null) {
-            static::$resultProcessor = new ResultProcessor();
-        }
+        static::$resultProcessor ??= new ResultProcessor();
 
         return static::$resultProcessor;
     }

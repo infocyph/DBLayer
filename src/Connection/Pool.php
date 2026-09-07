@@ -320,9 +320,7 @@ final class Pool
         }
 
         // Add to idle pool.
-        if (!isset($this->idle[$name])) {
-            $this->idle[$name] = [];
-        }
+        $this->idle[$name] ??= [];
 
         $this->idle[$name][$connectionId] = [
             'connection' => $connection,
@@ -423,9 +421,7 @@ final class Pool
 
         $connectionId = spl_object_id($connection);
 
-        if (!isset($this->connections[$name])) {
-            $this->connections[$name] = [];
-        }
+        $this->connections[$name] ??= [];
 
         $this->connections[$name][$connectionId] = [
             'connection' => $connection,

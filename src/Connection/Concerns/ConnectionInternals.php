@@ -29,6 +29,28 @@ trait ConnectionInternals
     private ?CacheInterface $queryCache = null;
 
     /**
+     * Disconnect write and read handles and reset request-scoped state.
+     */
+    public function disconnect(): void
+    {
+        if ($this->pdo?->inTransaction() === true) {
+            try {
+                $this->pdo->rollBack();
+            } catch (Throwable) {
+                // The handle is discarded below; transaction outcome is uncertain.
+            }
+        }
+
+        $this->pdo = null;
+        $this->readPdo = null;
+        $this->clearStatementCache();
+        $this->replicaSelector->reset();
+        $this->recordsModified = false;
+        $this->transactionManager = null;
+        $this->resetRequestRuntimeState();
+    }
+
+    /**
      * Whether this connection already has a query-result cache configured.
      */
     public function hasQueryCache(): bool
@@ -56,28 +78,6 @@ trait ConnectionInternals
         $this->queryCache = $cache;
 
         return $this;
-    }
-
-    /**
-     * Disconnect write and read handles and reset request-scoped state.
-     */
-    public function disconnect(): void
-    {
-        if ($this->pdo?->inTransaction() === true) {
-            try {
-                $this->pdo->rollBack();
-            } catch (Throwable) {
-                // The handle is discarded below; transaction outcome is uncertain.
-            }
-        }
-
-        $this->pdo = null;
-        $this->readPdo = null;
-        $this->clearStatementCache();
-        $this->replicaSelector->reset();
-        $this->recordsModified = false;
-        $this->transactionManager = null;
-        $this->resetRequestRuntimeState();
     }
 
     /**
@@ -481,9 +481,7 @@ trait ConnectionInternals
      */
     private function getExecutor(): Executor
     {
-        if ($this->executor === null) {
-            $this->executor = new Executor($this);
-        }
+        $this->executor ??= new Executor($this);
 
         return $this->executor;
     }
@@ -507,9 +505,7 @@ trait ConnectionInternals
      */
     private function getTransactionManager(): TransactionManager
     {
-        if ($this->transactionManager === null) {
-            $this->transactionManager = new TransactionManager();
-        }
+        $this->transactionManager ??= new TransactionManager();
 
         return $this->transactionManager;
     }
