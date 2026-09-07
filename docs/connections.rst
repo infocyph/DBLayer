@@ -4,8 +4,8 @@ Connections, Replicas, and Pooling
 Introduction
 ------------
 
-This guide covers read/write split behavior, replica selection strategies, and
-pooled connection lifecycle.
+This guide covers direct connection ownership, read/write split behavior,
+replica selection strategies, and pooled connection lifecycle.
 
 .. contents:: On This Page
    :depth: 2
@@ -14,13 +14,34 @@ pooled connection lifecycle.
 Connection Access
 -----------------
 
+Facade-managed applications can resolve named connections through ``DB``:
+
 .. code-block:: php
 
-   $conn = DB::connection();       // default
-   $fresh = DB::freshConnection(); // uncached
+   $conn = DB::connection();       // registered/cached facade connection
+   $fresh = DB::freshConnection(); // new independent connection
 
-Use ``freshConnection()`` when you explicitly need a new underlying PDO
-instance and do not want shared connection reuse.
+Use ``freshConnection()`` when you explicitly need a new underlying connection
+instance and do not want facade connection reuse.
+
+Execution-scoped runtimes can own ``Connection`` objects directly instead of
+registering execution state in the static facade:
+
+.. code-block:: php
+
+   use Infocyph\DBLayer\Connection\Connection;
+   use Infocyph\DBLayer\Connection\ConnectionConfig;
+
+   $config = ConnectionConfig::fromArray([
+       'driver' => 'sqlite',
+       'database' => __DIR__ . '/../storage/app.sqlite',
+   ]);
+
+   $connection = new Connection($config, 'main');
+   $rows = $connection->table('users')->get();
+
+Higher-level runtimes should own the connection for exactly one execution scope
+and release or disconnect it from that scope's cleanup boundary.
 
 Connection Runtime Methods
 --------------------------
@@ -34,6 +55,8 @@ Runtime controls are available on ``Connection`` instances:
   ``getQueryCommentContext()``
 - execution helpers: ``setFetchMode()``, ``withoutQueryEvents()``,
   ``stream()``, ``unbufferedStream()``, ``yieldRows()``, ``readOnlyTransaction()``
+- query cache ownership: ``setQueryCache()``, ``queryCache()``, ``hasQueryCache()``
+- managed transaction callbacks: ``afterCommit()``
 
 ``stream()`` avoids ``fetchAll()`` but native client buffering remains
 driver-dependent. ``unbufferedStream()`` makes the stronger bounded-memory
@@ -77,9 +100,8 @@ In this setup:
 
 .. note::
 
-   Sticky read-after-write behavior is request-scope consistency behavior.
-   It is useful for immediate read-back of writes, but increases read load on
-   the primary/write connection.
+   Sticky read-after-write behavior is execution-scope consistency state. It
+   must not leak from one request/job/Fiber execution into another.
 
 Read Strategies
 ---------------
@@ -143,6 +165,8 @@ isolated by named connection.
 Pooling
 -------
 
+The static facade provides a convenience wrapper:
+
 .. code-block:: php
 
    DB::poolManager([
@@ -156,10 +180,71 @@ Pooling
        return $pooled->select('select 1');
    }, 'main');
 
+For persistent, interleaved, Fiber-based, or DI-owned runtimes, use the
+instance-oriented lease API so ownership is explicit:
+
+.. code-block:: php
+
+   use Infocyph\DBLayer\Connection\Pool;
+   use Infocyph\DBLayer\Connection\PoolManager;
+
+   $pool = new Pool([
+       'min_connections' => 1,
+       'max_connections' => 10,
+   ]);
+   $pool->addConfig('main', $config);
+
+   $manager = new PoolManager($pool);
+   $lease = $manager->checkout('main');
+
+   try {
+       $connection = $lease->connection();
+       $result = $connection->scalar('select 1');
+   } finally {
+       $lease->release();
+   }
+
+``checkout()`` returns a ``ConnectionLease`` containing the ownership token for
+that checkout generation. A stale lease, double release, or a bare
+``PoolManager::release()`` attempt against an active tokenized checkout is
+rejected. ``ConnectionLease::connection()`` also rejects access after release.
+
+For callback-scoped work, ``PoolManager::using()`` performs checkout and release
+with the same tokenized ownership semantics:
+
+.. code-block:: php
+
+   $value = $manager->using(
+       'main',
+       static fn ($connection) => $connection->scalar('select 42'),
+   );
+
+``PoolManager::get()``/``release()`` remain convenience APIs for strictly scoped
+legacy callers. Prefer ``checkout()`` for persistent or interleaved execution
+models because a bare ``Connection`` reference does not itself express checkout
+generation ownership.
+
+Release Sanitation
+------------------
+
+Before a pooled connection becomes idle again, DBLayer calls
+``Connection::resetRuntimeStateForReuse()``. Reuse sanitation protects the next
+execution from request/job-local state, including managed/raw transaction state,
+after-commit callbacks, sticky-write state, query comment context, deadlines,
+cancellation checks, and savepoint/transaction bookkeeping.
+
+If sanitation fails, or an opened connection is unhealthy or beyond its maximum
+lifetime, the pool removes it instead of returning it to idle reuse.
+
+Prepared-statement cache state remains connection-owned so a healthy pooled
+connection can retain the warm reuse benefit. Do not add a second higher-level
+reset layer that clears DBLayer internals indiscriminately; extend DBLayer's
+reuse contract if new connection-scoped mutable state is introduced.
+
 Operational Notes
 -----------------
 
-- ``max_connections`` bounds total open pooled connections.
+- ``max_connections`` bounds total open pooled connections across configured names.
 - ``idle_timeout`` evicts idle connections.
 - ``max_lifetime`` rotates old connections.
 - ``health_check_interval`` controls probe cadence.
@@ -167,22 +252,28 @@ Operational Notes
   scheduled health probe. Negative values are invalid.
 - Health probes run only against idle, already-opened connections; a borrowed
   connection is never interrupted by ``SELECT 1``.
+- A checked-out connection belongs to one active execution until its lease is
+  released. Do not share one leased connection concurrently across executions.
 
 Use pool stats to tune these settings under real workload:
 
 .. code-block:: php
 
-   $stats = DB::pool()->getStats();
+   $stats = $manager->getPool()->getStats();
 
 .. warning::
 
-   Oversizing ``max_connections`` can overwhelm downstream databases.
-   Tune against real connection limits and query concurrency.
+   Oversizing ``max_connections`` can overwhelm downstream databases. Tune
+   against real database limits and application query concurrency.
 
 Pool Limitations and Fit
 ------------------------
 
-- PHP-FPM request lifecycles usually do not benefit much from pooling.
-- Long-running workers and CLI daemons benefit more from pooled reuse.
+- PHP-FPM request lifecycles usually do not benefit much from userland pooling.
+- Long-running workers and persistent runtimes can benefit from PDO and prepared
+  statement reuse.
 - Pool health checks are interval-based and batched, not full scans on every
   acquire path.
+- Pooling is not automatically faster. Benchmark create/use/disconnect against
+  checkout/use/release and warm prepared-statement reuse in the target runtime
+  before enabling it by default.
