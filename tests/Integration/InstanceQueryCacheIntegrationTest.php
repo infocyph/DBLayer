@@ -108,3 +108,46 @@ it('keeps invalidation bound to the exact connection instance', function (): voi
         }
     }
 });
+
+it('coordinates invalidation across instances that deliberately share one cache backend', function (): void {
+    $database = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
+        . DIRECTORY_SEPARATOR
+        . 'dblayer-shared-instance-cache-'
+        . bin2hex(random_bytes(8))
+        . '.sqlite';
+    $first = null;
+    $second = null;
+
+    try {
+        $config = ConnectionConfig::fromArray([
+            'driver' => 'sqlite',
+            'database' => $database,
+        ]);
+        $sharedCache = Cache::memory('instance-cache-shared-' . bin2hex(random_bytes(4)));
+        $first = new Connection($config, 'shared-name');
+        $second = new Connection($config, 'shared-name');
+        $first->setQueryCache($sharedCache);
+        $second->setQueryCache($sharedCache);
+
+        $first->statement('create table cache_items (id integer primary key, value text not null)');
+        $first->table('cache_items')->insert(['id' => 1, 'value' => 'before']);
+
+        $secondRead = static fn(): array => $second->table('cache_items')
+            ->where('id', '=', 1)
+            ->cacheFor(60)
+            ->first() ?? [];
+
+        expect($secondRead()['value'] ?? null)->toBe('before');
+
+        $first->table('cache_items')->where('id', '=', 1)->update(['value' => 'after']);
+
+        expect($secondRead()['value'] ?? null)->toBe('after');
+    } finally {
+        $first?->disconnect();
+        $second?->disconnect();
+
+        if (is_file($database)) {
+            unlink($database);
+        }
+    }
+});
