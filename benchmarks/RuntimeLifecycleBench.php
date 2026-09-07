@@ -78,6 +78,13 @@ final class RuntimeLifecycleBench
         $lease->release();
     }
 
+    public function benchPoolPreparedStatementReuse(): void
+    {
+        $lease = self::poolManager()->checkout();
+        $lease->connection()->scalar('select ? as value', [42]);
+        $lease->release();
+    }
+
     public function benchPoolUsingSelect(): void
     {
         self::poolManager()->using(
@@ -109,6 +116,7 @@ final class RuntimeLifecycleBench
             'statement_cache_size' => 64,
         ]);
         self::$dedicatedConnection = new Connection(self::config(), 'runtime-dedicated');
+        self::$dedicatedConnection->scalar('select ? as value', [42]);
 
         $pool = new Pool([
             'min_connections' => 1,
@@ -116,6 +124,9 @@ final class RuntimeLifecycleBench
         ]);
         $pool->addConfig('default', self::config());
         self::$poolManager = new PoolManager($pool);
+        $warmLease = self::$poolManager->checkout();
+        $warmLease->connection()->scalar('select ? as value', [42]);
+        $warmLease->release();
 
         self::$cachedConnection = new Connection(self::config(), 'runtime-cache');
         self::$cachedConnection->setQueryCache(Cache::memory('dblayer-runtime-benchmark'));
