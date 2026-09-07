@@ -102,6 +102,9 @@ it('keeps invalidation bound to the exact connection instance', function (): voi
     } finally {
         $first?->disconnect();
         $second?->disconnect();
-        @unlink($database);
+
+        if (is_file($database)) {
+            unlink($database);
+        }
     }
 });
