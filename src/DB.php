@@ -25,6 +25,7 @@ use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository;
 use Infocyph\DBLayer\Query\ResultProcessor;
 use Infocyph\DBLayer\Support\ArrayNormalizer;
+use Infocyph\DBLayer\Support\ConnectionReplacementGuard;
 use Infocyph\DBLayer\Support\Logger;
 use Infocyph\DBLayer\Support\Profiler;
 use Infocyph\DBLayer\Support\QueryExecutedBridge;
@@ -193,20 +194,12 @@ class DB
     {
         $configObject = static::normalizeConfig($config);
 
-        $existing = static::$connections[$name] ?? null;
-        if ($existing instanceof Connection) {
-            if ($existing->inTransaction()) {
-                throw ConnectionException::invalidConfiguration(
-                    "Cannot replace connection [{$name}] while it has an active transaction.",
-                );
-            }
-            $existing->disconnect();
-        }
+        ConnectionReplacementGuard::disconnect(
+            static::$connections[$name] ?? null,
+            "Cannot replace connection [{$name}] while it has an active transaction.",
+        );
 
-        $connection = new Connection($configObject, $name);
-        if (static::$cache !== null) {
-            $connection->setQueryCache(static::$cache);
-        }
+        $connection = (new Connection($configObject, $name))->setQueryCache(static::$cache);
 
         static::$connectionConfigs[$name] = $configObject;
         static::$connections[$name] = $connection;
@@ -242,11 +235,7 @@ class DB
      */
     public static function cache(): CacheInterface
     {
-        if (static::$cache === null) {
-            static::setCache(Cache::memory('dblayer'));
-        }
-
-        return static::$cache;
+        return static::$cache ?? self::initializeCache();
     }
 
     /**
@@ -290,21 +279,11 @@ class DB
         $config = static::$connectionConfigs[$name];
 
         if ($fresh) {
-            $connection = new Connection($config, $name);
-            if (static::$cache !== null) {
-                $connection->setQueryCache(static::$cache);
-            }
-
-            return $connection;
+            return (new Connection($config, $name))->setQueryCache(static::$cache);
         }
 
         if (!isset(static::$connections[$name])) {
-            $connection = new Connection($config, $name);
-            if (static::$cache !== null) {
-                $connection->setQueryCache(static::$cache);
-            }
-
-            static::$connections[$name] = $connection;
+            static::$connections[$name] = (new Connection($config, $name))->setQueryCache(static::$cache);
         }
 
         return static::$connections[$name];
@@ -828,10 +807,7 @@ class DB
             $connection = static::$connections[$name];
             $connection->disconnect();
         } else {
-            $connection = new Connection(static::$connectionConfigs[$name], $name);
-            if (static::$cache !== null) {
-                $connection->setQueryCache(static::$cache);
-            }
+            $connection = (new Connection(static::$connectionConfigs[$name], $name))->setQueryCache(static::$cache);
             static::$connections[$name] = $connection;
         }
 
@@ -1159,7 +1135,7 @@ class DB
     /**
      * Stream rows lazily for large reads without buffering all rows in memory.
      *
-     * @param array<int,mixed> $bindings
+     * @param array<int|string,mixed> $bindings
      * @return Generator<mixed>
      *
      * @throws ConnectionException
@@ -1373,9 +1349,7 @@ class DB
         return static::poolManager()->using(
             $name,
             static function (Connection $pooled) use ($callback): mixed {
-                if (static::$cache !== null) {
-                    $pooled->setQueryCache(static::$cache);
-                }
+                $pooled->setQueryCache(static::$cache);
 
                 return $callback($pooled);
             },
@@ -1503,28 +1477,20 @@ class DB
                 'security',
                 self::mergeSecurityDefaults($config->securityConfig(), $config->getDriver()),
             );
+            $replaceConnection = $refreshExisting || !isset(static::$connections[$name]);
 
-            if ($refreshExisting || !isset(static::$connections[$name])) {
-                $existing = static::$connections[$name] ?? null;
-                if ($existing instanceof Connection) {
-                    if ($existing->inTransaction()) {
-                        throw ConnectionException::invalidConfiguration(
-                            "Cannot refresh connection [{$name}] security while a transaction is active.",
-                        );
-                    }
-                    $existing->disconnect();
-                }
+            if ($replaceConnection) {
+                ConnectionReplacementGuard::disconnect(
+                    static::$connections[$name] ?? null,
+                    "Cannot refresh connection [{$name}] security while a transaction is active.",
+                );
             }
 
             static::$connectionConfigs[$name] = $normalized;
             static::$pool?->addConfig($name, $normalized);
 
-            if ($refreshExisting || !isset(static::$connections[$name])) {
-                $connection = new Connection($normalized, $name);
-                if (static::$cache !== null) {
-                    $connection->setQueryCache(static::$cache);
-                }
-                static::$connections[$name] = $connection;
+            if ($replaceConnection) {
+                static::$connections[$name] = (new Connection($normalized, $name))->setQueryCache(static::$cache);
             }
         }
     }
@@ -1613,6 +1579,14 @@ class DB
             Events::getListeners('db.query.failed'),
             true,
         );
+    }
+
+    private static function initializeCache(): CacheInterface
+    {
+        $cache = Cache::memory('dblayer');
+        static::setCache($cache);
+
+        return $cache;
     }
 
     /**
