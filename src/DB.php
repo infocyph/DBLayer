@@ -199,7 +199,7 @@ class DB
             "Cannot replace connection [{$name}] while it has an active transaction.",
         );
 
-        $connection = (new Connection($configObject, $name))->setQueryCache(static::$cache);
+        $connection = new Connection($configObject, $name)->setQueryCache(static::$cache);
 
         static::$connectionConfigs[$name] = $configObject;
         static::$connections[$name] = $connection;
@@ -279,12 +279,10 @@ class DB
         $config = static::$connectionConfigs[$name];
 
         if ($fresh) {
-            return (new Connection($config, $name))->setQueryCache(static::$cache);
+            return new Connection($config, $name)->setQueryCache(static::$cache);
         }
 
-        if (!isset(static::$connections[$name])) {
-            static::$connections[$name] = (new Connection($config, $name))->setQueryCache(static::$cache);
-        }
+        static::$connections[$name] ??= new Connection($config, $name)->setQueryCache(static::$cache);
 
         return static::$connections[$name];
     }
@@ -807,7 +805,7 @@ class DB
             $connection = static::$connections[$name];
             $connection->disconnect();
         } else {
-            $connection = (new Connection(static::$connectionConfigs[$name], $name))->setQueryCache(static::$cache);
+            $connection = new Connection(static::$connectionConfigs[$name], $name)->setQueryCache(static::$cache);
             static::$connections[$name] = $connection;
         }
 
@@ -1490,7 +1488,7 @@ class DB
             static::$pool?->addConfig($name, $normalized);
 
             if ($replaceConnection) {
-                static::$connections[$name] = (new Connection($normalized, $name))->setQueryCache(static::$cache);
+                static::$connections[$name] = new Connection($normalized, $name)->setQueryCache(static::$cache);
             }
         }
     }

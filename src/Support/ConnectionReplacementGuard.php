@@ -12,9 +12,7 @@ use Infocyph\DBLayer\Exceptions\ConnectionException;
  */
 final class ConnectionReplacementGuard
 {
-    private function __construct()
-    {
-    }
+    private function __construct() {}
 
     public static function disconnect(?Connection $connection, string $activeTransactionMessage): void
     {
