@@ -73,6 +73,8 @@ it('keeps invalidation bound to the exact connection instance', function (): voi
         . 'dblayer-instance-cache-'
         . bin2hex(random_bytes(8))
         . '.sqlite';
+    $first = null;
+    $second = null;
 
     try {
         $config = ConnectionConfig::fromArray([
