@@ -203,8 +203,13 @@ class DB
             $existing->disconnect();
         }
 
+        $connection = new Connection($configObject, $name);
+        if (static::$cache !== null) {
+            $connection->setQueryCache(static::$cache);
+        }
+
         static::$connectionConfigs[$name] = $configObject;
-        static::$connections[$name] = new Connection($configObject, $name);
+        static::$connections[$name] = $connection;
         static::$pool?->addConfig($name, $configObject);
 
         static::$defaultConnection ??= $name;
@@ -237,7 +242,9 @@ class DB
      */
     public static function cache(): CacheInterface
     {
-        static::$cache ??= Cache::memory('dblayer');
+        if (static::$cache === null) {
+            static::setCache(Cache::memory('dblayer'));
+        }
 
         return static::$cache;
     }
@@ -283,12 +290,22 @@ class DB
         $config = static::$connectionConfigs[$name];
 
         if ($fresh) {
-            // Fresh, non-cached Connection for this DB config.
-            return new Connection($config, $name);
+            $connection = new Connection($config, $name);
+            if (static::$cache !== null) {
+                $connection->setQueryCache(static::$cache);
+            }
+
+            return $connection;
         }
 
-        // Shared singleton: lazily (re)instantiate if missing.
-        static::$connections[$name] ??= new Connection($config, $name);
+        if (!isset(static::$connections[$name])) {
+            $connection = new Connection($config, $name);
+            if (static::$cache !== null) {
+                $connection->setQueryCache(static::$cache);
+            }
+
+            static::$connections[$name] = $connection;
+        }
 
         return static::$connections[$name];
     }
@@ -812,6 +829,9 @@ class DB
             $connection->disconnect();
         } else {
             $connection = new Connection(static::$connectionConfigs[$name], $name);
+            if (static::$cache !== null) {
+                $connection->setQueryCache(static::$cache);
+            }
             static::$connections[$name] = $connection;
         }
 
@@ -991,6 +1011,10 @@ class DB
     public static function setCache(CacheInterface $cache): void
     {
         static::$cache = $cache;
+
+        foreach (static::$connections as $connection) {
+            $connection->setQueryCache($cache);
+        }
     }
 
     /**
@@ -1348,7 +1372,13 @@ class DB
 
         return static::poolManager()->using(
             $name,
-            static fn(Connection $pooled): mixed => $callback($pooled),
+            static function (Connection $pooled) use ($callback): mixed {
+                if (static::$cache !== null) {
+                    $pooled->setQueryCache(static::$cache);
+                }
+
+                return $callback($pooled);
+            },
         );
     }
 
@@ -1490,7 +1520,11 @@ class DB
             static::$pool?->addConfig($name, $normalized);
 
             if ($refreshExisting || !isset(static::$connections[$name])) {
-                static::$connections[$name] = new Connection($normalized, $name);
+                $connection = new Connection($normalized, $name);
+                if (static::$cache !== null) {
+                    $connection->setQueryCache(static::$cache);
+                }
+                static::$connections[$name] = $connection;
             }
         }
     }
