@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection\Concerns;
 
+use Infocyph\CacheLayer\Cache\Cache;
 use Infocyph\CacheLayer\Cache\CacheInterface;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\Connection\ReadReplicaSessionPolicy;
 use Infocyph\DBLayer\Connection\SqlStatementInspector;
-use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\SecurityException;
@@ -24,27 +24,28 @@ use Throwable;
 trait ConnectionInternals
 {
     /**
-     * Explicit query-result cache bound to this connection instance.
+     * Query-result cache owned by this connection instance.
      */
     private ?CacheInterface $queryCache = null;
 
     /**
-     * Resolve the cache used by query-result caching.
-     *
-     * Instance binding wins. The DB facade cache remains the compatibility
-     * fallback for applications that intentionally use the static facade.
+     * Whether this connection already has a query-result cache configured.
      */
-    public function queryCache(): CacheInterface
+    public function hasQueryCache(): bool
     {
-        return $this->queryCache ?? DB::cache();
+        return $this->queryCache !== null;
     }
 
     /**
-     * Return only the explicitly instance-bound query cache, if any.
+     * Resolve the query-result cache for this connection.
+     *
+     * Direct Connection users remain independent from the process-static DB
+     * facade. A private memory cache is created only when cacheFor() is used
+     * without an explicitly supplied shared CacheLayer backend.
      */
-    public function queryCacheOverride(): ?CacheInterface
+    public function queryCache(): CacheInterface
     {
-        return $this->queryCache;
+        return $this->queryCache ??= Cache::memory('dblayer');
     }
 
     /**
@@ -127,7 +128,7 @@ trait ConnectionInternals
      */
     private function applyReadOnlyTransactionMode(): void
     {
-        $this->driver->applyReadOnlyTransaction($this->getPdo());
+        $this->driver->applyReadOnlyTransactionMode($this->getPdo());
     }
 
     /**
