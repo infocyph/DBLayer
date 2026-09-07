@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection\Concerns;
 
+use Infocyph\CacheLayer\Cache\CacheInterface;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\Connection\ReadReplicaSessionPolicy;
 use Infocyph\DBLayer\Connection\SqlStatementInspector;
+use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Events\Events;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\DBLayer\Exceptions\SecurityException;
@@ -21,6 +23,40 @@ use Throwable;
 
 trait ConnectionInternals
 {
+    /**
+     * Explicit query-result cache bound to this connection instance.
+     */
+    private ?CacheInterface $queryCache = null;
+
+    /**
+     * Resolve the cache used by query-result caching.
+     *
+     * Instance binding wins. The DB facade cache remains the compatibility
+     * fallback for applications that intentionally use the static facade.
+     */
+    public function queryCache(): CacheInterface
+    {
+        return $this->queryCache ?? DB::cache();
+    }
+
+    /**
+     * Return only the explicitly instance-bound query cache, if any.
+     */
+    public function queryCacheOverride(): ?CacheInterface
+    {
+        return $this->queryCache;
+    }
+
+    /**
+     * Bind or clear the query-result cache for this exact connection instance.
+     */
+    public function setQueryCache(?CacheInterface $cache): self
+    {
+        $this->queryCache = $cache;
+
+        return $this;
+    }
+
     /**
      * Disconnect write and read handles and reset request-scoped state.
      */
