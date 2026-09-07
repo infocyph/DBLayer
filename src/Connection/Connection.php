@@ -546,9 +546,7 @@ final class Connection
      */
     public function getHealthCheck(): HealthCheck
     {
-        if ($this->healthCheck === null) {
-            $this->healthCheck = new HealthCheck($this);
-        }
+        $this->healthCheck ??= new HealthCheck($this);
 
         return $this->healthCheck;
     }
@@ -1415,12 +1413,10 @@ final class Connection
      */
     private static function pretendPdo(): PDO
     {
-        if (self::$pretendPdo === null) {
-            self::$pretendPdo = new PDO('sqlite::memory:', '', '', [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            ]);
-        }
+        self::$pretendPdo ??= new PDO('sqlite::memory:', '', '', [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
 
         return self::$pretendPdo;
     }

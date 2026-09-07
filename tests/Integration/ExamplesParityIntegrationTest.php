@@ -489,6 +489,7 @@ it('keeps examples and integration coverage in sync', function (): void {
         'restored_modules.php' => [
             'RestoredModulesIntegrationTest.php',
             'ModernizationIntegrationTest.php',
+            'InstanceQueryCacheIntegrationTest.php',
         ],
         'schema_migrations.php' => [
             'SchemaMigrationIntegrationTest.php',

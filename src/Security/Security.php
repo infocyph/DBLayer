@@ -572,9 +572,7 @@ final class Security
      */
     private static function limiter(): RateLimiter
     {
-        if (self::$rateLimiter === null) {
-            self::$rateLimiter = new RateLimiter();
-        }
+        self::$rateLimiter ??= new RateLimiter();
 
         return self::$rateLimiter;
     }

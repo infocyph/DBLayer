@@ -7,7 +7,6 @@ namespace Infocyph\DBLayer\Query\Concerns;
 use Generator;
 use Infocyph\ArrayKit\Collection\Collection;
 use Infocyph\ArrayKit\Collection\LazyCollection;
-use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Pagination\SimplePaginator;
 
@@ -67,7 +66,7 @@ trait QueryBuilderResults
             return $this->executor->selectCompiled($compiled);
         }
 
-        $result = DB::cache()->remember(
+        $result = $this->connection->queryCache()->remember(
             $this->resultCacheKey($sql, $bindingFingerprint),
             fn(): array => $this->executor->selectCompiled($compiled),
             $this->cacheTtl,

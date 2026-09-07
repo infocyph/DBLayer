@@ -1,15 +1,51 @@
 Caching
 ~~~~~~~
 
-DBLayer uses ``infocyph/cachelayer`` 3.x. Cache initialization is lazy, so
-ordinary database-only request paths do not allocate a cache adapter. The
-default is ``Cache::memory('dblayer')``.
+DBLayer uses ``infocyph/cachelayer`` ``^3.4``. Query-result caching is opt-in
+and ordinary database-only paths do not need to initialize a cache adapter.
 
-Cache Topology
---------------
+The important runtime rule is ownership: a ``QueryBuilder`` uses the cache
+attached to its exact ``Connection`` instance. Result reads and post-commit
+invalidation therefore do not depend on process-static ``DB`` registration.
 
-``DB::cache()`` returns the configured CacheLayer instance. Inject any
-CacheLayer 3 topology explicitly:
+Instance-Owned Cache
+--------------------
+
+For DI containers, scoped runtimes, workers, Fibers, or other execution-owned
+connection lifecycles, attach the CacheLayer backend directly to the connection:
+
+.. code-block:: php
+
+   use Infocyph\CacheLayer\Cache\Cache;
+   use Infocyph\DBLayer\Connection\Connection;
+   use Infocyph\DBLayer\Connection\ConnectionConfig;
+
+   $connection = new Connection(
+       ConnectionConfig::fromArray([
+           'driver' => 'sqlite',
+           'database' => __DIR__ . '/../storage/app.sqlite',
+       ]),
+       'main',
+   );
+
+   $connection->setQueryCache(
+       Cache::file('dblayer-query', __DIR__ . '/../storage/cache'),
+   );
+
+   $users = $connection->table('users')
+       ->where('active', '=', 1)
+       ->cacheFor(120)
+       ->get();
+
+``setQueryCache()`` binds or clears the backend for that exact connection.
+``queryCache()`` lazily creates a private in-memory backend when a direct
+``Connection`` user opts into ``cacheFor()`` without supplying one explicitly.
+
+Facade Cache Topology
+---------------------
+
+The static facade remains a convenience API for applications that intentionally
+use process-level ``DB`` orchestration:
 
 .. code-block:: php
 
@@ -24,11 +60,16 @@ CacheLayer 3 topology explicitly:
    ]));
 
 Adapter selection, storage, locking, stampede protection, metrics, TTL, and tag
-versions remain CacheLayer responsibilities. DBLayer does not provide
-adapter-specific configuration shortcuts.
+versions remain CacheLayer responsibilities. DBLayer does not duplicate
+adapter-specific configuration.
+
+For execution-scoped runtimes, prefer explicit ``Connection`` ownership over
+using ``DB::cache()`` as the correctness boundary.
 
 Direct CacheLayer Usage
 -----------------------
+
+CacheLayer can still be used directly for application-owned cache entries:
 
 .. code-block:: php
 
@@ -47,7 +88,7 @@ Direct CacheLayer Usage
 Query Result Cache
 ------------------
 
-The preferred database-integrated form is opt-in on a QueryBuilder:
+The database-integrated form is opt-in on ``QueryBuilder``:
 
 .. code-block:: php
 
@@ -65,40 +106,53 @@ The preferred database-integrated form is opt-in on a QueryBuilder:
 
    $fresh = DB::table('users')->cacheFor(120)->withoutCache()->get();
 
-Automatic identities include the logical connection, driver, database,
+Automatic result identities include the logical connection, driver, database,
 result mode, compiled SQL fingerprint, and normalized scalar bindings. They do
 not contain credentials, TLS material, or physical replica indexes.
+
+When multiple independent database deployments deliberately share the same
+CacheLayer backend, give those deployments distinct CacheLayer namespaces and/or
+logical DBLayer connection identities. Do not rely on credentials or physical
+replica addresses to partition result-cache entries.
 
 Tags and Invalidation
 ---------------------
 
 Builder reads receive conservative tags for their source and joined tables.
-Repository reads also add record and tenant tags where applicable. CacheLayer
-3 permits only letters, digits, ``_``, ``.``, and ``-`` in tags, so DBLayer's
-internal tags use forms such as ``table.users`` and
-``table.users.id.42``. Caller tags are validated exactly and rejected when they
-are empty, longer than 64 bytes, or outside the documented alphabet; DBLayer
-does not silently rewrite caller identity.
+Repository reads also add record and tenant tags where applicable. DBLayer's
+internal tags are database-scoped hashes, while caller tags are validated
+exactly and rejected when empty, longer than 64 bytes, or outside CacheLayer's
+documented tag alphabet.
 
-Successful QueryBuilder writes invalidate table tags through ``afterCommit()``.
-A rollback, rolled-back savepoint, or failed transaction retry therefore does
-not evict valid cached data.
+Structured writes schedule invalidation on the exact owning connection with
+``Connection::afterCommit()``. Invalidation runs after the successful top-level
+commit. A rollback, rolled-back savepoint, or failed transaction retry therefore
+does not evict valid cached data.
+
+Two connection instances may intentionally share the same CacheLayer backend.
+When they identify the same database/table dependency, a structured write from
+one instance invalidates cached results populated by the other. When they use
+separate backends, invalidation remains isolated to the backend attached to the
+writing connection.
 
 Consistency Bypasses
 --------------------
 
-Shared result caching is bypassed for active transactions, sticky
+Result caching is bypassed for active managed transactions, sticky
 read-after-write state, locking reads, cursors, streaming, lazy/chunked reads,
 unsupported resource bindings, and raw query fragments without explicit tags.
 Queries with CTE, UNION, derived-table, nested, or subquery dependencies also
-bypass shared caching unless the caller supplies complete explicit tags.
-These paths continue to execute normally; they simply do not read or populate
-the shared result cache.
+bypass caching unless the caller supplies complete explicit tags.
 
-Raw write helpers cannot infer table dependencies reliably. After an explicit
-raw mutation, call ``DB::invalidateCacheTags()`` with the application-owned tags
-that cover the write. Structured QueryBuilder and schema DDL mutations schedule
-their table-tag invalidation automatically after commit.
+These paths continue to execute normally; they simply do not read or populate
+the result cache.
+
+Raw write helpers cannot infer table dependencies reliably. Facade users can
+call ``DB::invalidateCacheTags()`` with application-owned tags after explicit
+raw mutations. Instance-owned runtimes should invalidate through the exact
+CacheLayer backend they attached to the connection. Structured QueryBuilder and
+schema DDL mutations schedule their table-tag invalidation automatically after
+commit.
 
 Repository Policy
 -----------------
@@ -111,6 +165,20 @@ Repositories expose the same opt-in policy:
        ->forTenant(10)
        ->cacheFor(120)
        ->find(42);
+
+Instance-first repositories inherit the cache from their exact connection:
+
+.. code-block:: php
+
+   final class UserRepository extends \Infocyph\DBLayer\Query\ConnectionRepository
+   {
+       protected function table(): string
+       {
+           return 'users';
+       }
+   }
+
+   $users = (new UserRepository($connection))->cacheFor(120);
 
 The repository adds table, tenant, and primary-key record tags while retaining
 the transaction and sticky-read consistency rules above.

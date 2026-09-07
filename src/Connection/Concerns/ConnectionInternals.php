@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection\Concerns;
 
+use Infocyph\CacheLayer\Cache\Cache;
+use Infocyph\CacheLayer\Cache\CacheInterface;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\Connection\ReadReplicaSessionPolicy;
 use Infocyph\DBLayer\Connection\SqlStatementInspector;
@@ -21,6 +23,11 @@ use Throwable;
 
 trait ConnectionInternals
 {
+    /**
+     * Query-result cache owned by this connection instance.
+     */
+    private ?CacheInterface $queryCache = null;
+
     /**
      * Disconnect write and read handles and reset request-scoped state.
      */
@@ -41,6 +48,36 @@ trait ConnectionInternals
         $this->recordsModified = false;
         $this->transactionManager = null;
         $this->resetRequestRuntimeState();
+    }
+
+    /**
+     * Whether this connection already has a query-result cache configured.
+     */
+    public function hasQueryCache(): bool
+    {
+        return $this->queryCache !== null;
+    }
+
+    /**
+     * Resolve the query-result cache for this connection.
+     *
+     * Direct Connection users remain independent from the process-static DB
+     * facade. A private memory cache is created only when cacheFor() is used
+     * without an explicitly supplied shared CacheLayer backend.
+     */
+    public function queryCache(): CacheInterface
+    {
+        return $this->queryCache ??= Cache::memory('dblayer');
+    }
+
+    /**
+     * Bind or clear the query-result cache for this exact connection instance.
+     */
+    public function setQueryCache(?CacheInterface $cache): self
+    {
+        $this->queryCache = $cache;
+
+        return $this;
     }
 
     /**
@@ -444,9 +481,7 @@ trait ConnectionInternals
      */
     private function getExecutor(): Executor
     {
-        if ($this->executor === null) {
-            $this->executor = new Executor($this);
-        }
+        $this->executor ??= new Executor($this);
 
         return $this->executor;
     }
@@ -470,9 +505,7 @@ trait ConnectionInternals
      */
     private function getTransactionManager(): TransactionManager
     {
-        if ($this->transactionManager === null) {
-            $this->transactionManager = new TransactionManager();
-        }
+        $this->transactionManager ??= new TransactionManager();
 
         return $this->transactionManager;
     }

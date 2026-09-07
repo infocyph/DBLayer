@@ -4,59 +4,67 @@ Repository
 Introduction
 ------------
 
-Create a repository:
+Repository is a thin table-centric abstraction over ``QueryBuilder``. It adds
+reusable policy such as tenant scope, soft deletes, optimistic locking, casts,
+hooks, default ordering, and query-result cache policy while preserving direct
+builder access for advanced SQL composition.
+
+DBLayer supports both facade-created repositories and instance-owned
+repositories.
+
+Facade Repository
+-----------------
 
 .. code-block:: php
 
    $users = DB::repository('users');
 
-Repository is a thin abstraction over ``QueryBuilder`` for table-centric
-application code. It adds feature scopes and lifecycle hooks while preserving
-access to query-level composition through optional scope callbacks.
+Use this when your application intentionally uses the process-level ``DB``
+facade as its connection/orchestration boundary.
 
-DB vs Repository: Why and What Differs
---------------------------------------
+Instance-Owned Repository
+-------------------------
 
-Use ``DB`` as the orchestration entrypoint and ``Repository`` as the
-table-level policy layer.
+For DI containers, workers, Fiber/interleaved runtimes, or higher-level
+frameworks that already own an exact ``Connection``, extend
+``ConnectionRepository``:
 
-- Use ``DB::table()`` when you need direct query composition, joins, ad-hoc SQL
-  shaping, or low-level control per query.
-- Use ``DB::repository()`` when multiple call sites must share the same table
-  rules (tenant scope, soft deletes, optimistic locking, casts, hooks, default
-  ordering, reusable scopes).
+.. code-block:: php
 
-Practical split:
+   use Infocyph\DBLayer\Query\ConnectionRepository;
 
-- ``DB`` owns connections, transactions, raw SQL helpers, telemetry/profiler,
-  pooling, and capability checks.
-- ``Repository`` owns reusable behavior for one table while still allowing
-  ``QueryBuilder`` access through scoped callbacks and ``builder()``.
+   final class UserRepository extends ConnectionRepository
+   {
+       protected function table(): string
+       {
+           return 'users';
+       }
+   }
 
-Entry Flow from DB
-------------------
+   $users = new UserRepository($connection);
 
-In practice, most usage enters through ``DB`` and then branches:
+``ConnectionRepository`` derives the connection-bound ``Executor`` and a
+stateless ``ResultProcessor`` internally. The higher layer therefore does not
+need ``DB::resultProcessor()`` or any other static facade state just to build a
+repository.
 
-- ``DB`` for runtime orchestration (transactions, retries, capabilities,
-  observability, pooling)
-- ``DB::table()`` for ad-hoc query composition
-- ``DB::repository()`` for table-level policy
-
-This is an explicit design choice, not accidental overlap.
+Use the same exact connection for the repository, transaction boundary, query
+cache, and execution cleanup lifecycle.
 
 When Repository Is the Better Default
 -------------------------------------
 
-Use repository-first when your team repeatedly applies the same table rules:
+Use repository-first when multiple call sites must apply the same rules:
 
 - tenant isolation
 - soft-delete visibility rules
 - optimistic locking writes
 - lifecycle hooks around writes
 - default ordering and shared query scopes
+- connection-owned query-cache policy
 
-This keeps rules in one place instead of spread across many builder chains.
+This keeps table rules in one place instead of duplicating filters and
+read-before-write logic across application adapters.
 
 .. contents:: On This Page
    :depth: 2
@@ -68,7 +76,8 @@ Core Methods
 - ``all()``, ``get()``, ``first()``, ``find()``, ``findMany()``
 - ``create()``, ``updateById()``, ``deleteById()``
 - ``firstOrCreate()``, ``updateOrCreate()``, ``upsert()``
-- ``cacheFor()`` for an opt-in table/tenant/record-tagged read policy
+- ``updateByIdWithVersion()``
+- ``cacheFor()`` for opt-in table/tenant/record-tagged reads
 
 ``findMany()`` deduplicates database lookup keys, applies driver/security
 parameter ceilings, and restores the caller's requested identifier order (and
@@ -85,84 +94,55 @@ Pattern for scoped reads:
 
 .. code-block:: php
 
-   $active = $users->get(fn ($q) => $q->where('active', '=', 1));
+   $active = $users->get(
+       static fn ($q) => $q->where('active', '=', 1),
+   );
 
-Repository-Style App Class (Composition)
-----------------------------------------
+Native Upsert
+-------------
 
-DBLayer repository is not an ORM. If you want repository-oriented naming, wrap the
-repository in an app class:
-
-.. code-block:: php
-
-   use Infocyph\DBLayer\DB;
-   use Infocyph\DBLayer\Query\Repository;
-
-   final class UserRepository
-   {
-       public function __construct(private readonly Repository $repo) {}
-
-       public static function make(int $tenantId): self
-       {
-           $repo = DB::repository('users')
-               ->forTenant($tenantId)
-               ->enableSoftDeletes()
-               ->setDefaultOrder('id', 'desc');
-
-           return new self($repo);
-       }
-
-       public function findByEmail(string $email): ?array
-       {
-           return $this->repo->first(
-               fn ($q) => $q->where('email', '=', $email)
-           );
-       }
-
-       public function allActive()
-       {
-           return $this->repo->get(
-               fn ($q) => $q->where('active', '=', 1)
-           );
-       }
-   }
-
-.. note::
-
-   ``DB::repository('UserProfiles')`` normalizes to ``user_profiles`` table
-   name. This helps keep naming consistent for repository-style class names.
-
-Laravel-Like Repository Surface (Without ORM)
----------------------------------------------
-
-If you want static repository-oriented calls while keeping pure repository style, build
-on top of DBLayer's built-in ``TableRepository``:
+Use ``upsert()`` for driver-aware insert-or-update semantics instead of
+application-level SELECT-then-INSERT/UPDATE flows:
 
 .. code-block:: php
 
-   use Infocyph\DBLayer\Repository\TableRepository;
-   use Infocyph\DBLayer\Query\QueryBuilder;
-   use Infocyph\DBLayer\Query\Repository;
+   $users->upsert(
+       [['email' => $email, 'name' => $name]],
+       ['email'],
+       ['name'],
+   );
 
-   abstract class AppTableRepository extends TableRepository
-   {
-       protected static function configureRepository(Repository $repository): Repository
-       {
-           return $repository->enableSoftDeletes();
-       }
-   }
+DBLayer owns dialect/capability handling for the mutation. Higher layers should
+not duplicate an upsert abstraction unless they are adding domain policy rather
+than SQL mechanics.
 
-   final class User extends AppTableRepository
-   {
-       protected static string $table = 'users';
-       protected static ?string $connection = 'main';
-   }
+Optimistic Conditional Writes
+-----------------------------
 
-   $one = User::find(1);
-   $active = User::forTenant(10)->get(static fn (QueryBuilder $q) => $q->where('active', '=', 1));
-   $reportRows = User::query('reporting')->limit(20)->get();
+For rows that require compare-and-swap style persistence, use
+``updateByIdWithVersion()``:
 
-This preserves repository semantics and avoids accidental ORM expectations.
+.. code-block:: php
+
+   $updated = $users->updateByIdWithVersion(
+       id: $id,
+       values: ['payload' => $payload],
+       expectedVersion: $revision,
+       versionColumn: 'revision',
+   );
+
+The write matches both primary key and expected version and advances the version
+on success. This is the generic lower-level primitive for application-level
+concurrency policy such as profile revisions, token records, MFA factors, or
+passkey credential records.
+
+DBLayer should not gain domain-specific CAS APIs for those use cases; the host
+owns domain semantics and DBLayer owns the conditional database mutation.
+
+.. warning::
+
+   Do not replace a required conditional write with a SELECT followed by a blind
+   update. The two operations create a lost-update race window.
 
 Feature Scopes
 --------------
@@ -185,36 +165,29 @@ Boolean casts normalize native booleans and common database representations:
 ``1``, ``t``, ``true``, ``yes``, and ``on`` are true; ``0``, ``f``,
 ``false``, ``no``, ``off``, and an empty string are false. Matching is
 case-insensitive and ignores surrounding whitespace. ``null`` remains
-``null``. This normalization belongs to the repository cast boundary; raw
-``Connection`` and ``QueryBuilder`` results retain the PDO driver's native
+``null``. Raw ``Connection`` and ``QueryBuilder`` results retain PDO-native
 value types.
 
-Soft-delete behavior:
+Query Cache Policy
+------------------
 
-- ``deleteById()`` writes a timestamp when soft deletes are enabled.
-- ``withTrashed()`` includes deleted rows.
-- ``onlyTrashed()`` limits reads to deleted rows.
-- ``forceDeleteById()`` bypasses soft-delete and removes rows permanently.
+Repository reads opt into the CacheLayer-backed query cache with ``cacheFor()``.
+The repository uses the cache attached to its exact connection and adds table,
+tenant, and primary-key record tags where applicable.
 
-Optimistic locking behavior:
-
-- ``updateByIdWithVersion()`` updates only when expected version matches.
-- Successful update increments the version column.
-
-.. warning::
-
-   Do not mix optimistic locking writes with blind ``updateById()`` on the same
-   records unless you intentionally accept lost-update risk.
+Structured repository writes flow through QueryBuilder mutation semantics and
+schedule tag invalidation after the successful top-level commit. Rollback does
+not evict valid cached data.
 
 Repository + QueryBuilder Together
 ----------------------------------
 
-For advanced one-off queries, you can drop to builder without abandoning
-repository defaults:
+For advanced one-off queries, drop to builder without abandoning repository
+defaults:
 
 .. code-block:: php
 
-   $users = DB::repository('users')
+   $users = (new UserRepository($connection))
        ->forTenant($tenantId)
        ->setDefaultOrder('id', 'desc');
 
@@ -223,20 +196,32 @@ repository defaults:
        ->limit(50)
        ->get();
 
-Use this sparingly for SQL-heavy reads. Keep recurring table rules in repository
-methods/scopes.
+Keep recurring table rules in repository methods/scopes and SQL shape in the
+builder.
 
-Common Scenarios
-----------------
+Static TableRepository Surface
+------------------------------
 
-1. Tenant-scoped reads and writes:
-   ``DB::repository('users')->forTenant($tenantId)``.
-2. Soft-delete lifecycle:
-   ``enableSoftDeletes()``, ``withTrashed()``, ``restoreById()``.
-3. Concurrent edit safety:
-   ``enableOptimisticLocking()`` with ``updateByIdWithVersion()``.
-4. DTO output mapping for service layers:
-   ``mapInto()`` and ``firstInto()``.
+If you intentionally want static repository-oriented calls while keeping
+repository semantics, use ``TableRepository``:
+
+.. code-block:: php
+
+   use Infocyph\DBLayer\Repository\TableRepository;
+
+   final class User extends TableRepository
+   {
+       protected static string $table = 'users';
+       protected static ?string $connection = 'main';
+   }
+
+   $one = User::find(1);
+   $active = User::forTenant(10)->get(
+       static fn ($q) => $q->where('active', '=', 1),
+   );
+
+This preserves repository semantics and does not introduce ORM identity maps,
+dirty tracking, or a unit of work.
 
 Mapping
 -------

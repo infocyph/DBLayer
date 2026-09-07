@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Query\Concerns;
 
 use DateInterval;
-use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Exceptions\QueryException;
 use Infocyph\DBLayer\Query\JoinClause;
 use Infocyph\DBLayer\Support\SqlFingerprint;
@@ -184,7 +183,21 @@ trait QueryBuilderCaching
 
     private function invalidateCachedTables(): void
     {
-        DB::invalidateCacheTagsAfterCommit($this->automaticTableTags(), $this->connection->getName());
+        if (!$this->connection->hasQueryCache()) {
+            return;
+        }
+
+        $tags = $this->automaticTableTags();
+        if ($tags === []) {
+            return;
+        }
+
+        $cache = $this->connection->queryCache();
+        $this->connection->afterCommit(
+            static function () use ($cache, $tags): void {
+                $cache->invalidateTags($tags);
+            },
+        );
     }
 
     private function resultCacheKey(string $sql, string $bindingFingerprint): string

@@ -14,7 +14,7 @@ The reliable optimization loop is:
 1. Capture the slow parameterized query shape.
 2. Inspect its native execution plan.
 3. Verify row estimates, actual rows, loops, sort/hash behavior, and I/O.
-4. Change one query, index, statistics, or partitioning decision.
+4. Change one query, index, statistics, partitioning, or runtime-lifecycle decision.
 5. Repeat the plan and an end-to-end benchmark with equivalent results.
 6. Keep the change only when sustained application throughput improves without
    correctness or operational regressions.
@@ -263,6 +263,52 @@ database fleet. Export telemetry regularly and use native systems such as
 PostgreSQL ``pg_stat_statements`` or the corresponding MySQL monitoring tools
 for durable, server-wide evidence.
 
+Connection Lifecycle and Pooling
+--------------------------------
+
+Connection lifecycle is a performance decision only after it is a correctness
+decision. Persistent runtimes may compare three strategies:
+
+- construct/open/use/disconnect per execution
+- keep a dedicated warm connection owned by a long-lived component
+- reuse connections through ``PoolManager`` tokenized leases
+
+DBLayer includes ``RuntimeLifecycleBench`` specifically to measure these paths.
+Compare full open/query/disconnect cost against checkout/query/release, warm
+selects, and prepared-statement reuse before enabling pooling.
+
+Pooling is most relevant to long-running workers and persistent hosts. Typical
+PHP-FPM request lifecycles often gain little from a userland pool because the
+process/request lifecycle already bounds reuse differently.
+
+When pooling is selected:
+
+- each active ``ConnectionLease`` belongs to exactly one execution scope
+- release through the lease rather than a stale bare connection reference
+- let DBLayer run ``resetRuntimeStateForReuse()`` before idle reuse
+- preserve prepared-statement cache reuse unless measurements show otherwise
+- monitor total/active/idle connection counts under sustained concurrency
+
+Do not add application-level locks around ``PoolManager`` as a substitute for
+checkout ownership. Pool state is process-local and the lease token is the
+intended ownership primitive.
+
+Query Result Cache Performance
+------------------------------
+
+Query-result caching is also opt-in. Compare disabled, miss, and hit paths with
+the same query and result shape. For scoped runtimes, attach the selected
+CacheLayer backend to the exact connection with ``setQueryCache()`` rather than
+routing cache correctness through a static facade lookup.
+
+Use memory CacheLayer for DBLayer microbenchmarks. Networked/shared CacheLayer
+backends belong in integration/load tests where serialization, transport,
+server latency, tag invalidation, and concurrency are all present.
+
+A cache hit that returns stale or cross-topology data is not a performance win.
+When independent database deployments share CacheLayer infrastructure, isolate
+their CacheLayer namespace/logical connection identity deliberately.
+
 Benchmark Acceptance
 --------------------
 
@@ -274,7 +320,11 @@ Plan cost is evidence, not the final performance result. Compare:
 - rows examined versus rows returned
 - buffer/cache hits and physical reads
 - CPU, memory, locks, connection occupancy, and temporary spills
+- connection creation versus checkout/release lifecycle cost
+- prepared-statement reuse benefit
+- query-cache disabled/miss/hit/invalidation cost
 - sustained successful RPS/RPM across realistic concurrency
+- stable memory and connection count across repeated persistent executions
 - write throughput after adding or enlarging indexes
 
 Reject an optimization that improves one isolated plan while reducing complete

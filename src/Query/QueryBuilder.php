@@ -1220,9 +1220,7 @@ class QueryBuilder
      */
     public function stream(?int $fetchMode = null): Generator
     {
-        if ($this->type === null) {
-            $this->type = 'select';
-        }
+        $this->type ??= 'select';
 
         yield from $this->connection->stream(
             $this->toSelectSql(),
@@ -1295,9 +1293,7 @@ class QueryBuilder
      */
     public function toSelectSql(): string
     {
-        if ($this->type === null) {
-            $this->type = 'select';
-        }
+        $this->type ??= 'select';
 
         return $this->connection->getCompiler()->compile($this->toPayload())->sql;
     }
@@ -1361,9 +1357,7 @@ class QueryBuilder
      */
     public function unbufferedStream(?int $fetchMode = null, int $fetchSize = 1000): Generator
     {
-        if ($this->type === null) {
-            $this->type = 'select';
-        }
+        $this->type ??= 'select';
 
         yield from $this->connection->unbufferedStream(
             $this->toSelectSql(),

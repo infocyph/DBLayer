@@ -106,9 +106,7 @@ final class TransactionManager
     {
         $hash = spl_object_id($connection);
 
-        if (!isset($this->transactions[$hash])) {
-            $this->transactions[$hash] = new Transaction($connection);
-        }
+        $this->transactions[$hash] ??= new Transaction($connection);
 
         return $this->transactions[$hash];
     }

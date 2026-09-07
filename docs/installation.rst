@@ -6,8 +6,8 @@ Requirements
 
 - PHP ``^8.4``
 - ``ext-pdo``
-- ``infocyph/arraykit`` ``^5.1``
-- ``infocyph/cachelayer`` ``^3.1``
+- ``infocyph/arraykit`` ``^5.2``
+- ``infocyph/cachelayer`` ``^3.4``
 - ``psr/log`` ``^3.0.2``
 - Optional per driver:
   - ``ext-pdo_mysql`` (MySQL and MariaDB)
@@ -16,6 +16,10 @@ Requirements
   - ``ext-pdo_sqlite`` (SQLite)
 - Optional identifier generation: ``infocyph/uid``. DBLayer's ``uuid`` and
   ``ulid`` schema helpers declare storage and do not require a generator.
+
+DBLayer keeps CacheLayer as a direct dependency because query-result caching
+and migration locking integrate with CacheLayer contracts. Ordinary database
+paths remain cache-cold until a cache-backed feature is selected.
 
 Driver Notes
 ------------

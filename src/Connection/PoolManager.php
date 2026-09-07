@@ -7,93 +7,135 @@ namespace Infocyph\DBLayer\Connection;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 
 /**
- * PoolManager
+ * DI-friendly facade over the low-level Pool.
  *
- * Tiny DI-friendly facade over the low-level Pool:
- * - Tracks which connection name a Connection came from
- * - Lets you get / release safely without passing the name back
- * - Provides a simple "using" helper for scoped usage
- *
- * Typical DI wiring:
- *  - Register Pool as a shared service
- *  - Register PoolManager with Pool injected
- *  - Repositories / services depend on PoolManager
+ * checkout() is the concurrency-safe ownership API for persistent runtimes.
+ * get()/release() remain as a legacy convenience for strictly scoped callers.
  */
 final class PoolManager
 {
     /**
-     * Map of connection object id → pool name.
+     * Active tokenized checkouts keyed by Connection object id.
+     *
+     * @var array<int,array{name:string,token:int}>
+     */
+    private array $activeLeases = [];
+
+    /**
+     * Legacy get()/release() ownership keyed by Connection object id.
      *
      * @var array<int,string>
      */
     private array $connectionNames = [];
 
+    private int $leaseSequence = 0;
+
     public function __construct(
-        /**
-         * Underlying pool instance.
-         */
         private readonly Pool $pool,
     ) {}
 
     /**
-     * Get a pooled connection for the given name.
+     * Checkout a pooled connection with an exclusive ownership token.
+     */
+    public function checkout(string $name = 'default'): ConnectionLease
+    {
+        $connection = $this->pool->getConnection($name);
+        $id = spl_object_id($connection);
+
+        if (isset($this->activeLeases[$id]) || isset($this->connectionNames[$id])) {
+            throw ConnectionException::invalidConfiguration(
+                'Pool returned a connection that is already owned by this pool manager.',
+            );
+        }
+
+        $token = ++$this->leaseSequence;
+        $this->activeLeases[$id] = [
+            'name' => $name,
+            'token' => $token,
+        ];
+
+        return new ConnectionLease($this, $connection, $name, $token);
+    }
+
+    /**
+     * Legacy direct checkout.
      *
-     * This will:
-     *  - Ask the Pool for a Connection
-     *  - Remember which name it came from for later release()
+     * Prefer checkout() in persistent or interleaved execution models because a
+     * bare Connection reference cannot prove which reuse generation owns it.
      */
     public function get(string $name = 'default'): Connection
     {
         $connection = $this->pool->getConnection($name);
+        $id = spl_object_id($connection);
 
-        $this->connectionNames[spl_object_id($connection)] = $name;
+        if (isset($this->activeLeases[$id]) || isset($this->connectionNames[$id])) {
+            throw ConnectionException::invalidConfiguration(
+                'Pool returned a connection that is already owned by this pool manager.',
+            );
+        }
+
+        $this->connectionNames[$id] = $name;
 
         return $connection;
     }
 
-    /**
-     * Expose the underlying Pool for advanced operations (stats, config).
-     */
     public function getPool(): Pool
     {
         return $this->pool;
     }
 
     /**
-     * Release a connection back into the pool.
-     *
-     * If the name is not provided, it will be inferred from the
-     * internal map. If the connection was not obtained via this
-     * PoolManager, the call becomes a no-op.
+     * Release a legacy get() checkout.
      */
     public function release(Connection $connection, ?string $name = null): void
     {
         $id = spl_object_id($connection);
 
-        if ($name === null) {
-            $name = $this->connectionNames[$id] ?? null;
+        if (isset($this->activeLeases[$id])) {
+            throw ConnectionException::invalidConfiguration(
+                'Cannot release a tokenized checkout without its active connection lease.',
+            );
         }
 
-        if ($name === null) {
+        $ownedName = $this->connectionNames[$id] ?? null;
+        if ($ownedName === null) {
             throw ConnectionException::invalidConfiguration(
                 'Cannot release a connection that was not checked out by this pool manager.',
             );
         }
 
-        unset($this->connectionNames[$id]);
+        if ($name !== null && $name !== $ownedName) {
+            throw ConnectionException::invalidConfiguration(
+                sprintf('Connection was checked out from pool [%s], not [%s].', $ownedName, $name),
+            );
+        }
 
+        unset($this->connectionNames[$id]);
+        $this->pool->releaseConnection($ownedName, $connection);
+    }
+
+    /**
+     * Release one tokenized checkout.
+     *
+     * @internal Called by ConnectionLease.
+     */
+    public function releaseLease(Connection $connection, string $name, int $token): void
+    {
+        $id = spl_object_id($connection);
+        $ownership = $this->activeLeases[$id] ?? null;
+
+        if ($ownership === null || $ownership['name'] !== $name || $ownership['token'] !== $token) {
+            throw ConnectionException::invalidConfiguration(
+                'Connection lease is stale or does not own the active pooled checkout.',
+            );
+        }
+
+        unset($this->activeLeases[$id]);
         $this->pool->releaseConnection($name, $connection);
     }
 
     /**
-     * Execute a callback using a pooled connection.
-     *
-     * Usage:
-     *   $result = $poolManager->using('default', function (Connection $conn) {
-     *       return $conn->select('SELECT 1');
-     *   });
-     *
-     * Connection is always released back to the pool.
+     * Execute a callback using an exclusive pooled connection lease.
      *
      * @template T
      * @param callable(Connection):T $callback
@@ -101,12 +143,12 @@ final class PoolManager
      */
     public function using(string $name, callable $callback): mixed
     {
-        $connection = $this->get($name);
+        $lease = $this->checkout($name);
 
         try {
-            return $callback($connection);
+            return $callback($lease->connection());
         } finally {
-            $this->release($connection, $name);
+            $lease->release();
         }
     }
 }
