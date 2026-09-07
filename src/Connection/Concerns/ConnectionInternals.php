@@ -128,7 +128,7 @@ trait ConnectionInternals
      */
     private function applyReadOnlyTransactionMode(): void
     {
-        $this->driver->applyReadOnlyTransactionMode($this->getPdo());
+        $this->driver->applyReadOnlyTransaction($this->getPdo());
     }
 
     /**
