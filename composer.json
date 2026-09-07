@@ -61,7 +61,6 @@
             "pestphp/pest-plugin": true,
             "pestphp/pest-plugin-drift": true
         },
-        "classmap-authoritative": true,
         "optimize-autoloader": true,
         "sort-packages": true
     }
