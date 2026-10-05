@@ -86,6 +86,47 @@ trait ConnectionRunwire
         ?RequestContext $request = null,
         ?CoroutineScope $scope = null,
     ): mixed {
+        $this->assertRunwireBindingAllowed($runtime, $request, $scope);
+
+        $previousRuntime = $this->runwireRuntime;
+        $previousRequest = $this->runwireRequest;
+        $previousScope = $this->runwireScope;
+        $effectiveRequest = $request ?? $previousRequest;
+        $effectiveScope = $scope ?? $previousScope;
+
+        $this->runwireRuntime = $runtime;
+        $this->runwireRequest = $effectiveRequest;
+        $this->runwireScope = $effectiveScope;
+
+        $checker = static fn(): bool => ($effectiveRequest?->completed() ?? false)
+            || ($effectiveRequest?->cancelled() ?? false)
+            || ($effectiveScope?->cancellation()->isCancelled() ?? false);
+        $remainingSeconds = $this->runwireRemainingSeconds($effectiveRequest, $effectiveScope);
+        $operation = static fn(): mixed => $callback();
+        $withCancellation = fn(): mixed => $this->withQueryCancellation($checker, $operation);
+        $withBudget = $remainingSeconds === null
+            ? $withCancellation
+            : fn(): mixed => $this->withQueryDeadline($remainingSeconds, $withCancellation);
+
+        try {
+            return $this->executeRunwireBinding(
+                $runtime,
+                $effectiveRequest,
+                $effectiveScope,
+                $withBudget,
+            );
+        } finally {
+            $this->runwireRuntime = $previousRuntime;
+            $this->runwireRequest = $previousRequest;
+            $this->runwireScope = $previousScope;
+        }
+    }
+
+    private function assertRunwireBindingAllowed(
+        RuntimeContext $runtime,
+        ?RequestContext $request,
+        ?CoroutineScope $scope,
+    ): void {
         $pid = getmypid();
         $currentPid = is_int($pid) ? $pid : 0;
 
@@ -127,39 +168,19 @@ trait ConnectionRunwire
                 'DBLayer connection cannot switch Runwire coroutine scope inside a nested binding.',
             );
         }
+    }
 
-        $previousRuntime = $this->runwireRuntime;
-        $previousRequest = $this->runwireRequest;
-        $previousScope = $this->runwireScope;
-        $effectiveRequest = $request ?? $previousRequest;
-        $effectiveScope = $scope ?? $previousScope;
-
-        $this->runwireRuntime = $runtime;
-        $this->runwireRequest = $effectiveRequest;
-        $this->runwireScope = $effectiveScope;
-
-        $checker = static fn(): bool => ($effectiveRequest?->completed() ?? false)
-            || ($effectiveRequest?->cancelled() ?? false)
-            || ($effectiveScope?->cancellation()->isCancelled() ?? false);
-        $remainingSeconds = $this->runwireRemainingSeconds($effectiveRequest, $effectiveScope);
-
-        $operation = static fn(): mixed => $callback();
-        $withCancellation = fn(): mixed => $this->withQueryCancellation($checker, $operation);
-        $withBudget = $remainingSeconds === null
-            ? $withCancellation
-            : fn(): mixed => $this->withQueryDeadline($remainingSeconds, $withCancellation);
-
-        try {
-            if (CacheRunwireIntegration::runtime() === $runtime) {
-                return CacheRunwireIntegration::share($effectiveRequest, $effectiveScope, $withBudget);
-            }
-
-            return $withBudget();
-        } finally {
-            $this->runwireRuntime = $previousRuntime;
-            $this->runwireRequest = $previousRequest;
-            $this->runwireScope = $previousScope;
+    private function executeRunwireBinding(
+        RuntimeContext $runtime,
+        ?RequestContext $request,
+        ?CoroutineScope $scope,
+        callable $callback,
+    ): mixed {
+        if (CacheRunwireIntegration::runtime() === $runtime) {
+            return CacheRunwireIntegration::share($request, $scope, $callback);
         }
+
+        return $callback();
     }
 
     private function runwireRemainingSeconds(
