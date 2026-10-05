@@ -212,7 +212,9 @@ final class Transaction
 
     private function backoff(int $attempt): void
     {
-        usleep(self::BASE_BACKOFF_US * max(1, $attempt));
+        $this->connection->cooperativeSleep(
+            (self::BASE_BACKOFF_US * max(1, $attempt)) / 1_000_000,
+        );
     }
 
     private function beginTopLevel(): void
