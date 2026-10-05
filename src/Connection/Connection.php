@@ -67,6 +67,13 @@ final class Connection
     private static ?PDO $pretendPdo = null;
 
     /**
+     * Active streaming cursor statement ids.
+     *
+     * @var array<int,true>
+     */
+    private array $activeStatementCursors = [];
+
+    /**
      * Query compiler for this connection.
      */
     private readonly QueryCompilerInterface $compiler;
@@ -299,6 +306,17 @@ final class Connection
         $this->registerLifecycleHook('afterReconnect', $hook);
 
         return $this;
+    }
+
+    /**
+     * Fail fast at a cache/stream/runtime checkpoint.
+     *
+     * @internal Used by DBLayer-owned higher-level execution paths.
+     */
+    public function assertQueryCheckpoint(float $startedAt): void
+    {
+        $this->assertNotCancelled();
+        $this->assertWithinQueryBudget($startedAt);
     }
 
     /**
@@ -933,6 +951,17 @@ final class Connection
         $this->transactionManager?->clear();
         $this->resetRequestRuntimeState();
 
+        if ($this->ownsQueryCache) {
+            $this->queryCache = null;
+            $this->ownsQueryCache = false;
+        }
+
+        try {
+            $this->syncServerSideStatementTimeouts();
+        } catch (Throwable) {
+            return false;
+        }
+
         return true;
     }
 
@@ -1220,7 +1249,10 @@ final class Connection
      */
     public function stream(string $sql, array $bindings = [], ?int $fetchMode = null): Generator
     {
+        $startedAt = microtime(true);
         $statement = $this->execute($sql, $bindings);
+        $statementId = spl_object_id($statement);
+        $this->activeStatementCursors[$statementId] = true;
         $mode = $fetchMode ?? $this->fetchMode;
         $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
             ? $this->sqlServerBigIntColumns($statement)
@@ -1228,7 +1260,9 @@ final class Connection
 
         try {
             while (true) {
+                $this->assertQueryCheckpoint($startedAt);
                 $row = $statement->fetch($mode);
+                $this->assertQueryCheckpoint($startedAt);
 
                 if ($row === false) {
                     break;
@@ -1239,6 +1273,7 @@ final class Connection
                     : $row;
             }
         } finally {
+            unset($this->activeStatementCursors[$statementId]);
             $statement->closeCursor();
         }
     }
@@ -1396,7 +1431,9 @@ final class Connection
     public function withQueryCancellation(callable $checker, callable $callback): mixed
     {
         $previous = $this->queryCancellationChecker;
-        $this->queryCancellationChecker = $checker;
+        $this->queryCancellationChecker = $previous === null
+            ? $checker
+            : static fn(): bool => $previous() || $checker();
 
         try {
             return $callback();
