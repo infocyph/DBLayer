@@ -146,7 +146,15 @@ final class PoolManager
         $lease = $this->checkout($name);
 
         try {
-            return $callback($lease->connection());
+            $result = $callback($lease->connection());
+
+            if ($result instanceof \Traversable) {
+                throw ConnectionException::invalidConfiguration(
+                    'Lazy results cannot escape PoolManager::using(); use an explicit connection lease for iterator lifetime.',
+                );
+            }
+
+            return $result;
         } finally {
             $lease->release();
         }
