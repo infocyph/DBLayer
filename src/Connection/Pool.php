@@ -534,6 +534,18 @@ final class Pool
         return $data['connection'];
     }
 
+    private function idleConnectionExpired(string $name, int $id, float $idleSince, float $now): bool
+    {
+        $idleExpired = $this->poolConfig['idle_timeout'] > 0
+            && ($now - $idleSince) >= $this->poolConfig['idle_timeout'];
+
+        $createdAt = $this->connections[$name][$id]['created_at'] ?? $now;
+        $lifetimeExpired = $this->poolConfig['max_lifetime'] > 0
+            && ($now - $createdAt) >= $this->poolConfig['max_lifetime'];
+
+        return $idleExpired || $lifetimeExpired;
+    }
+
     /**
      * @param list<array{name:string,connection:Connection}> $candidates
      */
@@ -584,18 +596,6 @@ final class Pool
                 }
             }
         }
-    }
-
-    private function idleConnectionExpired(string $name, int $id, float $idleSince, float $now): bool
-    {
-        $idleExpired = $this->poolConfig['idle_timeout'] > 0
-            && ($now - $idleSince) >= $this->poolConfig['idle_timeout'];
-
-        $createdAt = $this->connections[$name][$id]['created_at'] ?? $now;
-        $lifetimeExpired = $this->poolConfig['max_lifetime'] > 0
-            && ($now - $createdAt) >= $this->poolConfig['max_lifetime'];
-
-        return $idleExpired || $lifetimeExpired;
     }
 
     private function shouldRunHealthCheck(float $now): bool
