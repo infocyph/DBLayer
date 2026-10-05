@@ -92,11 +92,13 @@ trait QueryBuilderResults
         mixed $fromId = null,
         string $direction = 'asc',
     ): Generator {
-        foreach ($this->keysetChunks($chunkSize, $column, $fromId, $direction) as [$rows]) {
-            foreach ($rows as $row) {
-                yield $row;
-            }
-        }
+        return $this->lazyByIdGenerator(
+            $chunkSize,
+            $column,
+            $fromId,
+            $direction,
+            $this->connection->runwireBinding(),
+        );
     }
 
     /**
@@ -110,15 +112,33 @@ trait QueryBuilderResults
         mixed $fromId = null,
         string $direction = 'asc',
     ): LazyCollection {
-        return LazyCollection::fromFactory(function () use ($chunkSize, $column, $fromId, $direction): Generator {
-            $index = 0;
+        $runwireBinding = $this->connection->runwireBinding();
+        $collection = LazyCollection::fromFactory(
+            function () use ($chunkSize, $column, $fromId, $direction, $runwireBinding): Generator {
+                $index = 0;
+                $builder = $this->cloneBuilder()->withoutCache();
 
-            foreach ($this->cloneBuilder()
-              ->withoutCache()
-              ->lazyById($chunkSize, $column, $fromId, $direction) as $row) {
-                yield $index++ => $row;
-            }
-        });
+                foreach ($builder->lazyByIdGenerator(
+                    $chunkSize,
+                    $column,
+                    $fromId,
+                    $direction,
+                    $runwireBinding,
+                ) as $row) {
+                    yield $index++ => $row;
+                }
+            },
+        );
+
+        if ($runwireBinding === null) {
+            return $collection;
+        }
+
+        return $collection->withRunwire(
+            $runwireBinding['runtime'],
+            $runwireBinding['request'],
+            $runwireBinding['scope'],
+        );
     }
 
     /**
@@ -138,6 +158,34 @@ trait QueryBuilderResults
         [$items, $hasMore] = $this->resolvePaginatedItems($clone->get(), $perPage);
 
         return new SimplePaginator($items, $perPage, $page, $hasMore);
+    }
+
+    /**
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
+     * @return Generator<array<string,mixed>>
+     */
+    private function lazyByIdGenerator(
+        int $chunkSize,
+        string $column,
+        mixed $fromId,
+        string $direction,
+        ?array $runwireBinding,
+    ): Generator {
+        foreach ($this->keysetChunks(
+            $chunkSize,
+            $column,
+            $fromId,
+            $direction,
+            $runwireBinding,
+        ) as [$rows]) {
+            foreach ($rows as $row) {
+                yield $row;
+            }
+        }
     }
 
     /** @phpstan-assert list<array<string,mixed>> $result */
