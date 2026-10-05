@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Connection\Concerns;
 
 use Infocyph\CacheLayer\Integration\Runwire\RunwireIntegration as CacheRunwireIntegration;
-use Infocyph\DBLayer\Exceptions\ConnectionException;
+use Infocyph\DBLayer\Connection\RunwireBindingPolicy;
 use Infocyph\Runwire\Coroutine\CoroutineScope;
 use Infocyph\Runwire\RequestContext;
 use Infocyph\Runwire\Runtime\Enum\RuntimeCapability;
@@ -86,7 +86,14 @@ trait ConnectionRunwire
         ?RequestContext $request = null,
         ?CoroutineScope $scope = null,
     ): mixed {
-        $this->assertRunwireBindingAllowed($runtime, $request, $scope);
+        RunwireBindingPolicy::assertAllowed(
+            $runtime,
+            $request,
+            $scope,
+            $this->runwireRuntime,
+            $this->runwireRequest,
+            $this->runwireScope,
+        );
 
         $previousRuntime = $this->runwireRuntime;
         $previousRequest = $this->runwireRequest;
@@ -101,7 +108,7 @@ trait ConnectionRunwire
         $checker = static fn(): bool => ($effectiveRequest?->completed() ?? false)
             || ($effectiveRequest?->cancelled() ?? false)
             || ($effectiveScope?->cancellation()->isCancelled() ?? false);
-        $remainingSeconds = $this->runwireRemainingSeconds($effectiveRequest, $effectiveScope);
+        $remainingSeconds = RunwireBindingPolicy::remainingSeconds($effectiveRequest, $effectiveScope);
         $operation = static fn(): mixed => $callback();
         $withCancellation = fn(): mixed => $this->withQueryCancellation($checker, $operation);
         $withBudget = $remainingSeconds === null
@@ -122,58 +129,6 @@ trait ConnectionRunwire
         }
     }
 
-    private function assertNestedRunwireOwner(
-        ?object $current,
-        ?object $next,
-        string $message,
-    ): void {
-        if ($current === null || $next === null || $current === $next) {
-            return;
-        }
-
-        throw ConnectionException::invalidConfiguration($message);
-    }
-
-    private function assertRunwireBindingAllowed(
-        RuntimeContext $runtime,
-        ?RequestContext $request,
-        ?CoroutineScope $scope,
-    ): void {
-        $pid = getmypid();
-        $currentPid = is_int($pid) ? $pid : 0;
-
-        if ($runtime->pid !== $currentPid) {
-            throw ConnectionException::invalidConfiguration(
-                'Runwire runtime PID does not match the current DBLayer process.',
-            );
-        }
-        if ($request !== null && $request->runtime() !== $runtime) {
-            throw ConnectionException::invalidConfiguration(
-                'Runwire request context belongs to a different runtime.',
-            );
-        }
-        if ($request?->completed() === true) {
-            throw ConnectionException::invalidConfiguration(
-                'Completed Runwire request context cannot be bound to DBLayer.',
-            );
-        }
-        if ($this->runwireRuntime !== null && $this->runwireRuntime !== $runtime) {
-            throw ConnectionException::invalidConfiguration(
-                'DBLayer connection is already borrowing a different Runwire runtime.',
-            );
-        }
-        $this->assertNestedRunwireOwner(
-            $this->runwireRequest,
-            $request,
-            'DBLayer connection cannot switch Runwire request ownership inside a nested binding.',
-        );
-        $this->assertNestedRunwireOwner(
-            $this->runwireScope,
-            $scope,
-            'DBLayer connection cannot switch Runwire coroutine scope inside a nested binding.',
-        );
-    }
-
     private function executeRunwireBinding(
         RuntimeContext $runtime,
         ?RequestContext $request,
@@ -187,17 +142,4 @@ trait ConnectionRunwire
         return $callback();
     }
 
-    private function runwireRemainingSeconds(
-        ?RequestContext $request,
-        ?CoroutineScope $scope,
-    ): ?float {
-        $requestRemaining = $request?->deadline()->remainingSeconds();
-        $scopeRemaining = $scope?->cancellation()->deadline()->remainingSeconds();
-
-        return match (true) {
-            $requestRemaining === null => $scopeRemaining,
-            $scopeRemaining === null => $requestRemaining,
-            default => min($requestRemaining, $scopeRemaining),
-        };
-    }
 }
