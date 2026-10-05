@@ -95,9 +95,11 @@ function dblayerRequireDriver(string $driver): array
     $config = dblayerConnectionConfig($driver);
     if ($config === null) {
         DB::purge();
-        test()->markTestSkipped(sprintf('Driver [%s] is not available in this environment. Configure env vars to enable it.', $driver));
 
-        throw new RuntimeException('Skipped');
+        throw new RuntimeException(sprintf(
+            'Required driver [%s] is unavailable; CI must provision its extension and service.',
+            $driver,
+        ));
     }
 
     return $config;
