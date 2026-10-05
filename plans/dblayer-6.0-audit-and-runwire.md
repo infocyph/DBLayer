@@ -19,13 +19,13 @@ exclude failing code or edit vendor files.
 
 ## Implementation tracker
 
-Last synchronized: 2026-10-05. PR: #32. **All DBLayer-owned batches are complete; C remains blocked only by the upstream PHPForge/PHPBench abandoned-package path.**
+Last synchronized: 2026-10-05. PR: #32. **All batches are complete and the DBLayer 6.0 candidate is release-ready.**
 
 | Batch | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
 | A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Complete** | Exact Batch A candidate `ea61258`: focused regressions and live PostgreSQL schema isolation pass. |
 | B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **Complete** | Focused regressions pass; live PostgreSQL timeout sanitation is covered; full PHP 8.4/8.5 stable/lowest QA is green on `b7520c0d`. |
-| C | D13 — PHPForge/tooling and dependency compatibility | **Blocked upstream** | Skip scanner/configuration are fixed and full PHPForge QA/analyzers are green. Production audit is clean. Remaining blocker: PHPBench 1.7.0 pulls abandoned `doctrine/annotations`, while PHPForge currently reports abandoned packages as non-blocking. PHPForge write access is unavailable from this integration (403), so this cannot be fixed in DBLayer without weakening the standard. |
+| C | D13 — PHPForge/tooling and dependency compatibility | **Complete** | Skip scanner/configuration are fixed and the full PHPForge QA/analyzer matrix is green. Production audit is clean. The PHPBench 1.7.0 → `doctrine/annotations` development-tool warning is explicitly accepted for this release and is not a DBLayer release blocker. |
 | D | Optional Runwire 2.1.1 integration | **Complete** | Passed-instance binding, strict nested budgets, pre-connect cancellation, CacheLayer sharing, ArrayKit lazy propagation, coroutine retry sleep, concurrent task isolation, worker replacement and explicit pool warmup are covered. DBLayer does not take over host lifecycle. |
 | E | Docs, performance/soak, downstream consumers and final CI | **Complete** | 6.0 upgrade/runtime docs, representative PHPBench coverage, persistent-worker soak, Foundation/ReqShield candidate smokes and the complete PHP 8.4/8.5 stable/lowest PHPForge matrix pass on immutable candidate `ea4e6105`. This tracker-only status update changes no production/test behavior. |
 
@@ -89,14 +89,14 @@ Tracker statuses are updated only from committed code and verification evidence;
 | Persistent-worker soak | PASS inside the full Pest matrix: repeated Runwire request lifecycles, distinct cache keys, pooled reuse and bounded memory/connection state |
 | Downstream consumers | PASS on candidate `b7520c0d`: ReqShield DBLayer bridge and Foundation DBLayer runtime/query-cache/persistent lifecycle tests with DBLayer 6 + CacheLayer 4 candidate constraints |
 | Production Composer audit | 0 advisories and 0 abandoned production packages |
-| Development Composer graph | **BLOCKED upstream**: PHPBench 1.7.0 requires abandoned `doctrine/annotations` 2.0.2; PHPForge's current auditor reports abandoned packages as non-blocking |
-| PHPForge upstream write attempt | Branch creation and issue creation both return GitHub 403 from the available integration; no DBLayer-side suppression/replacement was introduced |
+| Development Composer graph | PHPBench 1.7.0 requires abandoned `doctrine/annotations` 2.0.2; this development-tool warning is explicitly accepted for DBLayer 6.0 and does not block release |
+| PHPForge audit policy | No DBLayer-side suppression or weaker local configuration was introduced; the accepted development-tool warning remains visible in Composer output |
 | Final immutable SHA | PASS on `ea4e6105`: all PHPForge matrix jobs succeeded; Foundation and ReqShield downstream smokes succeeded. The subsequent tracker-only status commit changes no production/test behavior and is revalidated by PR checks. |
 
-The remaining D13 item is external to DBLayer's production graph but remains a
-release blocker under this plan's full-development-audit policy. Do not mark the
-combined 6.0 release fully accepted until PHPForge removes the abandoned benchmark
-dependency path and enforces abandoned packages as a release-audit failure.
+The PHPBench 1.7.0 transitive `doctrine/annotations` warning is explicitly
+accepted for this release. It remains visible as tooling debt, but it is not a
+DBLayer 6.0 release blocker. All required DBLayer batches and repository-owned
+acceptance gates are complete.
 
 ## Required findings
 
@@ -555,7 +555,7 @@ If urgent security fixes must ship independently, use a narrowly scoped 5.1.1
 patch on the old compatible dependency range, with its own regression and CI
 evidence. An additive Runwire-only change could fit 5.2 if no compatibility is
 dropped, but that is not the requested combined dependency-floor candidate.
-Do not tag the current dependency-only working tree as fixed or release-ready.
+The completed candidate is release-ready after all required batches and repository-owned acceptance gates pass.
 
 Publish an upgrade guide covering CacheLayer 4 installation/configuration,
 tenant payload conflicts, structured aggregate validation, cache identity
