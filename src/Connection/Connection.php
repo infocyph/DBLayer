@@ -403,6 +403,30 @@ final class Connection
     }
 
     /**
+     * Build the non-sensitive identity used only for shared data dependencies.
+     *
+     * Result visibility remains isolated by cacheScopeFingerprint(). Dependency
+     * identity deliberately excludes username/cache_scope so a write performed
+     * through another role or visibility scope invalidates the same physical
+     * table. cache_dependency_scope can distinguish deployments sharing a cache.
+     */
+    public function cacheDependencyFingerprint(): string
+    {
+        $schema = $this->config->get('schema');
+        $dependencyScope = $this->config->get('cache_dependency_scope');
+
+        return substr(hash('sha256', implode("\0", [
+            'v1',
+            $this->name,
+            $this->getDriverName(),
+            $this->getDatabaseName(),
+            $this->tablePrefix,
+            is_string($schema) ? $schema : '',
+            is_string($dependencyScope) ? $dependencyScope : '',
+        ])), 0, 32);
+    }
+
+    /**
      * Build a stable non-sensitive CacheLayer tag for a structured table dependency.
      */
     public function cacheTableTag(string $table, ?string $suffix = null): string
@@ -418,7 +442,7 @@ final class Connection
             ? $table
             : $table . "\0" . $suffix;
 
-        return 'db.' . $this->cacheScopeFingerprint() . '.table.' . hash('xxh3', $dependency);
+        return 'db.' . $this->cacheDependencyFingerprint() . '.table.' . hash('xxh3', $dependency);
     }
 
     /**
@@ -731,9 +755,9 @@ final class Connection
 
         $cache = $this->queryCache();
         if ($this->managedTransactionLevel() === 0 && $this->hasActiveNativeTransaction()) {
-            $cache->invalidateTags($tags);
-
-            return;
+            throw ConnectionException::invalidConfiguration(
+                'Cache invalidation cannot be deferred for an externally owned native PDO transaction.',
+            );
         }
 
         $this->afterCommit(static function () use ($cache, $tags): void {
@@ -1610,6 +1634,17 @@ final class Connection
             $this->recordPretend($sql, $bindings);
 
             return $pretendResult();
+        }
+
+        if (
+            $isWrite
+            && $this->hasQueryCache()
+            && $this->managedTransactionLevel() === 0
+            && $this->hasActiveNativeTransaction()
+        ) {
+            throw ConnectionException::invalidConfiguration(
+                'Cache-aware DBLayer writes are not supported inside an externally owned native PDO transaction; use a DBLayer-managed transaction or an explicit caller-owned cache policy.',
+            );
         }
 
         $start = microtime(true);
