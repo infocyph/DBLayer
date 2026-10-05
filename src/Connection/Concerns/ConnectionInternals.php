@@ -885,6 +885,22 @@ trait ConnectionInternals
      *
      * @param array<int|string,mixed> $bindings
      */
+    private function sanitizeRuntimeStateForReuse(): bool
+    {
+        if ($this->ownsQueryCache) {
+            $this->queryCache = null;
+            $this->ownsQueryCache = false;
+        }
+
+        try {
+            $this->syncServerSideStatementTimeouts();
+        } catch (Throwable) {
+            return false;
+        }
+
+        return true;
+    }
+
     private function shouldRetryQuery(
         PDOException $e,
         int $attempt,
