@@ -1,0 +1,112 @@
+name: "DBLayer 6.0 Release Performance"
+
+on:
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dblayer-release-performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-performance:
+    name: "Matched host workload and Runwire soak"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: dblayer_perf
+          POSTGRES_USER: dblayer
+          POSTGRES_PASSWORD: dblayer
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dblayer -d dblayer_perf"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DBLAYER_PERF_HOST: 127.0.0.1
+      DBLAYER_PERF_PORT: "5432"
+      DBLAYER_PERF_DATABASE: dblayer_perf
+      DBLAYER_PERF_USER: dblayer
+      DBLAYER_PERF_PASSWORD: dblayer
+
+    steps:
+      - name: Checkout DBLayer candidate
+        uses: actions/checkout@v7
+        with:
+          path: candidate
+
+      - name: Checkout matched baseline
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha || 'main' }}
+          path: baseline
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: "pdo_pgsql, pcntl, mbstring"
+          coverage: none
+          tools: composer:v2
+
+      - name: Install baseline dependencies
+        working-directory: baseline
+        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+
+      - name: Install candidate dependencies
+        working-directory: candidate
+        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+
+      - name: Create release evidence directory
+        run: mkdir -p release-evidence
+
+      - name: Measure baseline host workload
+        run: >-
+          php candidate/.automation/scripts/ci/release-host-workload.php
+          --project=baseline
+          --output=release-evidence/baseline-host.json
+          --duration=3
+          --trials=3
+          --concurrency=1,2,4
+
+      - name: Measure candidate host workload
+        run: >-
+          php candidate/.automation/scripts/ci/release-host-workload.php
+          --project=candidate
+          --output=release-evidence/candidate-host.json
+          --duration=3
+          --trials=3
+          --concurrency=1,2,4
+
+      - name: Enforce matched performance budgets
+        run: >-
+          php candidate/.automation/scripts/ci/compare-release-host-workload.php
+          --baseline=release-evidence/baseline-host.json
+          --candidate=release-evidence/candidate-host.json
+          --output=release-evidence/host-comparison.json
+          --max-regression=2
+
+      - name: Run sustained Runwire worker soak
+        run: >-
+          php candidate/.automation/scripts/ci/release-runwire-soak.php
+          --project=candidate
+          --output=release-evidence/runwire-soak.json
+          --requests=3000
+          --concurrency=4
+
+      - name: Upload release performance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dblayer-6-release-performance
+          path: release-evidence
+          retention-days: 61
+          if-no-files-found: error
