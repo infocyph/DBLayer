@@ -1,7 +1,7 @@
 Caching
 ~~~~~~~
 
-DBLayer uses ``infocyph/cachelayer`` ``^3.4``. Query-result caching is opt-in
+DBLayer uses ``infocyph/cachelayer`` ``^4.0``. Query-result caching is opt-in
 and ordinary database-only paths do not need to initialize a cache adapter.
 
 The important runtime rule is ownership: a ``QueryBuilder`` uses the cache

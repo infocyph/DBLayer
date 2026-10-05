@@ -204,6 +204,12 @@ instance-oriented lease API so ownership is explicit:
        $lease->release();
    }
 
+``min_connections`` currently creates lazy connection objects within the
+pool-wide maximum; it does not open database handles at startup or automatically
+replenish a minimum after expiry. PDO handles open on first use and healthy
+handles remain available for reuse after the lease is released. Retain the pool
+manager across requests in the owning worker to benefit from this reuse.
+
 ``checkout()`` returns a ``ConnectionLease`` containing the ownership token for
 that checkout generation. A stale lease, double release, or a bare
 ``PoolManager::release()`` attempt against an active tokenized checkout is

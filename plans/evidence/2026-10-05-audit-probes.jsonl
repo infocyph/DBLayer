@@ -1,0 +1,15 @@
+{"probe":"cached_result_ignores_cancellation","observed":[{"id":1,"value":"original"}]}
+{"probe":"cached_result_ignores_expired_deadline","observed":[{"id":1,"value":"original"}]}
+{"probe":"nested_cancellation_replaces_parent","observed":[{"1":1}]}
+{"probe":"native_transaction_reads_cached_committed_data","observed":{"cached":[{"id":1,"value":"original"}],"actual":[{"id":1,"value":"uncommitted"}]}}
+{"probe":"native_transaction_publishes_rolled_back_rows","observed":{"inside":[{"id":1,"value":"uncommitted"}],"after_rollback_cached":[{"id":1,"value":"uncommitted"}],"actual":[{"id":1,"value":"original"}]}}
+{"probe":"statement_cache_closes_active_stream","observed":{"first":{"id":1,"value":"original"},"has_second":false,"second":null}}
+{"probe":"scope_returns_generator_after_lease_release","observed":{"same_connection_borrowed_again":true,"old_generator_can_execute":{"1":1}}}
+{"probe":"cache_key_omits_schema_and_role","observed":{"same_sql":true,"same_cache_key":true,"same_table_tag":false,"evidence":"key derivation only; PostgreSQL servers were not contacted"}}
+{"probe":"like_escape_changes_semantics","observed":{"pattern":"a\\\\%b","literal_matches":0}}
+{"probe":"pool_reset_leaves_native_timeout","observed":{"before":123,"wrapper_after":null,"native_after":123}}
+{"probe":"schema_drop_keeps_instance_cache","observed":[{"id":1,"value":"original"}]}
+{"probe":"aggregate_bypasses_raw_sql_deny","observed":42}
+{"probe":"committed_write_times_out_without_cache_invalidation","observed":{"error":"Query execution failed: Database query timeout after 0.0056 seconds. [statement: UPDATE] [fingerprint: 95d38b5677bd595f]","sticky":false,"cached":[{"id":1,"value":"original"}],"actual":[{"id":1,"value":"committed"}]}}
+{"probe":"tenant_scope_accepts_other_tenant_payload","observed":[{"id":1,"tenant_id":2,"value":"cross-tenant"}]}
+{"probe":"expired_private_cache_retains_distinct_keys","observed":{"expired_entries_retained":100,"capacity_configured":false}}

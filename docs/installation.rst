@@ -6,8 +6,8 @@ Requirements
 
 - PHP ``^8.4``
 - ``ext-pdo``
-- ``infocyph/arraykit`` ``^5.2``
-- ``infocyph/cachelayer`` ``^3.4``
+- ``infocyph/arraykit`` ``^5.3``
+- ``infocyph/cachelayer`` ``^4.0``
 - ``psr/log`` ``^3.0.2``
 - Optional per driver:
   - ``ext-pdo_mysql`` (MySQL and MariaDB)
