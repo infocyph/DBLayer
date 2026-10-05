@@ -418,6 +418,12 @@ final class ConnectionConfig
                 }
             }
         }
+        $this->validateCacheScopes($config);
+    }
+
+    /** @param array<string,mixed> $config */
+    private function validateCacheScopes(array $config): void
+    {
         foreach (['cache_scope', 'cache_dependency_scope'] as $scopeKey) {
             $scope = $config[$scopeKey] ?? null;
             if ($scope !== null && (!is_string($scope) || trim($scope) === '')) {
