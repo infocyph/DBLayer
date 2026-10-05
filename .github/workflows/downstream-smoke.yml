@@ -1,0 +1,114 @@
+name: "DBLayer 6.0 Downstream Smoke"
+
+on:
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reqshield:
+    name: "ReqShield DBLayer bridge"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout DBLayer candidate
+        uses: actions/checkout@v6
+        with:
+          path: dblayer
+
+      - name: Checkout ReqShield
+        uses: actions/checkout@v6
+        with:
+          repository: infocyph/ReqShield
+          ref: main
+          path: consumer
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: "pdo, pdo_sqlite, mbstring, fileinfo"
+          coverage: none
+
+      - name: Inject DBLayer 6.0 candidate
+        working-directory: consumer
+        run: |
+          php <<'PHP'
+          <?php
+          $path = 'composer.json';
+          $composer = json_decode(file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+          $composer['repositories'] ??= [];
+          array_unshift($composer['repositories'], [
+              'type' => 'path',
+              'url' => '../dblayer',
+              'options' => [
+                  'symlink' => false,
+                  'versions' => ['infocyph/dblayer' => '6.0.x-dev'],
+              ],
+          ]);
+          $composer['require-dev']['infocyph/dblayer'] = '6.0.x-dev';
+          file_put_contents(
+              $path,
+              json_encode($composer, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL,
+          );
+          PHP
+          composer update --no-interaction --prefer-dist --no-progress --with-all-dependencies
+
+      - name: Run ReqShield DBLayer integration
+        working-directory: consumer
+        run: vendor/bin/pest tests/Integration/Database/DBLayerDatabaseProviderTest.php
+
+  foundation:
+    name: "Foundation DBLayer runtime"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout DBLayer candidate
+        uses: actions/checkout@v6
+        with:
+          path: dblayer
+
+      - name: Checkout Foundation
+        uses: actions/checkout@v6
+        with:
+          repository: infocyph/Foundation
+          ref: main
+          path: consumer
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: "pdo, pdo_sqlite, sodium"
+          coverage: none
+
+      - name: Inject DBLayer 6.0 and CacheLayer 4 candidates
+        working-directory: consumer
+        run: |
+          php <<'PHP'
+          <?php
+          $path = 'composer.json';
+          $composer = json_decode(file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+          $composer['repositories'] ??= [];
+          array_unshift($composer['repositories'], [
+              'type' => 'path',
+              'url' => '../dblayer',
+              'options' => [
+                  'symlink' => false,
+                  'versions' => ['infocyph/dblayer' => '6.0.x-dev'],
+              ],
+          ]);
+          $composer['require']['infocyph/cachelayer'] = '^4.0';
+          $composer['require-dev']['infocyph/dblayer'] = '6.0.x-dev';
+          file_put_contents(
+              $path,
+              json_encode($composer, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL,
+          );
+          PHP
+          composer update --no-interaction --prefer-dist --no-progress --with-all-dependencies
+
+      - name: Run Foundation DBLayer integration
+        working-directory: consumer
+        run: |
+          vendor/bin/pest             tests/Feature/DBLayer51RuntimeIntegrationTest.php             tests/Feature/DBLayer51QueryCacheIntegrationTest.php             tests/Feature/PersistentDatabaseLifecycleTest.php
