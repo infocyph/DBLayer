@@ -285,6 +285,12 @@ trait QueryBuilderInternals
     /** Internal helper to run aggregate queries. */
     private function runAggregate(string $function, string $column = '*', bool $ignoreLimitOffset = false): mixed
     {
+        $function = trim($function);
+        if ($function === '' || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $function) !== 1) {
+            throw QueryException::invalidParameter('function', 'Aggregate function must be a plain SQL function identifier.');
+        }
+        $this->validateColumnIdentifier($column, true);
+
         $clone = clone $this;
         unset($clone->bindingBuckets['select']);
 
