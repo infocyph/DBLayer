@@ -29,9 +29,9 @@ trait ConnectionStreaming
 
     private int $activeStreamIterators = 0;
 
-    private int $runtimeReuseGeneration = 0;
-
     private int $postgresStreamCursorSequence = 0;
+
+    private int $runtimeReuseGeneration = 0;
 
     /**
      * Stream query rows lazily without buffering via fetchAll().
@@ -324,6 +324,7 @@ trait ConnectionStreaming
             $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
         }
     }
+
     /**
      * @param array<int|string,mixed> $bindings
      * @param array{
@@ -343,6 +344,7 @@ trait ConnectionStreaming
         $startedAt = microtime(true);
         $statement = null;
         $statementId = null;
+        $checkBudget = $runwireBinding !== null || $this->hasActiveQueryBudget();
         $this->activeStreamIterators++;
 
         try {
@@ -362,9 +364,15 @@ trait ConnectionStreaming
 
             while (true) {
                 if ($runwireBinding === null) {
-                    $this->assertQueryCheckpoint($startedAt);
+                    if ($checkBudget) {
+                        $this->assertQueryCheckpoint($startedAt);
+                    }
+
                     $row = $statement->fetch($mode);
-                    $this->assertQueryCheckpoint($startedAt);
+
+                    if ($checkBudget) {
+                        $this->assertQueryCheckpoint($startedAt);
+                    }
                 } else {
                     $row = $this->runWithRunwireBinding(
                         $runwireBinding,
@@ -386,7 +394,11 @@ trait ConnectionStreaming
                     ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
                     : $row;
 
-                $this->assertStreamGeneration($reuseGeneration);
+                if ($reuseGeneration !== $this->runtimeReuseGeneration) {
+                    throw ConnectionException::invalidConfiguration(
+                        'Deferred database iterator outlived its connection lease.',
+                    );
+                }
             }
         } finally {
             if ($statementId !== null) {
@@ -400,5 +412,4 @@ trait ConnectionStreaming
             $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
         }
     }
-
 }
