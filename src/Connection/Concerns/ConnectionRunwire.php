@@ -78,11 +78,14 @@ trait ConnectionRunwire
     /**
      * Execute one deferred iterator operation with a previously captured binding.
      *
+     * @template TResult
      * @param array{
      *   runtime:RuntimeContext,
      *   request:?RequestContext,
      *   scope:?CoroutineScope
      * }|null $binding
+     * @param callable():TResult $callback
+     * @return TResult
      *
      * @internal
      */
@@ -104,6 +107,10 @@ trait ConnectionRunwire
      * Execute work while borrowing host-owned Runwire execution context.
      *
      * DBLayer never starts, globally binds, stops, or releases the host runtime.
+     *
+     * @template TResult
+     * @param callable():TResult $callback
+     * @return TResult
      */
     public function withRunwire(
         RuntimeContext $runtime,
