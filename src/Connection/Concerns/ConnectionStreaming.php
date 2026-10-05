@@ -103,82 +103,6 @@ trait ConnectionStreaming
         };
     }
 
-    /**
-     * @param array<int|string,mixed> $bindings
-     * @param array{
-     *   runtime:\Infocyph\Runwire\RuntimeContext,
-     *   request:?\Infocyph\Runwire\RequestContext,
-     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
-     * }|null $runwireBinding
-     * @return Generator<mixed>
-     */
-    private function streamGenerator(
-        string $sql,
-        array $bindings,
-        ?int $fetchMode,
-        ?array $runwireBinding,
-        int $reuseGeneration,
-    ): Generator {
-        $startedAt = microtime(true);
-        $statement = null;
-        $statementId = null;
-        $this->activeStreamIterators++;
-
-        try {
-            $this->assertStreamGeneration($reuseGeneration);
-            $statement = $runwireBinding === null
-                ? $this->execute($sql, $bindings)
-                : $this->runWithRunwireBinding(
-                    $runwireBinding,
-                    fn(): PDOStatement => $this->execute($sql, $bindings),
-                );
-            $statementId = spl_object_id($statement);
-            $this->activeStatementCursors[$statementId] = $statement;
-            $mode = $fetchMode ?? $this->fetchMode;
-            $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
-                ? $this->sqlServerBigIntColumns($statement)
-                : [];
-
-            while (true) {
-                $this->assertStreamGeneration($reuseGeneration);
-                if ($runwireBinding === null) {
-                    $this->assertQueryCheckpoint($startedAt);
-                    $row = $statement->fetch($mode);
-                    $this->assertQueryCheckpoint($startedAt);
-                } else {
-                    $row = $this->runWithRunwireBinding(
-                        $runwireBinding,
-                        function () use ($statement, $mode, $startedAt): mixed {
-                            $this->assertQueryCheckpoint($startedAt);
-                            $row = $statement->fetch($mode);
-                            $this->assertQueryCheckpoint($startedAt);
-
-                            return $row;
-                        },
-                    );
-                }
-
-                if ($row === false) {
-                    break;
-                }
-
-                yield $sqlServerBigIntColumns !== []
-                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
-                    : $row;
-            }
-        } finally {
-            if ($statementId !== null) {
-                unset($this->activeStatementCursors[$statementId]);
-            }
-
-            if ($statement instanceof PDOStatement) {
-                $statement->closeCursor();
-            }
-
-            $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
-        }
-    }
-
     private function assertStreamGeneration(int $reuseGeneration): void
     {
         if ($reuseGeneration !== $this->runtimeReuseGeneration) {
@@ -400,4 +324,81 @@ trait ConnectionStreaming
             $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
         }
     }
+    /**
+     * @param array<int|string,mixed> $bindings
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
+     * @return Generator<mixed>
+     */
+    private function streamGenerator(
+        string $sql,
+        array $bindings,
+        ?int $fetchMode,
+        ?array $runwireBinding,
+        int $reuseGeneration,
+    ): Generator {
+        $startedAt = microtime(true);
+        $statement = null;
+        $statementId = null;
+        $this->activeStreamIterators++;
+
+        try {
+            $this->assertStreamGeneration($reuseGeneration);
+            $statement = $runwireBinding === null
+                ? $this->execute($sql, $bindings)
+                : $this->runWithRunwireBinding(
+                    $runwireBinding,
+                    fn(): PDOStatement => $this->execute($sql, $bindings),
+                );
+            $statementId = spl_object_id($statement);
+            $this->activeStatementCursors[$statementId] = $statement;
+            $mode = $fetchMode ?? $this->fetchMode;
+            $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
+                ? $this->sqlServerBigIntColumns($statement)
+                : [];
+
+            while (true) {
+                if ($runwireBinding === null) {
+                    $this->assertQueryCheckpoint($startedAt);
+                    $row = $statement->fetch($mode);
+                    $this->assertQueryCheckpoint($startedAt);
+                } else {
+                    $row = $this->runWithRunwireBinding(
+                        $runwireBinding,
+                        function () use ($statement, $mode, $startedAt): mixed {
+                            $this->assertQueryCheckpoint($startedAt);
+                            $row = $statement->fetch($mode);
+                            $this->assertQueryCheckpoint($startedAt);
+
+                            return $row;
+                        },
+                    );
+                }
+
+                if ($row === false) {
+                    break;
+                }
+
+                yield $sqlServerBigIntColumns !== []
+                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
+                    : $row;
+
+                $this->assertStreamGeneration($reuseGeneration);
+            }
+        } finally {
+            if ($statementId !== null) {
+                unset($this->activeStatementCursors[$statementId]);
+            }
+
+            if ($statement instanceof PDOStatement) {
+                $statement->closeCursor();
+            }
+
+            $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
+        }
+    }
+
 }
