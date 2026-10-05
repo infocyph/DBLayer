@@ -1452,15 +1452,6 @@ final class Connection
     }
 
     /**
-     * @param array{
-     *   runtime:\Infocyph\Runwire\RuntimeContext,
-     *   request:?\Infocyph\Runwire\RequestContext,
-     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
-     * }|null $runwireBinding
-     * @param array<int|string,mixed> $bindings
-     * @return Generator<mixed>
-     */
-    /**
      * Shared PDO used only to fabricate PDOStatement instances in pretend mode.
      */
     private static function pretendPdo(): PDO
