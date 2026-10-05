@@ -15,7 +15,7 @@ use Infocyph\Runwire\Runtime\RequestExecutionPolicy;
 use Infocyph\Runwire\RuntimeCapabilities;
 use Infocyph\Runwire\RuntimeContext;
 
-afterEach(static function (): void {
+afterEach(function (): void {
     CacheRunwireIntegration::release();
 });
 
