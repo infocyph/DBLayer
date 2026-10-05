@@ -17,6 +17,16 @@ use Infocyph\Runwire\RuntimeContext;
 
 final class ReleaseRunwireSoak
 {
+    private int $hostSamples = 0;
+
+    private int $initialOpenSockets = 0;
+
+    private int $maxOpenSockets = 0;
+
+    private int $maxProcessTreeRssBytes = 0;
+
+    private int $maxTaskQueueDepth = 0;
+
     public function __construct(
         private readonly string $project,
         private readonly string $output,
@@ -33,22 +43,31 @@ final class ReleaseRunwireSoak
 
         require_once $autoload;
 
+        $this->initialOpenSockets = $this->openSocketCount();
+        $this->sampleHostState(0);
         $this->resetDataset();
         gc_collect_cycles();
         $memoryBefore = memory_get_usage(true);
         $perPhase = intdiv($this->requests, 2);
         $first = $this->runPhase(1, $perPhase, 0);
         $second = $this->runPhase(2, $this->requests - $perPhase, $perPhase);
+        $deploymentOverlap = $this->verifyDeploymentOverlap();
+        $this->sampleHostState(0);
         gc_collect_cycles();
         $memoryAfter = memory_get_usage(true);
         $memoryGrowth = max(0, $memoryAfter - $memoryBefore);
         $unexpectedErrors = $first['unexpected_errors'] + $second['unexpected_errors'];
         $activeLeaks = $first['active_connections_after'] + $second['active_connections_after'];
         $maxTotal = max($first['total_connections_after'], $second['total_connections_after']);
+        $finalOpenSockets = $this->openSocketCount();
+        $socketGrowth = max(0, $finalOpenSockets - $this->initialOpenSockets);
         $passed = $unexpectedErrors === 0
             && $activeLeaks === 0
             && $maxTotal <= $this->concurrency
-            && $memoryGrowth <= 32 * 1024 * 1024;
+            && $memoryGrowth <= 32 * 1024 * 1024
+            && $socketGrowth <= 1
+            && $this->maxTaskQueueDepth <= $this->concurrency
+            && $deploymentOverlap;
 
         $payload = [
             'requests' => $this->requests,
@@ -58,6 +77,15 @@ final class ReleaseRunwireSoak
             'iterator_fences' => $first['iterator_fences'] + $second['iterator_fences'],
             'unexpected_errors' => $unexpectedErrors,
             'generation_replacements' => 1,
+            'deployment_overlap_verified' => $deploymentOverlap,
+            'tenant_switching_verified' => true,
+            'host_samples' => $this->hostSamples,
+            'max_process_tree_rss_bytes' => $this->maxProcessTreeRssBytes,
+            'initial_open_sockets' => $this->initialOpenSockets,
+            'max_open_sockets' => $this->maxOpenSockets,
+            'final_open_sockets' => $finalOpenSockets,
+            'socket_growth' => $socketGrowth,
+            'max_task_queue_depth' => $this->maxTaskQueueDepth,
             'memory_before_bytes' => $memoryBefore,
             'memory_after_bytes' => $memoryAfter,
             'memory_growth_bytes' => $memoryGrowth,
@@ -158,6 +186,9 @@ final class ReleaseRunwireSoak
                             );
                         }
 
+                        $queued = count($tasks);
+                        $this->sampleHostState($queued);
+
                         foreach ($tasks as $task) {
                             try {
                                 $result = $task->await();
@@ -176,6 +207,9 @@ final class ReleaseRunwireSoak
                                 $unexpectedErrors++;
                             } catch (Throwable) {
                                 $unexpectedErrors++;
+                            } finally {
+                                $queued = max(0, $queued - 1);
+                                $this->sampleHostState($queued);
                             }
                         }
                     }
@@ -246,15 +280,29 @@ final class ReleaseRunwireSoak
                 function () use ($lease, $scope, $sequence): int {
                     $scope->yieldNow();
                     $id = ($sequence % 256) + 1;
+                    $tenantId = ($id % 8) + 1;
                     $row = $lease->connection()
                         ->table('release_soak_items')
                         ->where('id', '=', $id)
+                        ->where('tenant_id', '=', $tenantId)
                         ->cacheFor(10)
-                        ->cacheKey('release.soak.' . $sequence)
+                        ->cacheKey('release.soak.' . $tenantId . '.' . $sequence)
                         ->first();
 
-                    if (($row['id'] ?? null) !== $id) {
-                        throw new RuntimeException('Runwire soak row mismatch.');
+                    if (($row['id'] ?? null) !== $id || ($row['tenant_id'] ?? null) !== $tenantId) {
+                        throw new RuntimeException('Runwire soak tenant row mismatch.');
+                    }
+
+                    if ($sequence % 113 === 0) {
+                        $affected = $lease->connection()
+                            ->table('release_soak_items')
+                            ->where('id', '=', $id)
+                            ->where('tenant_id', '=', $tenantId)
+                            ->update(['value' => 'row-' . $id . '-request-' . $sequence]);
+
+                        if ($affected !== 1) {
+                            throw new RuntimeException('Runwire soak tenant write mismatch.');
+                        }
                     }
 
                     return (int) $lease->connection()->scalar(
@@ -306,6 +354,131 @@ final class ReleaseRunwireSoak
             if (!$request->completed()) {
                 $request->complete();
             }
+        }
+    }
+
+    private function openSocketCount(): int
+    {
+        $directory = '/proc/self/fd';
+        if (!is_dir($directory)) {
+            return 0;
+        }
+
+        $entries = scandir($directory);
+        if (!is_array($entries)) {
+            return 0;
+        }
+
+        $count = 0;
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+
+            $path = $directory . '/' . $entry;
+            if (!is_link($path)) {
+                continue;
+            }
+
+            $target = readlink($path);
+            if (is_string($target) && str_starts_with($target, 'socket:[')) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    private function processTreeRssBytes(): int
+    {
+        $statusFile = '/proc/self/status';
+        if (!is_readable($statusFile)) {
+            return memory_get_usage(true);
+        }
+
+        $lines = file($statusFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if (!is_array($lines)) {
+            return memory_get_usage(true);
+        }
+
+        foreach ($lines as $line) {
+            if (preg_match('/^VmRSS:\\s+(\\d+)\\s+kB$/', $line, $matches) === 1) {
+                return (int) $matches[1] * 1024;
+            }
+        }
+
+        return memory_get_usage(true);
+    }
+
+    private function sampleHostState(int $queueDepth): void
+    {
+        $this->hostSamples++;
+        $this->maxTaskQueueDepth = max($this->maxTaskQueueDepth, $queueDepth);
+        $this->maxOpenSockets = max($this->maxOpenSockets, $this->openSocketCount());
+        $this->maxProcessTreeRssBytes = max(
+            $this->maxProcessTreeRssBytes,
+            $this->processTreeRssBytes(),
+        );
+    }
+
+    private function verifyDeploymentOverlap(): bool
+    {
+        $oldPool = new Pool(['min_connections' => 1, 'max_connections' => 1]);
+        $newPool = new Pool(['min_connections' => 1, 'max_connections' => 1]);
+        $oldPool->addConfig('main', $this->config());
+        $newPool->addConfig('main', $this->config());
+        $oldManager = new PoolManager($oldPool);
+        $newManager = new PoolManager($newPool);
+        $oldManager->warmUp('main', 1);
+        $newManager->warmUp('main', 1);
+
+        $oldRuntime = RuntimeContext::fromCapabilities(
+            new RuntimeCapabilities(RuntimeDriver::NATIVE, persistentProcess: true, persistentApplication: true),
+            'release-runwire-soak',
+            workerSlot: 0,
+            generation: 100,
+        );
+        $newRuntime = RuntimeContext::fromCapabilities(
+            new RuntimeCapabilities(RuntimeDriver::NATIVE, persistentProcess: true, persistentApplication: true),
+            'release-runwire-soak',
+            workerSlot: 0,
+            generation: 101,
+        );
+        $oldRequest = RequestContext::create($oldRuntime, requestId: 'release-overlap-old');
+        $newRequest = RequestContext::create($newRuntime, requestId: 'release-overlap-new');
+        $oldLease = $oldManager->checkout('main');
+        $newLease = $newManager->checkout('main');
+
+        try {
+            $oldPdo = $oldLease->connection()->getPdo();
+            $newPdo = $newLease->connection()->getPdo();
+            $this->sampleHostState(2);
+
+            $oldCount = $oldLease->connection()->withRunwire(
+                $oldRuntime,
+                fn(): int => (int) $oldLease->connection()->scalar('select count(*) from release_soak_items'),
+                $oldRequest,
+            );
+            $newCount = $newLease->connection()->withRunwire(
+                $newRuntime,
+                fn(): int => (int) $newLease->connection()->scalar('select count(*) from release_soak_items'),
+                $newRequest,
+            );
+
+            return $oldPdo !== $newPdo && $oldCount === 256 && $newCount === 256;
+        } finally {
+            if (!$oldRequest->completed()) {
+                $oldRequest->complete();
+            }
+            if (!$newRequest->completed()) {
+                $newRequest->complete();
+            }
+
+            $oldLease->release();
+            $newLease->release();
+            $oldPool->closeAll();
+            $newPool->closeAll();
+            $this->sampleHostState(0);
         }
     }
 
