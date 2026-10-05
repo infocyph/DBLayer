@@ -387,7 +387,7 @@ final class Connection
         $username = $this->config->get('username');
         $explicitScope = $this->config->get('cache_scope');
 
-        return hash('sha256', implode("\0", [
+        return substr(hash('sha256', implode("\0", [
             'v2',
             $this->name,
             $this->getDriverName(),
@@ -396,7 +396,7 @@ final class Connection
             is_string($schema) ? $schema : '',
             is_string($username) ? $username : '',
             is_string($explicitScope) ? $explicitScope : '',
-        ]));
+        ])), 0, 32);
     }
 
     /**
