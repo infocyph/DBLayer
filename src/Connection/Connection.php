@@ -362,23 +362,6 @@ final class Connection
     }
 
     /**
-     * Build a stable non-sensitive CacheLayer tag for a structured table dependency.
-     */
-    public function cacheTableTag(string $table, ?string $suffix = null): string
-    {
-        $table = strtolower(trim($table));
-        $schema = $this->config->get('schema');
-
-        if (!str_contains($table, '.') && is_string($schema) && $schema !== '') {
-            $table = strtolower($schema) . '.' . $table;
-        }
-
-        $tag = 'db.' . $this->cacheScopeFingerprint() . '.table.' . hash('xxh3', $table);
-
-        return $suffix === null || $suffix === '' ? $tag : $tag . '.' . $suffix;
-    }
-
-    /**
      * Build the versioned, non-sensitive identity used by result-cache keys and tags.
      */
     public function cacheScopeFingerprint(): string
@@ -397,6 +380,23 @@ final class Connection
             is_string($username) ? $username : '',
             is_string($explicitScope) ? $explicitScope : '',
         ])), 0, 32);
+    }
+
+    /**
+     * Build a stable non-sensitive CacheLayer tag for a structured table dependency.
+     */
+    public function cacheTableTag(string $table, ?string $suffix = null): string
+    {
+        $table = strtolower(trim($table));
+        $schema = $this->config->get('schema');
+
+        if (!str_contains($table, '.') && is_string($schema) && $schema !== '') {
+            $table = strtolower($schema) . '.' . $table;
+        }
+
+        $tag = 'db.' . $this->cacheScopeFingerprint() . '.table.' . hash('xxh3', $table);
+
+        return $suffix === null || $suffix === '' ? $tag : $tag . '.' . $suffix;
     }
 
     /**
@@ -670,6 +670,16 @@ final class Connection
     }
 
     /**
+     * Whether the already-open write handle is inside a PDO-owned transaction.
+     *
+     * This check never opens a new PDO connection.
+     */
+    public function hasActiveNativeTransaction(): bool
+    {
+        return $this->pdo?->inTransaction() ?? false;
+    }
+
+    /**
      * Whether this connection has an attached HealthCheck.
      */
     public function hasHealthCheck(): bool
@@ -686,13 +696,23 @@ final class Connection
     }
 
     /**
-     * Whether the already-open write handle is inside a PDO-owned transaction.
+     * Run an insert statement.
      *
-     * This check never opens a new PDO connection.
+     * @param array<int|string,mixed> $bindings
      */
-    public function hasActiveNativeTransaction(): bool
+    public function insert(string $sql, array $bindings = []): bool
     {
-        return $this->pdo?->inTransaction() ?? false;
+        $this->assertExpectedQueryType($sql, QueryType::INSERT);
+
+        return $this->executeKnownType($sql, $bindings, QueryType::INSERT)->rowCount() > 0;
+    }
+
+    /**
+     * Check if in transaction.
+     */
+    public function inTransaction(): bool
+    {
+        return $this->managedTransactionLevel() > 0 || ($this->pdo?->inTransaction() ?? false);
     }
 
     /**
@@ -717,26 +737,6 @@ final class Connection
         $this->afterCommit(static function () use ($cache, $tags): void {
             $cache->invalidateTags($tags);
         });
-    }
-
-    /**
-     * Run an insert statement.
-     *
-     * @param array<int|string,mixed> $bindings
-     */
-    public function insert(string $sql, array $bindings = []): bool
-    {
-        $this->assertExpectedQueryType($sql, QueryType::INSERT);
-
-        return $this->executeKnownType($sql, $bindings, QueryType::INSERT)->rowCount() > 0;
-    }
-
-    /**
-     * Check if in transaction.
-     */
-    public function inTransaction(): bool
-    {
-        return $this->managedTransactionLevel() > 0 || ($this->pdo?->inTransaction() ?? false);
     }
 
     /**
