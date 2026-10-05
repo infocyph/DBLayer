@@ -268,6 +268,12 @@ final class Connection
      */
     public function afterCommit(callable $callback): void
     {
+        if ($this->managedTransactionLevel() === 0 && $this->hasActiveNativeTransaction()) {
+            throw ConnectionException::transactionError(
+                'afterCommit callbacks require DBLayer-managed transaction ownership.',
+            );
+        }
+
         $this->getTransactionManager()->afterCommit($this, $callback);
     }
 
@@ -367,15 +373,30 @@ final class Connection
             $table = strtolower($schema) . '.' . $table;
         }
 
-        $identity = hash('xxh3', implode("\0", [
+        $tag = 'db.' . $this->cacheScopeFingerprint() . '.table.' . hash('xxh3', $table);
+
+        return $suffix === null || $suffix === '' ? $tag : $tag . '.' . $suffix;
+    }
+
+    /**
+     * Build the versioned, non-sensitive identity used by result-cache keys and tags.
+     */
+    public function cacheScopeFingerprint(): string
+    {
+        $schema = $this->config->get('schema');
+        $username = $this->config->get('username');
+        $explicitScope = $this->config->get('cache_scope');
+
+        return hash('sha256', implode("\0", [
+            'v2',
             $this->name,
             $this->getDriverName(),
             $this->getDatabaseName(),
             $this->tablePrefix,
+            is_string($schema) ? $schema : '',
+            is_string($username) ? $username : '',
+            is_string($explicitScope) ? $explicitScope : '',
         ]));
-        $tag = 'db.' . $identity . '.table.' . hash('xxh3', $table);
-
-        return $suffix === null || $suffix === '' ? $tag : $tag . '.' . $suffix;
     }
 
     /**
@@ -662,6 +683,40 @@ final class Connection
     public function hasStickyWrite(): bool
     {
         return $this->config->isSticky() && $this->recordsModified;
+    }
+
+    /**
+     * Whether the already-open write handle is inside a PDO-owned transaction.
+     *
+     * This check never opens a new PDO connection.
+     */
+    public function hasActiveNativeTransaction(): bool
+    {
+        return $this->pdo?->inTransaction() ?? false;
+    }
+
+    /**
+     * Invalidate query-cache tags after a managed commit, or immediately when
+     * an externally owned native transaction makes deferred commit ownership unknowable.
+     *
+     * @param list<string> $tags
+     */
+    public function invalidateQueryCacheTagsAfterCommit(array $tags): void
+    {
+        if ($tags === [] || !$this->hasQueryCache()) {
+            return;
+        }
+
+        $cache = $this->queryCache();
+        if ($this->managedTransactionLevel() === 0 && $this->hasActiveNativeTransaction()) {
+            $cache->invalidateTags($tags);
+
+            return;
+        }
+
+        $this->afterCommit(static function () use ($cache, $tags): void {
+            $cache->invalidateTags($tags);
+        });
     }
 
     /**
@@ -1611,8 +1666,15 @@ final class Connection
      */
     private function markExecutionSuccess(float $start, bool $isWrite, string $sql, array $bindings): void
     {
-        $this->assertWithinQueryBudget($start);
         $this->recordQuery($isWrite);
+
+        // A synchronous PDO mutation that returned successfully has already
+        // completed. Reporting a cooperative elapsed-time timeout here would
+        // invite callers to retry a mutation that may have committed.
+        if (!$isWrite) {
+            $this->assertWithinQueryBudget($start);
+        }
+
         $this->recordPretend($sql, $bindings);
     }
 
