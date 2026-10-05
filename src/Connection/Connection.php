@@ -934,6 +934,7 @@ final class Connection
                     throw ConnectionException::maxReconnectAttemptsReached(self::MAX_RECONNECT_ATTEMPTS);
                 }
 
+                $this->assertQueryCheckpoint(microtime(true));
                 usleep(100_000 * $attempt);
             }
         }
