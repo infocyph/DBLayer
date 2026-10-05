@@ -881,9 +881,7 @@ trait ConnectionInternals
     }
 
     /**
-     * Decide whether a failed query attempt should be retried.
-     *
-     * @param array<int|string,mixed> $bindings
+     * Sanitize native/session state before this connection is reused.
      */
     private function sanitizeRuntimeStateForReuse(): bool
     {
@@ -901,6 +899,11 @@ trait ConnectionInternals
         return true;
     }
 
+    /**
+     * Decide whether a failed query attempt should be retried.
+     *
+     * @param array<int|string,mixed> $bindings
+     */
     private function shouldRetryQuery(
         PDOException $e,
         int $attempt,
