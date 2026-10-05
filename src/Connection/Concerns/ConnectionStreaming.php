@@ -198,6 +198,47 @@ trait ConnectionStreaming
     }
 
     /**
+     * @param array<int|string,mixed> $bindings
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
+     */
+    private function fetchStreamRow(
+        PDOStatement $statement,
+        int $mode,
+        float $startedAt,
+        ?array $runwireBinding,
+        bool $checkBudget,
+    ): mixed {
+        if ($runwireBinding !== null) {
+            return $this->runWithRunwireBinding(
+                $runwireBinding,
+                function () use ($statement, $mode, $startedAt): mixed {
+                    $this->assertQueryCheckpoint($startedAt);
+                    $row = $statement->fetch($mode);
+                    $this->assertQueryCheckpoint($startedAt);
+
+                    return $row;
+                },
+            );
+        }
+
+        if ($checkBudget) {
+            $this->assertQueryCheckpoint($startedAt);
+        }
+
+        $row = $statement->fetch($mode);
+
+        if ($checkBudget) {
+            $this->assertQueryCheckpoint($startedAt);
+        }
+
+        return $row;
+    }
+
+    /**
      * @param array{
      *   runtime:\Infocyph\Runwire\RuntimeContext,
      *   request:?\Infocyph\Runwire\RequestContext,
@@ -240,6 +281,26 @@ trait ConnectionStreaming
         $this->postgresStreamCursorSequence++;
 
         return 'dblayer_stream_' . $this->postgresStreamCursorSequence;
+    }
+
+    /**
+     * @param array<int|string,mixed> $bindings
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
+     */
+    private function openStreamStatement(string $sql, array $bindings, ?array $runwireBinding): PDOStatement
+    {
+        if ($runwireBinding === null) {
+            return $this->execute($sql, $bindings);
+        }
+
+        return $this->runWithRunwireBinding(
+            $runwireBinding,
+            fn(): PDOStatement => $this->execute($sql, $bindings),
+        );
     }
 
     /**
@@ -325,67 +386,6 @@ trait ConnectionStreaming
         }
     }
 
-    /**
-     * @param array<int|string,mixed> $bindings
-     * @param array{
-     *   runtime:\Infocyph\Runwire\RuntimeContext,
-     *   request:?\Infocyph\Runwire\RequestContext,
-     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
-     * }|null $runwireBinding
-     */
-    private function fetchStreamRow(
-        PDOStatement $statement,
-        int $mode,
-        float $startedAt,
-        ?array $runwireBinding,
-        bool $checkBudget,
-    ): mixed {
-        if ($runwireBinding !== null) {
-            return $this->runWithRunwireBinding(
-                $runwireBinding,
-                function () use ($statement, $mode, $startedAt): mixed {
-                    $this->assertQueryCheckpoint($startedAt);
-                    $row = $statement->fetch($mode);
-                    $this->assertQueryCheckpoint($startedAt);
-
-                    return $row;
-                },
-            );
-        }
-
-        if ($checkBudget) {
-            $this->assertQueryCheckpoint($startedAt);
-        }
-
-        $row = $statement->fetch($mode);
-
-        if ($checkBudget) {
-            $this->assertQueryCheckpoint($startedAt);
-        }
-
-        return $row;
-    }
-
-    /**
-     * @param array<int|string,mixed> $bindings
-     * @param array{
-     *   runtime:\Infocyph\Runwire\RuntimeContext,
-     *   request:?\Infocyph\Runwire\RequestContext,
-     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
-     * }|null $runwireBinding
-     */
-    private function openStreamStatement(string $sql, array $bindings, ?array $runwireBinding): PDOStatement
-    {
-        if ($runwireBinding === null) {
-            return $this->execute($sql, $bindings);
-        }
-
-        return $this->runWithRunwireBinding(
-            $runwireBinding,
-            fn(): PDOStatement => $this->execute($sql, $bindings),
-        );
-    }
-
     private function releaseStreamStatement(?PDOStatement $statement, ?int $statementId): void
     {
         if ($statementId !== null) {
@@ -454,4 +454,6 @@ trait ConnectionStreaming
             $this->releaseStreamStatement($statement, $statementId);
         }
     }
+
+
 }
