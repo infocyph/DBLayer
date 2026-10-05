@@ -84,11 +84,21 @@ final class Connection
     private readonly ReplicaSelector $replicaSelector;
 
     /**
-     * Active streaming cursor statement ids.
+     * Active streaming cursor statements keyed by object id.
      *
-     * @var array<int,true>
+     * @var array<int,PDOStatement>
      */
     private array $activeStatementCursors = [];
+
+    /**
+     * Number of active iterator lifetimes using this wrapper.
+     */
+    private int $activeStreamIterators = 0;
+
+    /**
+     * Generation incremented whenever this wrapper crosses a pool-reuse boundary.
+     */
+    private int $runtimeReuseGeneration = 0;
 
     /**
      * Query executor for this connection.
@@ -950,7 +960,16 @@ final class Connection
      */
     public function resetRuntimeStateForReuse(): bool
     {
-        if ($this->managedTransactionLevel() > 0 || ($this->pdo?->inTransaction() ?? false)) {
+        $this->runtimeReuseGeneration++;
+
+        if (
+            $this->managedTransactionLevel() > 0
+            || ($this->pdo?->inTransaction() ?? false)
+            || $this->activeStreamIterators > 0
+            || $this->activeStatementCursors !== []
+        ) {
+            $this->closeActiveStatementCursors();
+
             return false;
         }
 
@@ -1244,33 +1263,13 @@ final class Connection
      */
     public function stream(string $sql, array $bindings = [], ?int $fetchMode = null): Generator
     {
-        $startedAt = microtime(true);
-        $statement = $this->execute($sql, $bindings);
-        $statementId = spl_object_id($statement);
-        $this->activeStatementCursors[$statementId] = true;
-        $mode = $fetchMode ?? $this->fetchMode;
-        $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
-            ? $this->sqlServerBigIntColumns($statement)
-            : [];
-
-        try {
-            while (true) {
-                $this->assertQueryCheckpoint($startedAt);
-                $row = $statement->fetch($mode);
-                $this->assertQueryCheckpoint($startedAt);
-
-                if ($row === false) {
-                    break;
-                }
-
-                yield $sqlServerBigIntColumns !== []
-                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
-                    : $row;
-            }
-        } finally {
-            unset($this->activeStatementCursors[$statementId]);
-            $statement->closeCursor();
-        }
+        return $this->streamGenerator(
+            $sql,
+            $bindings,
+            $fetchMode,
+            $this->runwireBinding(),
+            $this->runtimeReuseGeneration,
+        );
     }
 
     public function supportsInsertIgnore(): bool
@@ -1495,6 +1494,96 @@ final class Connection
     public function yieldRows(string $sql, array $bindings = [], ?int $fetchMode = null): Generator
     {
         yield from $this->stream($sql, $bindings, $fetchMode);
+    }
+
+    /**
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
+     * @param array<int|string,mixed> $bindings
+     * @return Generator<mixed>
+     */
+    private function streamGenerator(
+        string $sql,
+        array $bindings,
+        ?int $fetchMode,
+        ?array $runwireBinding,
+        int $reuseGeneration,
+    ): Generator {
+        $startedAt = microtime(true);
+        $statement = null;
+        $statementId = null;
+        $this->activeStreamIterators++;
+
+        try {
+            $this->assertStreamGeneration($reuseGeneration);
+            $statement = $this->runWithRunwireBinding(
+                $runwireBinding,
+                fn(): PDOStatement => $this->execute($sql, $bindings),
+            );
+            $statementId = spl_object_id($statement);
+            $this->activeStatementCursors[$statementId] = $statement;
+            $mode = $fetchMode ?? $this->fetchMode;
+            $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
+                ? $this->sqlServerBigIntColumns($statement)
+                : [];
+
+            while (true) {
+                $this->assertStreamGeneration($reuseGeneration);
+                $row = $this->runWithRunwireBinding(
+                    $runwireBinding,
+                    function () use ($statement, $mode, $startedAt): mixed {
+                        $this->assertQueryCheckpoint($startedAt);
+                        $row = $statement->fetch($mode);
+                        $this->assertQueryCheckpoint($startedAt);
+
+                        return $row;
+                    },
+                );
+
+                if ($row === false) {
+                    break;
+                }
+
+                yield $sqlServerBigIntColumns !== []
+                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
+                    : $row;
+            }
+        } finally {
+            if ($statementId !== null) {
+                unset($this->activeStatementCursors[$statementId]);
+            }
+
+            if ($statement instanceof PDOStatement) {
+                $statement->closeCursor();
+            }
+
+            $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
+        }
+    }
+
+    private function assertStreamGeneration(int $reuseGeneration): void
+    {
+        if ($reuseGeneration !== $this->runtimeReuseGeneration) {
+            throw ConnectionException::invalidConfiguration(
+                'Deferred database iterator outlived its connection lease.',
+            );
+        }
+    }
+
+    private function closeActiveStatementCursors(): void
+    {
+        foreach ($this->activeStatementCursors as $statement) {
+            try {
+                $statement->closeCursor();
+            } catch (Throwable) {
+                // Pool release will discard the wrapper after an active iterator.
+            }
+        }
+
+        $this->activeStatementCursors = [];
     }
 
     /**
