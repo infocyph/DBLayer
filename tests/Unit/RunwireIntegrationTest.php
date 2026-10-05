@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Infocyph\CacheLayer\Integration\Runwire\RunwireIntegration as CacheRunwireIntegration;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Connection\Pool;
+use Infocyph\DBLayer\Connection\PoolManager;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\Runwire\Coroutine\CoroutineRuntime;
 use Infocyph\Runwire\Coroutine\CoroutineScope;
@@ -178,4 +180,149 @@ it('uses a host coroutine scope for cooperative retry sleeps when capability is 
     });
 
     expect($completed)->toBeTrue();
+});
+
+it('rejects cancelled Runwire work before opening a PDO handle', function (): void {
+    $connection = new Connection(ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]), 'runwire-preconnect');
+    $runtime = RuntimeContext::standalone();
+    $request = RequestContext::create($runtime);
+    $request->cancel(CancellationReason::HOST_CANCELLED);
+
+    expect($connection->isConnected())->toBeFalse()
+        ->and(fn(): mixed => $connection->withRunwire(
+            $runtime,
+            fn(): mixed => $connection->scalar('select 1'),
+            $request,
+        ))->toThrow(ConnectionException::class)
+        ->and($connection->isConnected())->toBeFalse();
+});
+
+it('keeps concurrent Runwire requests on distinct pooled connections', function (): void {
+    $runtime = RuntimeContext::fromCapabilities(
+        new RuntimeCapabilities(
+            RuntimeDriver::NATIVE,
+            persistentProcess: true,
+            persistentApplication: true,
+            supportsRunwireCoroutines: true,
+        ),
+        'worker',
+        workerSlot: 0,
+        generation: 1,
+    );
+    $firstRequest = RequestContext::create($runtime, requestId: 'tenant-a');
+    $firstRequest->setAttribute('tenant', 'a');
+    $secondRequest = RequestContext::create($runtime, requestId: 'tenant-b');
+    $secondRequest->setAttribute('tenant', 'b');
+
+    $pool = new Pool([
+        'min_connections' => 0,
+        'max_connections' => 2,
+    ]);
+    $pool->addConfig('main', ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]));
+    $manager = new PoolManager($pool);
+
+    $results = new CoroutineRuntime()->run(
+        function (CoroutineScope $scope) use (
+            $manager,
+            $runtime,
+            $firstRequest,
+            $secondRequest,
+        ): array {
+            $first = $scope->spawn(function () use ($manager, $runtime, $firstRequest, $scope): array {
+                $lease = $manager->checkout('main');
+
+                try {
+                    return $lease->connection()->withRunwire(
+                        $runtime,
+                        function () use ($lease, $firstRequest, $scope): array {
+                            $scope->yieldNow();
+
+                            return [
+                                spl_object_id($lease->connection()),
+                                $firstRequest->attribute('tenant'),
+                                $lease->connection()->scalar('select 1'),
+                            ];
+                        },
+                        $firstRequest,
+                        $scope,
+                    );
+                } finally {
+                    $lease->release();
+                }
+            });
+            $second = $scope->spawn(function () use ($manager, $runtime, $secondRequest, $scope): array {
+                $lease = $manager->checkout('main');
+
+                try {
+                    return $lease->connection()->withRunwire(
+                        $runtime,
+                        function () use ($lease, $secondRequest, $scope): array {
+                            $scope->yieldNow();
+
+                            return [
+                                spl_object_id($lease->connection()),
+                                $secondRequest->attribute('tenant'),
+                                $lease->connection()->scalar('select 2'),
+                            ];
+                        },
+                        $secondRequest,
+                        $scope,
+                    );
+                } finally {
+                    $lease->release();
+                }
+            });
+
+            return [$first->await(), $second->await()];
+        },
+    );
+
+    expect($results[0][0])->not->toBe($results[1][0])
+        ->and($results[0][1])->toBe('a')
+        ->and($results[1][1])->toBe('b')
+        ->and($results[0][2])->toBe(1)
+        ->and($results[1][2])->toBe(2)
+        ->and($pool->getStats()['active_connections'])->toBe(0);
+
+    $firstRequest->complete();
+    $secondRequest->complete();
+});
+
+it('replaces worker-local pooled PDO handles across host generations', function (): void {
+    $config = ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]);
+
+    $firstPool = new Pool([
+        'min_connections' => 1,
+        'max_connections' => 1,
+    ]);
+    $firstPool->addConfig('main', $config);
+    $firstManager = new PoolManager($firstPool);
+    $firstManager->warmUp('main');
+    $firstLease = $firstManager->checkout('main');
+    $firstPdo = $firstLease->connection()->getPdo();
+    $firstLease->release();
+    $firstPool->closeAll();
+
+    $secondPool = new Pool([
+        'min_connections' => 1,
+        'max_connections' => 1,
+    ]);
+    $secondPool->addConfig('main', $config);
+    $secondManager = new PoolManager($secondPool);
+    $secondManager->warmUp('main');
+    $secondLease = $secondManager->checkout('main');
+    $secondPdo = $secondLease->connection()->getPdo();
+
+    expect($secondPdo)->not->toBe($firstPdo);
+
+    $secondLease->release();
 });
