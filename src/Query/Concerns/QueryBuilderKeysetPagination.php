@@ -316,6 +316,11 @@ trait QueryBuilderKeysetPagination
     }
 
     /**
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
      * @return list<array<string,mixed>>
      */
     private function fetchChunkById(
@@ -350,6 +355,11 @@ trait QueryBuilderKeysetPagination
     }
 
     /**
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
      * @return Generator<array{0:list<array<string,mixed>>,1:int}>
      */
     private function keysetChunks(
