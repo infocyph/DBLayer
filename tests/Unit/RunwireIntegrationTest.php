@@ -160,6 +160,40 @@ it('retains exact Runwire binding across lazy ArrayKit and database batch lifeti
         ->toThrow(LogicException::class, 'Completed Runwire request');
 });
 
+it('checks Runwire cancellation between buffered lazy rows', function (): void {
+    $connection = dblayerRunwireConnection();
+    $runtime = RuntimeContext::standalone();
+    $request = RequestContext::create($runtime);
+    $lazy = $connection->withRunwire(
+        $runtime,
+        fn() => $connection->table('items')->lazyById(chunkSize: 3),
+        $request,
+    );
+
+    $lazy->rewind();
+    expect($lazy->current()['id'] ?? null)->toBe(1);
+
+    $request->cancel(CancellationReason::HOST_CANCELLED);
+
+    expect(fn() => $lazy->next())->toThrow(ConnectionException::class);
+});
+
+it('keeps captured Runwire context for a stream created before first iteration', function (): void {
+    $connection = dblayerRunwireConnection();
+    $runtime = RuntimeContext::standalone();
+    $request = RequestContext::create($runtime);
+    $stream = $connection->withRunwire(
+        $runtime,
+        fn() => $connection->stream('select id, value from items order by id'),
+        $request,
+    );
+
+    $request->complete();
+
+    expect(fn(): array => iterator_to_array($stream))
+        ->toThrow(ConnectionException::class, 'Completed Runwire request');
+});
+
 it('uses a host coroutine scope for cooperative retry sleeps when capability is active', function (): void {
     $connection = dblayerRunwireConnection();
     $runtime = RuntimeContext::fromCapabilities(
