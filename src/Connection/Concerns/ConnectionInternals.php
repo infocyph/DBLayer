@@ -24,6 +24,11 @@ use Throwable;
 trait ConnectionInternals
 {
     /**
+     * Whether the current query-result cache was created privately by DBLayer.
+     */
+    private bool $ownsQueryCache = false;
+
+    /**
      * Query-result cache owned by this connection instance.
      */
     private ?CacheInterface $queryCache = null;
@@ -48,6 +53,11 @@ trait ConnectionInternals
         $this->recordsModified = false;
         $this->transactionManager = null;
         $this->resetRequestRuntimeState();
+
+        if ($this->ownsQueryCache) {
+            $this->queryCache = null;
+            $this->ownsQueryCache = false;
+        }
     }
 
     /**
@@ -67,7 +77,12 @@ trait ConnectionInternals
      */
     public function queryCache(): CacheInterface
     {
-        return $this->queryCache ??= Cache::memory('dblayer');
+        if ($this->queryCache === null) {
+            $this->queryCache = Cache::memory('dblayer');
+            $this->ownsQueryCache = true;
+        }
+
+        return $this->queryCache;
     }
 
     /**
@@ -76,6 +91,7 @@ trait ConnectionInternals
     public function setQueryCache(?CacheInterface $cache): self
     {
         $this->queryCache = $cache;
+        $this->ownsQueryCache = false;
 
         return $this;
     }
@@ -703,6 +719,10 @@ trait ConnectionInternals
         $cached = $this->statementCache[$bucket][$fingerprint] ?? null;
 
         if ($cached instanceof PDOStatement) {
+            if (isset($this->activeStatementCursors[spl_object_id($cached)])) {
+                return $pdo->prepare($sql);
+            }
+
             $cached->closeCursor();
             $this->touchStatementCacheEntry($isWrite, $fingerprint);
 
