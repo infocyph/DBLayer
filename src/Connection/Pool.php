@@ -383,12 +383,8 @@ final class Pool
             );
         }
 
-        $ready = 0;
-        foreach ($this->connections[$name] ?? [] as $data) {
-            if ($data['connection']->isConnected()) {
-                $ready++;
-            }
-        }
+        $this->removeStaleIdleConnections();
+        $ready = $this->activeConnectedCount($name);
 
         if ($ready >= $target) {
             return $ready;
@@ -401,16 +397,32 @@ final class Pool
                 $connection = $this->getConnection($name);
                 $held[] = $connection;
 
-                if ($connection->isConnected()) {
-                    continue;
+                if (!$connection->isConnected()) {
+                    $connection->getPdo();
                 }
 
-                $connection->getPdo();
                 $ready++;
             }
         } finally {
             foreach ($held as $connection) {
                 $this->releaseConnection($name, $connection);
+            }
+        }
+
+        return $ready;
+    }
+
+    private function activeConnectedCount(string $name): int
+    {
+        $ready = 0;
+
+        foreach ($this->connections[$name] ?? [] as $id => $data) {
+            if (isset($this->idle[$name][$id])) {
+                continue;
+            }
+
+            if ($data['connection']->isConnected()) {
+                $ready++;
             }
         }
 
@@ -499,9 +511,9 @@ final class Pool
         $connectionId = array_key_first($this->idle[$name]);
         $data = $this->idle[$name][$connectionId];
 
-        // Check idle timeout.
-        $idleTime = microtime(true) - $data['idle_since'];
-        if ($this->poolConfig['idle_timeout'] > 0 && $idleTime >= $this->poolConfig['idle_timeout']) {
+        // Check idle timeout and maximum wrapper lifetime before reuse.
+        $now = microtime(true);
+        if ($this->idleConnectionExpired($name, $connectionId, $data['idle_since'], $now)) {
             $this->removeConnection($name, $data['connection']);
 
             // Try next one.
@@ -566,14 +578,24 @@ final class Pool
         $now = microtime(true);
 
         foreach ($this->idle as $name => $connections) {
-            foreach ($connections as $data) {
-                $idleTime = $now - $data['idle_since'];
-
-                if ($this->poolConfig['idle_timeout'] > 0 && $idleTime >= $this->poolConfig['idle_timeout']) {
+            foreach ($connections as $id => $data) {
+                if ($this->idleConnectionExpired($name, $id, $data['idle_since'], $now)) {
                     $this->removeConnection($name, $data['connection']);
                 }
             }
         }
+    }
+
+    private function idleConnectionExpired(string $name, int $id, float $idleSince, float $now): bool
+    {
+        $idleExpired = $this->poolConfig['idle_timeout'] > 0
+            && ($now - $idleSince) >= $this->poolConfig['idle_timeout'];
+
+        $createdAt = $this->connections[$name][$id]['created_at'] ?? $now;
+        $lifetimeExpired = $this->poolConfig['max_lifetime'] > 0
+            && ($now - $createdAt) >= $this->poolConfig['max_lifetime'];
+
+        return $idleExpired || $lifetimeExpired;
     }
 
     private function shouldRunHealthCheck(float $now): bool
