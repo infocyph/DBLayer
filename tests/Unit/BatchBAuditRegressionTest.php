@@ -101,10 +101,17 @@ it('restores native SQLite timeout state before pooled reuse', function (): void
     $connection = dblayerBatchBConnection();
     $connection->setQueryTimeoutMs(123);
 
-    expect((int) $connection->scalar('pragma busy_timeout'))->toBe(123)
+    $before = $connection->getPdo()->query('pragma busy_timeout');
+    expect($before)->not->toBeFalse();
+    $beforeValue = $before === false ? -1 : (int) $before->fetchColumn();
+
+    expect($beforeValue)->toBe(123)
         ->and($connection->resetRuntimeStateForReuse())->toBeTrue()
-        ->and($connection->getQueryTimeoutMs())->toBeNull()
-        ->and((int) $connection->scalar('pragma busy_timeout'))->toBe(0);
+        ->and($connection->getQueryTimeoutMs())->toBeNull();
+
+    $after = $connection->getPdo()->query('pragma busy_timeout');
+    expect($after)->not->toBeFalse()
+        ->and($after === false ? -1 : (int) $after->fetchColumn())->toBe(0);
 });
 
 it('escapes LIKE wildcard and escape characters exactly once', function (): void {
