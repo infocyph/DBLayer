@@ -160,6 +160,26 @@ trait QueryBuilderResults
         return new SimplePaginator($items, $perPage, $page, $hasMore);
     }
 
+    /** @phpstan-assert list<array<string,mixed>> $result */
+    private function assertCachedRows(mixed $result): void
+    {
+        if (!is_array($result) || !array_is_list($result)) {
+            throw QueryException::invalidParameter('cache', 'Cached query result must be a row list.');
+        }
+
+        foreach ($result as $row) {
+            if (!is_array($row)) {
+                throw QueryException::invalidParameter('cache', 'Cached query rows must be arrays.');
+            }
+
+            foreach ($row as $key => $value) {
+                if (!is_string($key)) {
+                    throw QueryException::invalidParameter('cache', 'Cached query row keys must be strings.');
+                }
+            }
+        }
+    }
+
     /**
      * @param array{
      *   runtime:\Infocyph\Runwire\RuntimeContext,
@@ -184,26 +204,6 @@ trait QueryBuilderResults
         ) as [$rows]) {
             foreach ($rows as $row) {
                 yield $row;
-            }
-        }
-    }
-
-    /** @phpstan-assert list<array<string,mixed>> $result */
-    private function assertCachedRows(mixed $result): void
-    {
-        if (!is_array($result) || !array_is_list($result)) {
-            throw QueryException::invalidParameter('cache', 'Cached query result must be a row list.');
-        }
-
-        foreach ($result as $row) {
-            if (!is_array($row)) {
-                throw QueryException::invalidParameter('cache', 'Cached query rows must be arrays.');
-            }
-
-            foreach ($row as $key => $value) {
-                if (!is_string($key)) {
-                    throw QueryException::invalidParameter('cache', 'Cached query row keys must be strings.');
-                }
             }
         }
     }
