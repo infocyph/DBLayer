@@ -204,11 +204,25 @@ instance-oriented lease API so ownership is explicit:
        $lease->release();
    }
 
-``min_connections`` currently creates lazy connection objects within the
-pool-wide maximum; it does not open database handles at startup or automatically
-replenish a minimum after expiry. PDO handles open on first use and healthy
-handles remain available for reuse after the lease is released. Retain the pool
-manager across requests in the owning worker to benefit from this reuse.
+``min_connections`` creates lazy connection objects within the pool-wide
+maximum. PDO handles normally open on first use. Persistent hosts that want an
+explicit readiness warmup can open distinct primary handles after worker/fork
+creation:
+
+.. code-block:: php
+
+   $ready = $manager->warmUp('main', target: 10);
+
+``warmUp()`` is synchronous and host-invoked. It opens distinct handles up to
+the requested target, returns them to the idle pool, and respects
+``max_connections``. It does not start a background timer or automatically
+replenish capacity after expiry. A host that wants periodic reconciliation must
+invoke its own bounded maintenance/readiness policy.
+
+Healthy handles remain available for reuse after a lease is released. Retain
+the pool manager only inside the owning worker generation and close the pool
+during host-controlled drain or replacement. Never carry opened PDO handles
+across a fork.
 
 ``checkout()`` returns a ``ConnectionLease`` containing the ownership token for
 that checkout generation. A stale lease, double release, or a bare
@@ -229,6 +243,33 @@ with the same tokenized ownership semantics:
 legacy callers. Prefer ``checkout()`` for persistent or interleaved execution
 models because a bare ``Connection`` reference does not itself express checkout
 generation ownership.
+
+Runwire Runtime Composition
+---------------------------
+
+Runwire integration is optional and instance-oriented. The host lends its
+already active runtime/request/scope to an exclusively owned connection:
+
+.. code-block:: php
+
+   $result = $connection->withRunwire(
+       $runtime,
+       fn () => $connection->table('users')->where('active', 1)->get(),
+       $request,
+       $scope,
+   );
+
+DBLayer validates process and request/runtime identity, composes cancellation
+and the earliest deadline with existing query controls, and restores the prior
+binding in ``finally``. When a compatible coroutine scope is present, bounded
+retry/backoff sleeps cooperate with that scope.
+
+Lazy keyset and ArrayKit collection paths retain the exact binding for their
+iterator lifetime. A completed/cancelled request cannot resume database work.
+
+DBLayer does not start or stop Runwire workers, listeners, supervisors, or event
+loops. Runwire integration also does not make synchronous PDO calls nonblocking.
+The host remains responsible for worker lifecycle, pool ownership, and drain.
 
 Release Sanitation
 ------------------
