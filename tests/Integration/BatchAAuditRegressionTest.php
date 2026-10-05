@@ -35,7 +35,7 @@ it('rejects SQL syntax smuggled through structured aggregate identifiers', funct
 
     expect(fn() => $connection->table('items')->aggregate('MAX(42) FROM items --'))
         ->toThrow(QueryException::class, 'Aggregate function must be a plain SQL function identifier')
-        ->and(fn() => $connection->table('items')->aggregate('MAX', 'value)')->not->toThrow(QueryException::class)
+        ->and(fn() => $connection->table('items')->aggregate('MAX', 'value'))->not->toThrow(QueryException::class)
         ->and($connection->table('items')->count('id'))->toBe(1);
 });
 
