@@ -202,13 +202,13 @@ trait QueryBuilderCaching
 
     private function resultCacheKey(string $sql, string $bindingFingerprint): string
     {
-        return 'dblayer.query.' . hash('xxh3', implode("\0", [
+        return 'dblayer.query.' . substr(hash('sha256', implode("\0", [
             $this->connection->cacheScopeFingerprint(),
             'select-array',
             SqlFingerprint::hash($sql, 32),
             $bindingFingerprint,
             $this->cacheKey ?? '',
-        ]));
+        ])), 0, 40);
     }
 
     /** @return list<string> */
