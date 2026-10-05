@@ -258,7 +258,9 @@ trait ConnectionStreaming
                     $this->assertStreamGeneration($reuseGeneration);
                     $this->runWithRunwireBinding(
                         $runwireBinding,
-                        fn(): mixed => $this->assertQueryCheckpoint($startedAt),
+                        function () use ($startedAt): void {
+                            $this->assertQueryCheckpoint($startedAt);
+                        },
                     );
 
                     yield $row;
