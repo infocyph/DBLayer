@@ -30,9 +30,10 @@ function setupRepositoryFixture(string $driver): string
             'create table %s (
             %s,
             tenant_id integer not null,
-            email %s not null unique,
+            email %s not null,
             name %s not null,
-            active integer not null default 1
+            active integer not null default 1,
+            unique (tenant_id, email)
         )',
             $table,
             dblayerAutoIncrementPrimaryKey($schemaDriver),
