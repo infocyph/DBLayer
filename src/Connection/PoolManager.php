@@ -159,4 +159,12 @@ final class PoolManager
             $lease->release();
         }
     }
+
+    /**
+     * Explicitly warm distinct primary PDO handles for a worker-local pool.
+     */
+    public function warmUp(string $name = 'default', ?int $target = null): int
+    {
+        return $this->pool->warmUp($name, $target);
+    }
 }
