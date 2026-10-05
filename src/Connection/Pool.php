@@ -365,6 +365,59 @@ final class Pool
     }
 
     /**
+     * Open distinct primary PDO handles up to the requested ready target.
+     *
+     * This is host-invoked warmup only; it does not install timers or own a
+     * worker/event-loop lifecycle. Active connected leases count toward target.
+     */
+    public function warmUp(string $name = 'default', ?int $target = null): int
+    {
+        if (!isset($this->configs[$name])) {
+            throw ConnectionException::configNotFound($name);
+        }
+
+        $target ??= $this->poolConfig['min_connections'];
+        if ($target < 0 || $target > $this->poolConfig['max_connections']) {
+            throw ConnectionException::invalidConfiguration(
+                'Pool warmup target must be between zero and max_connections.',
+            );
+        }
+
+        $ready = 0;
+        foreach ($this->connections[$name] ?? [] as $data) {
+            if ($data['connection']->isConnected()) {
+                $ready++;
+            }
+        }
+
+        if ($ready >= $target) {
+            return $ready;
+        }
+
+        $held = [];
+
+        try {
+            while ($ready < $target) {
+                $connection = $this->getConnection($name);
+                $held[] = $connection;
+
+                if ($connection->isConnected()) {
+                    continue;
+                }
+
+                $connection->getPdo();
+                $ready++;
+            }
+        } finally {
+            foreach ($held as $connection) {
+                $this->releaseConnection($name, $connection);
+            }
+        }
+
+        return $ready;
+    }
+
+    /**
      * Check if we can create a new connection.
      */
     private function canCreateConnection(): bool
