@@ -260,7 +260,13 @@ final class ReleaseHostWorkload
                     $directory . '/worker-' . $worker . '.json',
                     json_encode($result, JSON_THROW_ON_ERROR),
                 );
-                exit(($result['errors'] ?? 1) === 0 ? 0 : 1);
+                $workerCode = ($result['errors'] ?? 1) === 0
+                    ? ''
+                    : 'throw new RuntimeException("Release host worker failed.");';
+
+                pcntl_exec(PHP_BINARY, ['-r', $workerCode]);
+
+                throw new RuntimeException('Unable to terminate forked release workload worker.');
             }
 
             $pids[] = $pid;
