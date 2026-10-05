@@ -19,12 +19,12 @@ exclude failing code or edit vendor files.
 
 ## Implementation tracker
 
-Last synchronized: 2026-10-05 at `ea61258`. PR: #32. Active batch: **B**.
+Last synchronized: 2026-10-05 at `29ae72d`. PR: #32. Active batch: **B — verification**.
 
 | Batch | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
 | A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Complete** | Exact Batch A candidate `ea61258`: Pest, syntax, reference integrity, Pint and PHPBench 8.4/8.5 pass; live PostgreSQL schema isolation passes. Remaining analyzer/skip-scanner failures are tracked under D13. |
-| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **In progress** | Regression-first implementation now active after Batch A closure. |
+| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **Verification in progress** | D07-D12 production fixes and focused regressions are committed through `29ae72d`; live PostgreSQL timeout sanitation is included. PR QA is the exit gate. |
 | C | D13 — PHPForge/tooling and dependency compatibility | Not started | Full unsuppressed PHPForge gates, lowest/latest dependencies and audit policy. |
 | D | Optional Runwire 2.1.1 integration | Not started | Starts only after D01-D13 correctness gates pass. |
 | E | Docs, performance/soak, downstream consumers and final CI | Not started | Exact-final-SHA release evidence. |
@@ -41,6 +41,17 @@ Last synchronized: 2026-10-05 at `ea61258`. PR: #32. Active batch: **B**.
 | D06 | Complete | Completed mutations record durable outcome before late budget failure and cannot leave stale cache/sticky state. |
 
 Tracker statuses are updated only from committed code and verification evidence; a code change alone is not marked complete until its required regression/QA evidence exists.
+
+### Batch B item tracker
+
+| ID | Status | Exit requirement |
+| --- | --- | --- |
+| D07 | Implemented; verification pending | Warm cache hits, nested cancellation, deadlines, stream/batch and retry checkpoints preserve the strictest active budget. |
+| D08 | Implemented; verification pending | Active streaming statements are never reused from the prepared-statement cache; cleanup releases ownership. |
+| D09 | Implemented; verification pending | Scoped pool callbacks reject escaping Traversable/lazy results and always release the lease. |
+| D10 | Implemented; verification pending | Pool reset restores native timeout state; SQLite and live PostgreSQL regressions pass. |
+| D11 | Implemented; verification pending | LIKE escaping is single-pass and literal wildcard/backslash semantics are verified. |
+| D12 | Implemented; verification pending | DBLayer-owned private caches are discarded on reuse; caller-owned shared caches survive reset. |
 
 ## Changes already applied
 
