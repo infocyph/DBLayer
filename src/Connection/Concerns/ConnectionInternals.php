@@ -35,6 +35,25 @@ trait ConnectionInternals
     private ?CacheInterface $queryCache = null;
 
     /**
+     * Fail fast at a cache/stream/runtime checkpoint.
+     *
+     * @internal Used by DBLayer-owned higher-level execution paths.
+     */
+    public function assertQueryCheckpoint(float $startedAt): void
+    {
+        if (
+            $this->queryCancellationChecker === null
+            && $this->queryDeadlineAt === null
+            && $this->queryTimeoutMs === null
+        ) {
+            return;
+        }
+
+        $this->assertNotCancelled();
+        $this->assertWithinQueryBudget($startedAt);
+    }
+
+    /**
      * Disconnect write and read handles and reset request-scoped state.
      */
     public function disconnect(): void
