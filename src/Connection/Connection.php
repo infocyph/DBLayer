@@ -1749,8 +1749,14 @@ final class Connection
         float $start,
         int &$attemptsUsed,
     ): array {
-        $this->assertNotCancelled();
-        $this->assertWithinQueryBudget($start);
+        if (
+            $this->queryCancellationChecker !== null
+            || $this->queryDeadlineAt !== null
+            || $this->queryTimeoutMs !== null
+        ) {
+            $this->assertNotCancelled();
+            $this->assertWithinQueryBudget($start);
+        }
 
         $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
         $attempt = 0;
