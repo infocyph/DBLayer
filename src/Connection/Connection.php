@@ -640,26 +640,6 @@ final class Connection
     }
 
     /**
-     * Get read PDO connection (for read/write splitting).
-     */
-    public function getReadPdo(): PDO
-    {
-        if ($this->shouldUseWritePdoForRead()) {
-            return $this->getPdo();
-        }
-
-        if (!$this->config->hasReadConfig()) {
-            return $this->getPdo();
-        }
-
-        if ($this->readPdo === null) {
-            $this->connectRead();
-        }
-
-        return $this->readPdo ?? $this->getPdo();
-    }
-
-    /**
      * Get read-replica selection telemetry for this connection.
      *
      * @return array{
