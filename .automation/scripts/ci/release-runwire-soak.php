@@ -76,7 +76,7 @@ final class ReleaseRunwireSoak
         fwrite(STDOUT, $encoded . PHP_EOL);
 
         if (!$passed) {
-            exit(1);
+            throw new RuntimeException('Sustained Runwire worker soak failed its acceptance checks.');
         }
     }
 
