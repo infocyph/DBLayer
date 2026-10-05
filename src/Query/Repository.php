@@ -975,6 +975,10 @@ abstract class Repository
      */
     public function upsert(array $values, array $uniqueBy, ?array $update = null): bool
     {
+        $payload = $this->applyTenantValues(
+            $this->applyWriteCastsToValues($this->applyTenantValues($values)),
+        );
+
         if ($this->tenantId !== null) {
             $tenantColumn = $this->normalizeColumnName($this->tenantColumn, 'tenant_id');
             $driver = $this->connection->getDriverName();
@@ -997,10 +1001,6 @@ abstract class Repository
                 );
             }
         }
-
-        $payload = $this->applyTenantValues(
-            $this->applyWriteCastsToValues($this->applyTenantValues($values)),
-        );
 
         return $this->query()->upsert($payload, $uniqueBy, $update);
     }
