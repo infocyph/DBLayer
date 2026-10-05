@@ -72,13 +72,6 @@ final class Connection
     private static ?PDO $pretendPdo = null;
 
     /**
-     * Active streaming cursor statement ids.
-     *
-     * @var array<int,true>
-     */
-    private array $activeStatementCursors = [];
-
-    /**
      * Query compiler for this connection.
      */
     private readonly QueryCompilerInterface $compiler;
@@ -92,6 +85,13 @@ final class Connection
      * Stateful read-replica strategy coordinator.
      */
     private readonly ReplicaSelector $replicaSelector;
+
+    /**
+     * Active streaming cursor statement ids.
+     *
+     * @var array<int,true>
+     */
+    private array $activeStatementCursors = [];
 
     /**
      * Query executor for this connection.
@@ -998,18 +998,7 @@ final class Connection
         $this->transactionManager?->clear();
         $this->resetRequestRuntimeState();
 
-        if ($this->ownsQueryCache) {
-            $this->queryCache = null;
-            $this->ownsQueryCache = false;
-        }
-
-        try {
-            $this->syncServerSideStatementTimeouts();
-        } catch (Throwable) {
-            return false;
-        }
-
-        return true;
+        return $this->sanitizeRuntimeStateForReuse();
     }
 
     /**
