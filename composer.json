@@ -43,7 +43,7 @@
         "ext-pdo_pgsql": "For PostgreSQL database support",
         "ext-pdo_sqlite": "For SQLite database support",
         "ext-pdo_sqlsrv": "For Microsoft SQL Server database support",
-        "infocyph/runwire": "Optional runtime integration planned for DBLayer 6.0; development targets Runwire 2.1.1."
+        "infocyph/runwire": "Optional host-runtime cancellation, deadline, coroutine backoff, and lazy-iteration integration for DBLayer 6.0."
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
