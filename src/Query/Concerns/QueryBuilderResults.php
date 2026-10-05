@@ -207,7 +207,9 @@ trait QueryBuilderResults
             foreach ($rows as $row) {
                 $this->connection->runWithRunwireBinding(
                     $runwireBinding,
-                    fn(): mixed => $this->connection->assertQueryCheckpoint($startedAt),
+                    function () use ($startedAt): void {
+                        $this->connection->assertQueryCheckpoint($startedAt);
+                    },
                 );
 
                 yield $row;
