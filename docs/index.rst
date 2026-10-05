@@ -39,6 +39,7 @@ as lookup pages after reading the guides.
 
    installation
    quickstart
+   upgrade-6.0
    architecture
 
 .. toctree::
