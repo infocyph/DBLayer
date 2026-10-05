@@ -191,17 +191,13 @@ trait ConnectionRunwire
         ?RequestContext $request,
         ?CoroutineScope $scope,
     ): ?float {
-        $deadlines = [];
         $requestRemaining = $request?->deadline()->remainingSeconds();
         $scopeRemaining = $scope?->cancellation()->deadline()->remainingSeconds();
 
-        if ($requestRemaining !== null) {
-            $deadlines[] = $requestRemaining;
-        }
-        if ($scopeRemaining !== null) {
-            $deadlines[] = $scopeRemaining;
-        }
-
-        return $deadlines === [] ? null : min($deadlines);
+        return match (true) {
+            $requestRemaining === null => $scopeRemaining,
+            $scopeRemaining === null => $requestRemaining,
+            default => min($requestRemaining, $scopeRemaining),
+        };
     }
 }
