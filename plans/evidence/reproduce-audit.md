@@ -1,5 +1,10 @@
 # Reproducing the 2026-10-05 audit probes
 
+Historical baseline: `087f179ecac3e5555c346ce84cfc353050f8e3cb` plus the
+dependency-floor changes. The recorded outcomes predate remediation. See the
+[consolidated feedback](../dblayer-6.0-audit-and-runwire.md) for current statuses;
+running this harness on a newer revision may produce different outcomes.
+
 Run from the DBLayer repository root with its installed Composer dependencies.
 Copy the PHP block into `/tmp/dblayer-audit-probes.php`, then run
 `php /tmp/dblayer-audit-probes.php`. These diagnostic probes use private SQLite

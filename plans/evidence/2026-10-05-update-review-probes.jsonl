@@ -1,0 +1,8 @@
+{"probe":"native_transaction_refill_before_commit","result":{"reader_during_transaction":"old","cached_after_commit":"old","uncached_after_commit":"committed"}}
+{"probe":"cross_security_scope_write_invalidation","result":{"cached_after_write":"old","uncached_after_write":"new"}}
+{"probe":"lazyById_cancel_between_buffered_rows","result":{"first":1,"row_after_cancellation":2}}
+{"probe":"stream_created_under_binding_consumed_after_request_complete","result":{"row_count":3}}
+{"probe":"lease_release_with_live_stream","result":{"same_wrapper":true,"old_stream_row":2,"new_borrower_scalar":42}}
+{"probe":"warmup_counts_expired_idle_as_ready","result":{"warmup_reported_ready":1,"checkout_already_open":false,"same_pdo_after_checkout":false}}
+{"probe":"tenant_scoped_upsert_conflict_updates_other_tenant","result":{"accepted":true,"row":{"id":7,"tenant_id":2,"value":"changed-by-tenant-one"}}}
+{"probe":"tenant_scoped_upsert_default_updates_tenant_identity","result":{"row":{"id":7,"tenant_id":1,"value":"taken-by-tenant-one"}}}

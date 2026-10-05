@@ -1,13 +1,18 @@
-# DBLayer 6.0 audit and optional Runwire integration plan
+# DBLayer 6.0 consolidated audit feedback and release plan
 
-Date: 2026-10-05 (Asia/Dhaka). Status: remediation required; release blocked.
+Updated: 2026-10-05 (Asia/Dhaka). **Release blocked.**
 
-Audited source: `087f179ecac3e5555c346ce84cfc353050f8e3cb` (current 5.1 line),
-plus the requested dependency-floor and matching documentation changes.
-This is a risk-based whole-library audit using repository-wide detectors,
-existing tests, Graphify navigation, source inspection and focused adversarial
-probes. It is not a claim that every source line or deployment was exhaustively
-verified. Production PHP contains 162 source files.
+This file consolidates the initial library audit, updated-code review, Runwire
+integration requirements, worker-pool/configuration proposals and release gates.
+Initial baseline: `087f179ecac3e5555c346ce84cfc353050f8e3cb` (5.1).
+Latest reviewed candidate: `a33cbe7b955a10add97170592394f101e4dfefce`, PR #32.
+The latest review began with a clean working tree and changed no production
+code or test assertions. Evidence is tied to these revisions; this consolidation
+does not claim a new code verification run.
+
+The audit is risk-based: repository-wide detectors, existing tests, Graphify
+navigation, source inspection and focused adversarial probes. It does not claim
+every source line or deployment was exhaustively verified.
 
 The governing policy is
 [PHPForge engineering-principles.md](../vendor/infocyph/phpforge/resources/engineering-principles.md)
@@ -19,24 +24,26 @@ exclude failing code or edit vendor files.
 
 ## Implementation tracker
 
-Last synchronized: 2026-10-05. PR: #32. **All batches are complete and the DBLayer 6.0 candidate is release-ready.**
+Last synchronized: 2026-10-05. PR: #32. **Release blocked after rechecking
+`a33cbe7b955a10add97170592394f101e4dfefce`.** Exact-revision CI is green, but
+new adversarial probes reopen correctness and lifecycle gates. The open findings and reproducible evidence are consolidated below.
 
 | Batch | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
-| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Complete** | Exact Batch A candidate `ea61258`: focused regressions and live PostgreSQL schema isolation pass. |
-| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **Complete** | Focused regressions pass; live PostgreSQL timeout sanitation is covered; full PHP 8.4/8.5 stable/lowest QA is green on `b7520c0d`. |
+| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Reopened** | R01: scoped upsert modifies/reassigns foreign-tenant rows. R04-R05: cross-scope invalidation and native-commit cache policy need follow-up. Existing focused/schema tests still pass. |
+| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **Reopened** | R02-R03: live cursors survive lease release; iterator cancellation/binding coverage is incomplete. Existing focused/native-timeout tests still pass. |
 | C | D13 — PHPForge/tooling and dependency compatibility | **Complete** | Skip scanner/configuration are fixed and the full PHPForge QA/analyzer matrix is green. Production audit is clean. The PHPBench 1.7.0 → `doctrine/annotations` development-tool warning is explicitly accepted for this release and is not a DBLayer release blocker. |
-| D | Optional Runwire 2.1.1 integration | **Complete** | Passed-instance binding, strict nested budgets, pre-connect cancellation, CacheLayer sharing, ArrayKit lazy propagation, coroutine retry sleep, concurrent task isolation, worker replacement and explicit pool warmup are covered. DBLayer does not take over host lifecycle. |
-| E | Docs, performance/soak, downstream consumers and final CI | **Complete** | 6.0 upgrade/runtime docs, representative PHPBench coverage, persistent-worker soak, Foundation/ReqShield candidate smokes and the complete PHP 8.4/8.5 stable/lowest PHPForge matrix pass on immutable candidate `ea4e6105`. This tracker-only status update changes no production/test behavior. |
+| D | Optional Runwire 2.1.1 integration | **Reopened** | Existing instance/capability integration passes; R03 iterator lifetimes and R06 warmup readiness require regressions/fixes. Proposed timeout/maintenance contracts below remain unimplemented or uncertified. |
+| E | Docs, performance/soak, downstream consumers and final CI | **Open** | QA/analysis/component benchmarks/consumer smokes pass on `a33cbe7`. R07: representative benchmark validation/comparison steps are skipped; the 300-iteration unit regression is not the required sustained host soak. Revalidate exact final revision after fixes. |
 
 ### Batch A item tracker
 
 | ID | Status | Exit requirement |
 | --- | --- | --- |
 | D01 | Complete | Structured aggregate identifiers validated; injection regressions pass on every compiler path. |
-| D02 | Complete | Tenant conflicts/reassignment rejected after casts/hooks across repository write APIs. |
-| D03 | Complete | Versioned cache scope includes schema/security identity; PostgreSQL isolation regression covered. |
-| D04 | Complete | Native PDO transactions bypass result cache without opening PDO merely to test eligibility; native after-commit ownership is explicit. |
+| D02 | Reopened | Payload conflicts are rejected, but scoped upsert can update/reassign another tenant's existing conflict row (R01). |
+| D03 | Reopened | Visibility keys are isolated; mutation dependency tags must invalidate shared data across visibility scopes (R04). |
+| D04 | Follow-up required | Native reads bypass cache and afterCommit rejects unmanaged ownership; a competing reader can refill before native commit (R05). Preserve/document the explicit caller-owned policy or provide enforceable integration. |
 | D05 | Complete | Schema invalidation uses the exact passed Connection/cache owner. |
 | D06 | Complete | Completed mutations record durable outcome before late budget failure and cannot leave stale cache/sticky state. |
 
@@ -46,9 +53,9 @@ Tracker statuses are updated only from committed code and verification evidence;
 
 | ID | Status | Exit requirement |
 | --- | --- | --- |
-| D07 | Complete | Warm cache hits, nested cancellation, deadlines, stream/batch and retry checkpoints preserve the strictest active budget. |
+| D07 | Reopened | Cache/nested cancellation regressions pass; row-level lazy cancellation and deferred stream binding remain incomplete (R03). |
 | D08 | Complete | Active streaming statements are never reused from the prepared-statement cache; cleanup releases ownership. |
-| D09 | Complete | Scoped pool callbacks reject escaping Traversable/lazy results and always release the lease. |
+| D09 | Reopened | Scoped callbacks reject Traversable escape, but a live cursor can survive explicit lease release and unsafe wrapper reuse (R02). |
 | D10 | Complete | Pool reset restores native timeout state; SQLite and live PostgreSQL regressions pass. |
 | D11 | Complete | LIKE escaping is single-pass and literal wildcard/backslash semantics are verified. |
 | D12 | Complete | DBLayer-owned private caches are discarded on reuse; caller-owned shared caches survive reset. |
@@ -67,234 +74,200 @@ Tracker statuses are updated only from committed code and verification evidence;
   its lock file; consumers resolve the declared ranges independently.
 - Runwire `2.1.1` is declared in `require-dev` for the integration test target
   and in `suggest` for optional production adoption.
-- D01-D12 production correctness fixes are implemented with focused regressions.
+- Initial D01-D12 fixes are implemented with focused regressions; the current
+  findings reopen the composition cases listed in the tracker above.
 - Optional Runwire integration is implemented through passed host-owned runtime/request/scope
   objects; DBLayer never starts or stops the host runtime.
 - Worker-local pools support explicit synchronous `warmUp()`; healthy PDO handles are
   reused across requests and request-local runtime state is sanitized on release.
 - `docs/upgrade-6.0.rst` documents the CacheLayer 4 floor, changed tenancy/cache/
   transaction/lazy-lifetime contracts, worker pooling and Runwire composition.
-- Persistent-worker soak coverage and candidate downstream smokes for Foundation and
-  ReqShield are part of the release branch.
+- Persistent-worker lifecycle regressions and candidate downstream smokes for
+  Foundation and ReqShield are part of the release branch. Sustained host soak
+  remains open (R07).
 
-## Current verification evidence
+## Verification evidence and limits
 
-| Check | Result and limit |
-| --- | --- |
-| PHPForge QA | PASS on verified candidate `b7520c0d`: PHP 8.4/8.5, prefer-stable and prefer-lowest; Pest, Pint, PHPCS, Deptrac, Rector, syntax, references, duplicates, comments and skip scanner all green |
-| Static analysis | PASS on PHP 8.4 and PHP 8.5; PHPStan and Psalm both green without local suppression/baseline weakening |
-| PHPBench | PASS on PHP 8.4 and PHP 8.5; benchmark suite covers indexed reads, buffered/streamed rows, cache hit/miss, structured writes/upsert, transactions, relations, cursor pagination, statement reuse and runtime lifecycle |
-| Clean install | PASS; production install does not require Runwire |
-| Live database matrix | PHPForge provisions MySQL, MariaDB, PostgreSQL, SQL Server and SQLite plus configured replica/availability-group topologies; Batch A/B live PostgreSQL regressions pass |
-| Persistent-worker soak | PASS inside the full Pest matrix: repeated Runwire request lifecycles, distinct cache keys, pooled reuse and bounded memory/connection state |
-| Downstream consumers | PASS on candidate `b7520c0d`: ReqShield DBLayer bridge and Foundation DBLayer runtime/query-cache/persistent lifecycle tests with DBLayer 6 + CacheLayer 4 candidate constraints |
-| Production Composer audit | 0 advisories and 0 abandoned production packages |
-| Development Composer graph | PHPBench 1.7.0 requires abandoned `doctrine/annotations` 2.0.2; this development-tool warning is explicitly accepted for DBLayer 6.0 and does not block release |
-| PHPForge audit policy | No DBLayer-side suppression or weaker local configuration was introduced; the accepted development-tool warning remains visible in Composer output |
-| Final immutable SHA | PASS on `ea4e6105`: all PHPForge matrix jobs succeeded; Foundation and ReqShield downstream smokes succeeded. The subsequent tracker-only status commit changes no production/test behavior and is revalidated by PR checks. |
+- Exact candidate [PHPForge CI](https://github.com/infocyph/DBLayer/actions/runs/37340922191)
+  succeeds across PHP 8.4/8.5 stable/lowest QA and analysis, benchmark execution,
+  and clean install. Job metadata confirms configured service startup steps;
+  raw job-log retrieval returned empty files, so this recheck does not independently
+  inspect live-service participation assertions inside those logs.
+- Exact candidate [consumer smokes](https://github.com/infocyph/DBLayer/actions/runs/37340921121)
+  succeed for Foundation and ReqShield. PR #32 remains open; no merge/tag was
+  performed in this review.
+- Focused local regression suite: 26 passed / 116 assertions, including Batch
+  A/B, Runwire integration, pool runtime isolation and persistent lifecycle.
+- `composer ic:tests`: 459 passed / 2323 assertions and 3 failed. The failures
+  are explicit missing local PostgreSQL/MySQL service prerequisites in the
+  cross-driver and migration integration tests. The host also lacks
+  `pdo_sqlsrv`. They are not presented as product regressions or silently skipped.
+  Skip scanner, normalize, syntax, references, duplicates, comments, Pint,
+  PHPCS, Deptrac, PHPStan, Psalm and Rector all pass.
+- `composer validate --strict` and platform requirements pass after refreshing
+  the ignored local lock to the declared cognitive-complexity 1.2.0 pin.
+  Production audit: zero advisories and zero abandoned packages. Full dev audit:
+  zero advisories, accepted PHPBench → doctrine/annotations abandonment warning.
+  That accepted warning is not reopened as a blocker.
+- Eight adversarial SQLite probe outcomes are saved in
+  [review-probes.jsonl](evidence/2026-10-05-update-review-probes.jsonl), with the
+  [reproduction harness](evidence/reproduce-update-review.md). These are
+  diagnostics, not new green-suite assertions or live-server certification.
 
-The PHPBench 1.7.0 transitive `doctrine/annotations` warning is explicitly
-accepted for this release. It remains visible as tooling debt, but it is not a
-DBLayer 6.0 release blocker. All required DBLayer batches and repository-owned
-acceptance gates are complete.
+Historical evidence for the original 5.1 audit is retained in
+[original probe outcomes](evidence/2026-10-05-audit-probes.jsonl) and the
+[original reproduction harness](evidence/reproduce-audit.md). Those records
+predate the fixes; they do not describe the current candidate. Completed
+remediation details are summarized in the tracker instead of repeated as open
+findings.
 
-## Required findings
+## Open findings
 
-Priorities are remediation order and release risk, not assigned CVSS scores.
-Security impact depends on consumer trust boundaries; no remote application
-exploit was attempted.
+Priorities describe remediation order and release risk, not CVSS scores.
+Each finding includes its owner, observed behavior and required follow-up.
 
-| ID | Priority | Finding | Existing owner |
+| ID | Priority | Remaining issue | Related audit item |
 | --- | --- | --- | --- |
-| D01 | High | Aggregate function text bypasses structured SQL/raw-deny policy | QueryBuilderResults, QueryBuilderInternals, AbstractSqlCompiler |
-| D02 | High | Tenant-scoped writes accept a different tenant in the payload | Repository, RepositoryInternals |
-| D03 | High | Result-cache identity omits PostgreSQL schema and database role/security scope | QueryBuilderCaching, Connection |
-| D04 | High | Native PDO transaction can read/populate the shared result cache | QueryBuilderCaching, Connection, Transaction |
-| D05 | High | Schema cache invalidation uses the static DB facade instead of its exact connection | SchemaManager |
-| D06 | High | A committed write can become a timeout failure before sticky state/invalidation | Connection execution lifecycle, QueryBuilder mutation lifecycle |
-| D07 | High for Runwire adoption | Cache hits bypass cancellation/deadlines; nested cancellation replaces parent | QueryBuilderResults, Connection |
-| D08 | Medium | Prepared-statement reuse closes a live streaming cursor | Connection statement cache and streaming |
-| D09 | Medium; prerequisite for lazy Runwire work | Generator can escape pooled callback and execute after lease release | PoolManager, ConnectionLease, ConnectionStreaming |
-| D10 | Medium | Pool reset clears timeout metadata but leaves native timeout configured | Connection reset and timeout synchronization |
-| D11 | Medium | LIKE escaping doubles newly inserted escape characters | SecurityValidator |
-| D12 | Medium for persistent workers | Private memory result cache retains expired distinct keys without a capacity bound | Connection private-cache lifecycle; CacheLayer owns adapter eviction |
-| D13 | Release blocker | QA configuration, skipped coverage and abandoned dev dependency prevent complete acceptance | PHPForge dependency/configuration and repository integration setup |
+| R01 | High | Scoped upsert modifies or takes another tenant's row | D02 |
+| R02 | High for worker reuse | Active stream survives lease release and unsafe pool reuse | D09 |
+| R03 | Medium | Runwire binding/cancellation does not cover the full iterator lifetime | D07 |
+| R04 | Medium | Security-scoped tags miss shared-table mutations | D03 |
+| R05 | Medium | Native-transaction cache refill can stay stale after commit | D04 |
+| R06 | Medium | Warmup reports expired handles as ready | Worker-pool contract |
+| R07 | Release gate | Representative performance and sustained host soak remain uncertified | Batch E |
 
-### D01: aggregate SQL policy
+### R01 — High: scoped upsert can modify or take another tenant's row
 
-Reproduced on SQLite with `security.raw_sql_policy=deny`:
-`$connection->table('items')->aggregate('MAX(42) FROM items --')` returns `42`.
-The setter only checks for an empty string; the compiler interpolates the
-function text into `SELECT`, and the query retains generated-SQL provenance.
-This becomes an injection path if consumers forward untrusted function text.
+Owner: [Repository::upsert](../src/Query/Repository.php#L976).
+The new checks validate the incoming tenant attribute, but the SQL conflict
+update is not constrained by the repository's tenant WHERE predicate.
 
-Validate aggregate function names and columns at their existing public boundary.
-Support legitimate function identifiers deliberately, including qualified names
-only where the dialect contract allows them. SQL expressions must go through
-the existing explicit raw-expression policy. Keep raw provenance accurate and
-test deny/allowlist mode, comments, parenthesis injection and ordinary aggregates
-on every compiler. Review other interpolated structured fields alongside this
-fix; do not assume generated provenance makes unchecked strings trusted.
+Reproduction: seed row id=7, tenant_id=2. Call tenant 1's repository with
+`upsert(['id'=>7,'value'=>'changed'], ['id'], ['value'])`: it accepts the call
+and changes tenant 2's value. Omit the update-column list and it also changes
+the row's tenant_id from 2 to 1. Both reproduced against real SQLite PDO.
 
-### D02: tenant write integrity
+Fix the conflict-update ownership boundary, not just the payload. The database
+must enforce the tenant condition atomically, or the scoped API must reject
+unsafe conflict targets/driver paths explicitly. A pre-read alone is insufficient
+under concurrency. Including tenant_id in a declared conflict target does not
+automatically make MySQL's unrelated unique-key conflicts safe. Test existing
+foreign-tenant rows, both update-list forms, bulk calls and real driver-specific
+conflict behavior, including MySQL/MariaDB and SQL Server. Never reassign the
+tenant column in a scoped conflict update.
 
-Reproduced: an instance-first repository scoped with `forTenant(1)` successfully
-creates `['id'=>1, 'tenant_id'=>2, ...]`. The insert does not apply read WHERE
-predicates, and tenant enrichment only fills a missing payload column.
-`updateById()` also forwards tenant-column changes without a tenant invariant.
+### R02 — High for worker reuse: an active stream survives pool release
 
-Reject conflicts with the active tenant and reject tenant reassignment through
-scoped writes. Recheck the final payload after casts/hooks. Cover create, batch
-insert, first/update-or-create, upsert, update and optimistic updates through
-both repository APIs. Apply database-compatible comparison semantics without
-silently changing tenant identity. Explicit trusted cross-tenant operations
-must use the existing unscoped API with application authorization.
+Owner: [Connection::resetRuntimeStateForReuse](../src/Connection/Connection.php#L927).
+The reset rejects transactions but does not reject or settle
+`activeStatementCursors`. Start a stream, consume row 1, release its explicit
+lease, then checkout another lease: SQLite returns the same Connection while
+the old generator can fetch row 2 and the new borrower executes a query.
 
-### D03: cache isolation
+Callers should keep the lease for the iterator lifetime, as documented. The
+library nevertheless knows this cursor remains active and must prevent unsafe
+idle reuse. Refuse reuse/discard or explicitly close and fence live cursors;
+cover partial and abandoned streams and native unbuffered-driver behavior.
+This does not require claiming that arbitrary retained bare references can be
+fully fenced.
 
-Key derivation was tested without contacting PostgreSQL: two connections named
-`main`, database `app`, schemas `tenant_a`/`tenant_b`, and roles `role_a`/`role_b`
-compile identical unqualified SQL and derive identical result keys. Their table
-tags differ, so current tagging does not repair the colliding result key.
-Real PostgreSQL schema/RLS data leakage remains a mandatory live regression.
+### R03 — Medium: Runwire iterator lifetime is only partially enforced
 
-Define one versioned, non-sensitive cache-scope identity including the effective
-schema and caller-declared security/tenant scope. Use it consistently for reads
-and invalidation. Do not include plaintext credentials or depend on physical
-replica indexes. Keep equivalent replicas in the same logical database scope.
-For independent deployments sharing a backend, retain the documented distinct
-namespace/logical-name requirement or add an explicit deployment identity.
-Session `SET ROLE`/search-path/RLS changes require explicit cache scope or cache
-bypass; configuration username alone cannot describe dynamic session policy.
-Use a collision-resistant fingerprint for adversarial/security-sensitive cache
-identities and keep tag/key lengths within CacheLayer contracts. Test cache-key
-version migration with a cold old namespace; do not flush unrelated host data.
+Owners: [lazyByIdGenerator](../src/Query/Concerns/QueryBuilderResults.php#L191)
+and [Connection::stream](../src/Connection/Connection.php#L1221).
+`lazyById(chunkSize:3)` captures the passed binding for database batches, but
+yielding buffered rows has no checkpoint. Cancel after row 1: row 2 is yielded.
+Direct `stream()` is itself a deferred generator and does not capture the
+binding at creation. Return it from `withRunwire()`, complete the request, then
+iterate: all three rows are read with the restored, unbound connection policy.
 
-### D04: unmanaged transaction/cache boundary
+Capture and validate the exact binding through supported iterator lifetimes,
+check before each row/batch/fetch as required by the plan, or reject unsupported
+deferred escape explicitly. Preserve nested policies and iterator/lease
+ownership; cover both ordinary generators and ArrayKit collections, cancellation
+inside a buffered batch and completion before first iteration. Review the
+PostgreSQL server-cursor FETCH loop too: it currently lacks query checkpoints.
 
-Reproduced using the public `getPdo()->beginTransaction()`: cached committed
-rows hide transaction-local changes; a cold cached query publishes uncommitted
-rows that remain readable after native rollback. Only managed nesting is checked.
+### R04 — Medium: security-scoped cache tags miss shared-table mutations
 
-Bypass cache reads and fills whenever an already-open PDO handle has an active
-transaction. Do not open a PDO connection merely to check a cache hit. Define
-native-transaction behavior for structured-write invalidation and after-commit
-callbacks: reject unsupported ownership explicitly or integrate through an
-explicit transaction owner; never execute deferred effects as if committed.
-Test begin/commit/rollback, savepoints, cached/cold queries and external PDO use.
+Owner: [Connection::cacheTableTag](../src/Connection/Connection.php#L408).
+The table dependency tag includes the full result visibility fingerprint,
+including username/cache_scope. Two same-database, same-name connections share
+one cache but have scopes `reader` and `writer`. Warm the reader, mutate the
+same row through the writer: reader cache returns `old`, direct SELECT returns
+`new`. A write invalidates only the writer's visibility scope.
 
-### D05: schema invalidation ownership
+Keep visibility isolation in result keys while giving physical/logical table
+dependencies a shared invalidation identity across roles/scopes that access
+the same data. Preserve isolation between independent databases/deployments
+and between actual schemas. Verify cross-role/RLS and explicitly qualified
+cross-schema mutations on PostgreSQL as well as shared-backend cache adapters.
 
-Reproduced with a direct Connection and its private query cache: warm a query,
-drop its table with `new SchemaManager($connection)`, reset request state, then
-the same cached query still returns the old row. SchemaManager calls
-`DB::invalidateCacheTagsAfterCommit()` by name; with no facade cache it does
-nothing, and with a separately configured facade it can use the wrong owner.
+### R05 — Medium: pre-commit invalidation does not certify native transactions
 
-Schedule invalidation through the passed connection and its exact attached
-backend, matching the existing QueryBuilder mechanism. Cover create, alter,
-rename, drop, drop-all, transactional DDL rollback and migration execution while
-an unrelated same-named facade connection/cache is registered.
+Owner: [invalidateQueryCacheTagsAfterCommit](../src/Connection/Connection.php#L726).
+With two connections sharing a cache, begin a native PDO transaction on A and
+perform a structured update. Immediate tag invalidation lets B repopulate the
+old committed row before A commits. After native commit the cached value stays
+`old` while direct SELECT returns `committed`.
 
-### D06: completed mutation versus late timeout
+The upgrade guide correctly says native-transaction callers must own their
+commit/cache policy. Keep that limitation explicit: the early invalidation is
+not a substitute for a commit hook. Either provide explicit owner integration
+or reject unsupported cache-aware native writes until that policy is supplied.
+Tests must cover another reader filling during the transaction and commit/
+rollback; the existing single-connection rollback test cannot prove this gate.
 
-A SQLite AFTER UPDATE trigger delayed completion by about 5 ms under a 1 ms
-budget. The UPDATE committed, but DBLayer threw a query-timeout error, recorded
-no sticky write, skipped builder invalidation, and returned old cached rows on
-the next read. An application retry can duplicate a completed mutation.
+### R06 — Medium: warmup can report expired handles as ready
 
-Record durable execution outcome before evaluating a post-execution budget.
-Ensure completed writes retain sticky state and invalidate their dependencies.
-Define a distinguishable committed/late or uncertain outcome if a timeout is
-still reported; never imply rollback or automatically retry a completed write.
-Preserve transaction semantics, original PDO error metadata and exception causes
-through executor wrapping so retry classification does not depend on messages.
-Test delayed autocommit, managed transaction rollback, commit/listener failure,
-read deadlines and cache failures without executing a write twice.
+Owner: [Pool::warmUp](../src/Connection/Pool.php#L372).
+The initial ready count checks only whether PDO is non-null and returns before
+the pool's expiry/health rules run. An already-expired idle handle still makes
+`warmUp(target:1)` return 1. The next checkout removes it and returns a new lazy
+wrapper with no open handle. The diagnostic ages the existing idle timestamp
+through Reflection to make expiry deterministic; it does not mock PDO.
 
-### D07: cancellation and deadlines
+Reconcile eligible idle expiry/health and actual ready counts before claiming
+the warm target is reached. Never probe an active borrower. Verify cleanup and
+capacity changes during warmup, failed health/release, server disconnect and
+replenishment after expiry with real servers. Keep host startup/maintenance
+budgets and explicit per-endpoint allocation open until implemented/verified.
 
-Warm `cacheFor(60)->get()` returns rows under an always-cancelled checker and an
-expired deadline. Nesting `withQueryCancellation(false-checker)` inside an
-always-cancelled outer wrapper allows `select 1`. Deadline wrappers already
-take the minimum; cancellation currently replaces its parent.
+### R07 — Release gate: representative performance and soak are not certified
 
-Compose cancellation with logical OR and preserve/restores bindings in finally.
-Check at cache access, before database connection/acquisition and execution,
-before each stream/batch fetch and retry delay. Recheck before returning a
-cached result where backend access can block. Use monotonic duration/deadline
-accounting; retain compatibility for the existing absolute wall-clock setter
-through a clearly defined boundary. Do not relabel a committed mutation as
-cancelled. Ordinary synchronous PDO cannot always be interrupted mid-call.
+Owner: [release tracker](#implementation-tracker).
+The exact candidate's benchmark jobs pass, but both
+`ic:benchmark:validate` and `ic:benchmark:compare` steps are SKIPPED on PHP 8.4
+and 8.5 because representative result/baseline inputs are empty. PHPBench
+completion proves component coverage, not the plan's 5.1-versus-candidate
+sustained successful-RPM budget.
 
-### D08-D10: resource lifetime and sanitation
+The persistent-worker unit test passes 300 sequential SQLite iterations; the
+focused local suite, including that test, completes in about 0.15 seconds.
+It is a valuable lifecycle regression, not the planned sustained concurrent
+host soak with continuous process-tree RSS/socket/queue measurements,
+cancellation, tenant changes and deployment overlap. No matching production-
+equivalent baseline/candidate result artifacts or representative host soak
+evidence were found in the repository or configured CI gates inspected here.
+External results, if they exist, still need to be linked and checked against
+the candidate and the stated budgets.
 
-- D08: with statement caching enabled, start a two-row stream, run an identical
-  select, then advance the stream: the second row disappears. A cache hit calls
-  `closeCursor()` on the active statement. Track active cursor ownership and
-  prepare independently or bypass reuse while in use. Cleanup must release the
-  busy mark even on partial iteration, errors and cancellation. Test two streams,
-  reentrant callbacks, cache eviction and buffered/unbuffered driver limitations.
-- D09: `PoolManager::using('main', fn($c)=>$c->stream('select 1'))` releases the
-  lease before iteration. A second checkout gets the same Connection while the
-  escaped generator remains executable. Define supported lazy lease ownership:
-  consume inside the callback, reject escaping connection-bound results, or keep
-  a lease explicitly for the lifetime of a supported iterator. Test abandoned
-  iterators, partial consumption, cancellation and request completion. Do not
-  claim tokenized release checks fence every retained bare Connection reference.
-- D10: setting timeout 123 ms then `resetRuntimeStateForReuse()` leaves SQLite
-  `pragma busy_timeout=123`, although the wrapper reports null. Reset/synchronize
-  native session timeout policy before reuse, or discard on unsafe reset. Cover
-  PostgreSQL statement_timeout and driver-specific controls with live services.
-  Preserve immutable host connection configuration; do not clear unrelated
-  global caches, listeners or other requests' state during lease release.
+Retain the acceptance requirements, record reproducible results, and run the
+comparison only on an explicitly stable matched environment. Do not weaken
+the gates or equate green microbenchmarks with representative RPM acceptance.
 
-### D11-D12: escaping and persistent memory
+## Runwire and worker-pool contracts
 
-- D11: `sanitizeLikePattern('a%b')` returns two backslashes before `%`; a prepared
-  SQLite `LIKE ... ESCAPE '\'` no longer matches the literal `a%b`. Escape input
-  backslashes before adding wildcard escapes, preferably with a single mapping.
-  Test %, _, backslashes, mixed patterns and each dialect's escape semantics.
-- D12: populate 100 distinct `cacheKey()` values with a one-second TTL and wait
-  for expiry: all 100 entries remain in the private ArrayCacheAdapter store.
-  TTL does not bound distinct-key growth; collection happens when that key is
-  revisited. Define a bounded request/task lifetime for library-created private
-  caches, or use a caller-provided bounded backend for cross-request caching.
-  Do not flush caller-owned shared caches during reset. Adapter-level eviction
-  belongs in CacheLayer, not a duplicated DBLayer cache engine. Include distinct
-  keys, large rows, expired entries and failure recovery in persistent-worker soak.
-
-### D13: tooling and coverage
-
-The installed cognitive-complexity extension 1.3.0 rejects PHPForge's
-`dependency_tree` and `dependency_tree_types` keys. Fix the version/configuration
-ownership in PHPForge or its compatible dependency set; do not remove analysis
-rules or add a local weaker configuration merely to turn the gate green.
-
-Skip scanner findings occur at RestoredModulesIntegrationTest.php:55,
-tests/Pest.php:98, ConnectionConfigurationTest.php:291 and
-RegressionFixesTest.php:1373/1399. Provision required engines and extensions,
-make enabled service failures fail explicitly, and replace unnecessary conditional
-skips with valid tests. Ensure the intended engine/topology inventory is exercised;
-silently dropping unavailable drivers from a dataset is not release evidence.
-
-Resolve PHPBench's abandoned dependency at its tooling owner through a supported
-upstream version or PHPForge-maintained migration. Production dependencies have
-no abandoned packages. Retain the live full-audit result as an open dev-tooling
-gate; do not disable abandoned-package checks.
-
-## Optional Runwire 2.1.1 design
-
-Accept the integration after D01-D13 are fixed and representative measurement
-supports it. Runwire supplies execution context, cancellation/deadline and
+The passed-instance integration is implemented; R02-R03, R06 and the remaining
+measurement/lifecycle gates must close before release acceptance. Runwire supplies execution context, cancellation/deadline and
 coroutine primitives; its capability enum provides no asynchronous PDO API.
 Do not promise nonblocking database I/O from a context binding or fiber alone.
 
-Start with a minimal passed-instance API on the existing Connection owner,
-conceptually `withRunwire(RuntimeContext $runtime, callable $callback,
+The existing Connection API is
+`withRunwire(RuntimeContext $runtime, callable $callback,
 ?RequestContext $request = null, ?CoroutineScope $scope = null): mixed`.
-This is a proposed API, not a currently callable method. PoolManager may pass
-the same binding into an exclusively leased Connection. Repositories/builders
+The host/intermediary passes the same binding into an exclusively leased
+Connection. Repositories/builders
 inherit their exact Connection's binding; no framework-specific adapter is
 required for framework → DBLayer or framework → another library → DBLayer.
 
@@ -394,15 +367,14 @@ database contention before selecting capacity.
 
 Current `Pool::addConfig()` creates up to `min_connections` lazy Connection
 wrappers subject to the pool-wide maximum. It does not establish PDO handles,
-and later expiry/removal does not continuously replenish the minimum. Do not
-describe this as ten pre-opened database connections. A local SQLite probe on
-2026-10-05 verified zero initially open handles for min=10/max=50, ten distinct
-handles after explicit opening, ten retained idle wrappers after release, and
-reuse of an opened handle on the next lease. This verifies the existing
-mechanism, not live-server warmup or Runwire integration.
+and later expiry/removal does not continuously replenish the minimum.
+`Pool::warmUp()` and `PoolManager::warmUp()` now explicitly open distinct primary
+handles. R06 remains open because their initial ready count includes expired
+idle handles. Live-server warmup, replenishment and bounded maintenance still
+require the acceptance evidence below.
 
-- Add an explicit instance warmup operation on the existing pool owner, invoked
-  by the host after worker/PID/generation creation and before readiness. Keep
+- Use the existing instance warmup operation on the pool owner, invoked by
+  the host after worker/PID/generation creation and before readiness. Keep
   package loading and ordinary constructors free of eager database I/O.
 - Warm distinct handles for the requested logical connection/endpoint; ten
   sequential checkout/release calls can repeatedly open the same handle.
@@ -495,13 +467,13 @@ and [PostgreSQL explicit locking](https://www.postgresql.org/docs/current/explic
 
 ## Execution order and acceptance gates
 
-| Batch | Work | Required exit evidence |
+| Batch | Remaining work | Required exit evidence |
 | --- | --- | --- |
-| A | D01-D06: policy, tenancy, cache isolation and durable mutation correctness | Regressions reproduce before fix, pass after; live PostgreSQL schema/RLS/native transactions; DDL owner tests |
-| B | D07-D12: budgets, cursor/lease ownership, native reset, LIKE and memory | Direct and pooled regressions; all drivers' cursor/reset behavior; no expired-state reuse |
-| C | D13 and CacheLayer 4/ArrayKit 5.3 compatibility | Valid unsuppressed full PHPForge gates; latest/minimum supported dependencies; full runtime and dev audit policy resolved |
-| D | Optional passed Runwire integration | Present/absent and missing-capability paths; direct/transitive/nested composition; concurrent tasks and worker replacement; no host lifecycle takeover |
-| E | Docs, representative performance, soak, consumer tests and final CI | Exact-final-SHA evidence and reproducible release record |
+| A | R01, R04, R05: conflict ownership and cache commit/invalidation boundaries | Failing-before/passing-after regressions; real conflict-update drivers; PostgreSQL role/RLS/schema and competing native-transaction readers |
+| B | R02, R03: live cursors, leases and iterator context | Partial/abandoned streams, cancellation within batches, completed-request escape and safe reuse across supported drivers |
+| C | Preserve completed tooling/dependency gates | Unsuppressed PHPForge checks, latest/lowest constraints, clean production install; accepted development warning stays visible |
+| D | R06 and retained worker/configuration requirements | Accurate ready counts, expiry/disconnect recovery, bounded host-owned maintenance and configuration behavior documented/tested |
+| E | R07, consumer checks and final CI | Matched representative baseline/candidate results, sustained host soak, current consumers and exact-final-SHA evidence |
 
 For each code batch run PHPForge processors sequentially, targeted regressions,
 then required detailed/full checks. Do not change assertions or detectors to
@@ -555,9 +527,10 @@ If urgent security fixes must ship independently, use a narrowly scoped 5.1.1
 patch on the old compatible dependency range, with its own regression and CI
 evidence. An additive Runwire-only change could fit 5.2 if no compatibility is
 dropped, but that is not the requested combined dependency-floor candidate.
-The completed candidate is release-ready after all required batches and repository-owned acceptance gates pass.
+Release remains blocked until the reopened findings and required acceptance
+gates are closed with exact-final-revision evidence.
 
-Publish an upgrade guide covering CacheLayer 4 installation/configuration,
+Update the existing upgrade guide as fixes close, covering CacheLayer 4 installation/configuration,
 tenant payload conflicts, structured aggregate validation, cache identity
 version/cold transition, native transaction constraints, iterator ownership,
 late mutation outcomes and optional Runwire examples for both composition chains.
