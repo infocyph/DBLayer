@@ -394,9 +394,11 @@ final class Connection
             $table = strtolower($schema) . '.' . $table;
         }
 
-        $tag = 'db.' . $this->cacheScopeFingerprint() . '.table.' . hash('xxh3', $table);
+        $dependency = $suffix === null || $suffix === ''
+            ? $table
+            : $table . "\0" . $suffix;
 
-        return $suffix === null || $suffix === '' ? $tag : $tag . '.' . $suffix;
+        return 'db.' . $this->cacheScopeFingerprint() . '.table.' . hash('xxh3', $dependency);
     }
 
     /**
