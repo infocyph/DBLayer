@@ -97,6 +97,44 @@ it('rejects lazy results escaping PoolManager using scope and releases the lease
     $lease->release();
 });
 
+it('discards a pooled wrapper released with a live stream and fences the stale iterator', function (): void {
+    $pool = new Pool([
+        'min_connections' => 0,
+        'max_connections' => 1,
+    ]);
+    $pool->addConfig('main', ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]));
+    $manager = new PoolManager($pool);
+    $lease = $manager->checkout('main');
+    $connection = $lease->connection();
+    $connection->statement('create table items (id integer primary key, value text)');
+    $connection->insert('insert into items (id, value) values (?, ?)', [1, 'one']);
+    $connection->insert('insert into items (id, value) values (?, ?)', [2, 'two']);
+    $stream = $connection->stream('select id, value from items order by id');
+    $stream->rewind();
+
+    expect($stream->current()['id'] ?? null)->toBe(1);
+
+    $originalId = spl_object_id($connection);
+    $lease->release();
+
+    expect($pool->getStats()['idle_connections'])->toBe(0)
+        ->and($pool->getStats()['total_connections'])->toBe(0);
+
+    $next = $manager->checkout('main');
+
+    expect(spl_object_id($next->connection()))->not->toBe($originalId)
+        ->and($next->connection()->scalar('select 42'))->toBe(42)
+        ->and(fn() => $stream->next())->toThrow(
+            ConnectionException::class,
+            'Deferred database iterator outlived its connection lease',
+        );
+
+    $next->release();
+});
+
 it('restores native SQLite timeout state before pooled reuse', function (): void {
     $connection = dblayerBatchBConnection();
     $connection->setQueryTimeoutMs(123);
