@@ -74,7 +74,7 @@ jobs:
           --project=baseline
           --output=release-evidence/baseline-host.json
           --duration=3
-          --trials=3
+          --trials=5
           --concurrency=1,2,4
 
       - name: Measure candidate host workload
@@ -83,7 +83,7 @@ jobs:
           --project=candidate
           --output=release-evidence/candidate-host.json
           --duration=3
-          --trials=3
+          --trials=5
           --concurrency=1,2,4
 
       - name: Enforce matched performance budgets
