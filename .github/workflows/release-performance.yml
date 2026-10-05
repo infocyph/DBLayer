@@ -69,22 +69,26 @@ jobs:
         run: mkdir -p release-evidence
 
       - name: Measure baseline host workload
-        run: >-
-          php candidate/.automation/scripts/ci/release-host-workload.php
-          --project=baseline
-          --output=release-evidence/baseline-host.json
-          --duration=3
-          --trials=5
-          --concurrency=1,2,4
+        run: |
+          baseline_sha="$(git -C baseline rev-parse HEAD)"
+          php candidate/.automation/scripts/ci/release-host-workload.php \
+            --project=baseline \
+            --output=release-evidence/baseline-host.json \
+            --duration=3 \
+            --trials=5 \
+            --concurrency=1,2,4 \
+            --revision="$baseline_sha"
 
       - name: Measure candidate host workload
-        run: >-
-          php candidate/.automation/scripts/ci/release-host-workload.php
-          --project=candidate
-          --output=release-evidence/candidate-host.json
-          --duration=3
-          --trials=5
-          --concurrency=1,2,4
+        run: |
+          candidate_sha="$(git -C candidate rev-parse HEAD)"
+          php candidate/.automation/scripts/ci/release-host-workload.php \
+            --project=candidate \
+            --output=release-evidence/candidate-host.json \
+            --duration=3 \
+            --trials=5 \
+            --concurrency=1,2,4 \
+            --revision="$candidate_sha"
 
       - name: Enforce matched performance budgets
         run: >-
