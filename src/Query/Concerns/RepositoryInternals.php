@@ -109,12 +109,34 @@ trait RepositoryInternals
      */
     private function applyTenantAttributes(array $attributes): array
     {
-        if ($this->tenantId === null) {
+        $attributes = $this->assertTenantAttributes($attributes);
+
+        if ($this->tenantId !== null && !array_key_exists($this->tenantColumn, $attributes)) {
+            $attributes[$this->tenantColumn] = $this->tenantId;
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * Reject tenant reassignment while preserving payloads that omit the tenant.
+     *
+     * @param array<string,mixed> $attributes
+     * @return array<string,mixed>
+     */
+    private function assertTenantAttributes(array $attributes): array
+    {
+        if ($this->tenantId === null || !array_key_exists($this->tenantColumn, $attributes)) {
             return $attributes;
         }
 
-        if (!array_key_exists($this->tenantColumn, $attributes)) {
-            $attributes[$this->tenantColumn] = $this->tenantId;
+        $value = $attributes[$this->tenantColumn];
+        if ((!is_int($value) && !is_string($value)) || (string) $value !== (string) $this->tenantId) {
+            throw new InvalidArgumentException(sprintf(
+                'Tenant-scoped write cannot assign [%s] to tenant column [%s].',
+                is_scalar($value) || $value === null ? (string) $value : get_debug_type($value),
+                $this->tenantColumn,
+            ));
         }
 
         return $attributes;
