@@ -147,7 +147,12 @@ trait QueryBuilderCaching
 
     private function canUseResultCache(): bool
     {
-        if (!$this->cacheEnabled || $this->lock !== null || $this->connection->managedTransactionLevel() > 0) {
+        if (
+            !$this->cacheEnabled
+            || $this->lock !== null
+            || $this->connection->managedTransactionLevel() > 0
+            || $this->connection->hasActiveNativeTransaction()
+        ) {
             return false;
         }
 
@@ -192,24 +197,13 @@ trait QueryBuilderCaching
             return;
         }
 
-        $cache = $this->connection->queryCache();
-        $this->connection->afterCommit(
-            static function () use ($cache, $tags): void {
-                $cache->invalidateTags($tags);
-            },
-        );
+        $this->connection->invalidateQueryCacheTagsAfterCommit($tags);
     }
 
     private function resultCacheKey(string $sql, string $bindingFingerprint): string
     {
-        $connectionIdentity = implode("\0", [
-            $this->connection->getName(),
-            $this->connection->getDriverName(),
-            $this->connection->getDatabaseName(),
-        ]);
-
         return 'dblayer.query.' . hash('xxh3', implode("\0", [
-            $connectionIdentity,
+            $this->connection->cacheScopeFingerprint(),
             'select-array',
             SqlFingerprint::hash($sql, 32),
             $bindingFingerprint,
