@@ -122,6 +122,18 @@ trait ConnectionRunwire
         }
     }
 
+    private function assertNestedRunwireOwner(
+        ?object $current,
+        ?object $next,
+        string $message,
+    ): void {
+        if ($current === null || $next === null || $current === $next) {
+            return;
+        }
+
+        throw ConnectionException::invalidConfiguration($message);
+    }
+
     private function assertRunwireBindingAllowed(
         RuntimeContext $runtime,
         ?RequestContext $request,
@@ -150,24 +162,16 @@ trait ConnectionRunwire
                 'DBLayer connection is already borrowing a different Runwire runtime.',
             );
         }
-        if (
-            $this->runwireRequest !== null
-            && $request !== null
-            && $this->runwireRequest !== $request
-        ) {
-            throw ConnectionException::invalidConfiguration(
-                'DBLayer connection cannot switch Runwire request ownership inside a nested binding.',
-            );
-        }
-        if (
-            $this->runwireScope !== null
-            && $scope !== null
-            && $this->runwireScope !== $scope
-        ) {
-            throw ConnectionException::invalidConfiguration(
-                'DBLayer connection cannot switch Runwire coroutine scope inside a nested binding.',
-            );
-        }
+        $this->assertNestedRunwireOwner(
+            $this->runwireRequest,
+            $request,
+            'DBLayer connection cannot switch Runwire request ownership inside a nested binding.',
+        );
+        $this->assertNestedRunwireOwner(
+            $this->runwireScope,
+            $scope,
+            'DBLayer connection cannot switch Runwire coroutine scope inside a nested binding.',
+        );
     }
 
     private function executeRunwireBinding(
