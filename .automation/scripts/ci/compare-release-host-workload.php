@@ -51,7 +51,7 @@ final class ReleaseHostComparator
         fwrite(STDOUT, $encoded . PHP_EOL);
 
         if ($failures !== []) {
-            exit(1);
+            throw new RuntimeException('Representative release workload exceeded its acceptance budget.');
         }
     }
 
