@@ -418,9 +418,13 @@ final class ConnectionConfig
                 }
             }
         }
-        $cacheScope = $config['cache_scope'] ?? null;
-        if ($cacheScope !== null && (!is_string($cacheScope) || trim($cacheScope) === '')) {
-            throw ConnectionException::invalidConfiguration("Config key 'cache_scope' must be null or a non-empty string.");
+        foreach (['cache_scope', 'cache_dependency_scope'] as $scopeKey) {
+            $scope = $config[$scopeKey] ?? null;
+            if ($scope !== null && (!is_string($scope) || trim($scope) === '')) {
+                throw ConnectionException::invalidConfiguration(
+                    "Config key '{$scopeKey}' must be null or a non-empty string.",
+                );
+            }
         }
     }
 
