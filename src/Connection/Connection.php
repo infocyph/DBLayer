@@ -1238,12 +1238,6 @@ final class Connection
         return true;
     }
 
-    /**
-     * Stream query rows lazily without buffering via fetchAll().
-     *
-     * @param array<int|string,mixed> $bindings
-     * @return Generator<mixed>
-     */
     public function supportsInsertIgnore(): bool
     {
         return $this->driver->getCapabilities()->supportsInsertIgnore;
