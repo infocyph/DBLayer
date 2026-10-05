@@ -100,10 +100,15 @@ it('versions cache identity across schema role and explicit security scope', fun
         'cache_scope' => 'rls:b',
     ]), 'main');
 
+    $firstTableTag = $first->cacheTableTag('items');
+    $firstRecordTag = $first->cacheTableTag('items', 'id.i:1');
+
     expect($first->cacheScopeFingerprint())
         ->not->toBe($second->cacheScopeFingerprint())
-        ->and($first->cacheTableTag('items'))
-        ->not->toBe($second->cacheTableTag('items'));
+        ->and($firstTableTag)->not->toBe($second->cacheTableTag('items'))
+        ->and($firstRecordTag)->not->toBe($firstTableTag)
+        ->and(strlen($firstTableTag))->toBeLessThanOrEqual(64)
+        ->and(strlen($firstRecordTag))->toBeLessThanOrEqual(64);
 });
 
 it('bypasses result cache inside externally owned PDO transactions', function (): void {
