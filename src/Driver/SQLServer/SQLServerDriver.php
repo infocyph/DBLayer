@@ -226,10 +226,6 @@ final class SQLServerDriver extends AbstractPdoDriver
                 }
 
                 while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
-                    if (!is_array($row)) {
-                        continue;
-                    }
-                    /** @var array<string,mixed> $row */
                     if ($this->containsShowplanXml($row)) {
                         $planRows[] = $row;
                     }
