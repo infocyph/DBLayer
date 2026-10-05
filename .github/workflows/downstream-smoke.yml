@@ -114,4 +114,10 @@ jobs:
 
       - name: Run Foundation DBLayer integration
         working-directory: consumer
-        run: composer ic:test:code
+        run: |
+          php vendor/bin/pest \
+            --configuration vendor/infocyph/phpforge/resources/pest.xml \
+            --bootstrap vendor/autoload.php \
+            tests/Feature/DBLayer51RuntimeIntegrationTest.php \
+            tests/Feature/DBLayer51QueryCacheIntegrationTest.php \
+            tests/Feature/PersistentDatabaseLifecycleTest.php
