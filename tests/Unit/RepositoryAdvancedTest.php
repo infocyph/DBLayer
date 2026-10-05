@@ -140,25 +140,33 @@ it('supports repository write helpers and convenience create-or-update operation
     expect($createdViaUpdateOrCreate['tenant_id'] ?? null)->toBe(10);
     expect($repository->count())->toBe(5);
 
-    $upserted = $repository->upsert(
+    $upsert = static fn() => $repository->upsert(
         [
             'email' => 'frank@example.test',
             'name' => 'Frank',
             'active' => 1,
         ],
-        ['email'],
+        ['tenant_id', 'email'],
         ['name'],
     );
-    expect($upserted)->toBeTrue();
-    expect($repository->first(
-        static function (QueryBuilder $query): void {
-            $query->where('email', '=', 'frank@example.test');
-        },
-    )['name'] ?? null)->toBe('Frank');
+
+    if (in_array($driver, ['mysql', 'mariadb'], true)) {
+        expect($upsert)->toThrow(
+            InvalidArgumentException::class,
+            'Tenant-scoped upsert is not supported on MySQL/MariaDB',
+        );
+    } else {
+        expect($upsert())->toBeTrue();
+        expect($repository->first(
+            static function (QueryBuilder $query): void {
+                $query->where('email', '=', 'frank@example.test');
+            },
+        )['name'] ?? null)->toBe('Frank');
+    }
 
     $deleted = $repository->deleteById($newlyCreated['id']);
     expect($deleted)->toBe(1);
-    expect($repository->count())->toBe(5);
+    expect($repository->count())->toBe(in_array($driver, ['mysql', 'mariadb'], true) ? 4 : 5);
 })->with('dblayer_drivers');
 
 it('runs beforeUpdate exactly once for updateOrCreate', function (string $driver): void {
