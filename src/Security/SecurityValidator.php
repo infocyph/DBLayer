@@ -23,11 +23,11 @@ final class SecurityValidator
      */
     public static function sanitizeLikePattern(string $pattern): string
     {
-        return str_replace(
-            ['%', '_', '\\'],
-            ['\\%', '\\_', '\\\\'],
-            $pattern,
-        );
+        return strtr($pattern, [
+            '\\' => '\\\\',
+            '%' => '\\%',
+            '_' => '\\_',
+        ]);
     }
 
     /**
