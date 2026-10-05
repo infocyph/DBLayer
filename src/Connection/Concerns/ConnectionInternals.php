@@ -101,6 +101,18 @@ trait ConnectionInternals
     }
 
     /**
+     * Whether row/fetch checkpoints have any active query budget to enforce.
+     *
+     * @internal
+     */
+    public function hasActiveQueryBudget(): bool
+    {
+        return $this->queryCancellationChecker !== null
+            || $this->queryDeadlineAt !== null
+            || $this->queryTimeoutMs !== null;
+    }
+
+    /**
      * Whether this connection already has a query-result cache configured.
      */
     public function hasQueryCache(): bool
