@@ -198,7 +198,6 @@ trait ConnectionStreaming
     }
 
     /**
-     * @param array<int|string,mixed> $bindings
      * @param array{
      *   runtime:\Infocyph\Runwire\RuntimeContext,
      *   request:?\Infocyph\Runwire\RequestContext,
