@@ -400,6 +400,19 @@ final class ConnectionConfig
     }
 
     /** @param array<string,mixed> $config */
+    private function validateCacheScopes(array $config): void
+    {
+        foreach (['cache_scope', 'cache_dependency_scope'] as $scopeKey) {
+            $scope = $config[$scopeKey] ?? null;
+            if ($scope !== null && (!is_string($scope) || trim($scope) === '')) {
+                throw ConnectionException::invalidConfiguration(
+                    "Config key '{$scopeKey}' must be null or a non-empty string.",
+                );
+            }
+        }
+    }
+
+    /** @param array<string,mixed> $config */
     private function validateConfig(array $config): void
     {
         $driver = $config['driver'] ?? null;
@@ -419,19 +432,6 @@ final class ConnectionConfig
             }
         }
         $this->validateCacheScopes($config);
-    }
-
-    /** @param array<string,mixed> $config */
-    private function validateCacheScopes(array $config): void
-    {
-        foreach (['cache_scope', 'cache_dependency_scope'] as $scopeKey) {
-            $scope = $config[$scopeKey] ?? null;
-            if ($scope !== null && (!is_string($scope) || trim($scope) === '')) {
-                throw ConnectionException::invalidConfiguration(
-                    "Config key '{$scopeKey}' must be null or a non-empty string.",
-                );
-            }
-        }
     }
 
     /** @param array<string,mixed> $replica */
