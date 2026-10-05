@@ -19,15 +19,15 @@ exclude failing code or edit vendor files.
 
 ## Implementation tracker
 
-Last synchronized: 2026-10-05 at `29ae72d`. PR: #32. Active batch: **B — verification**.
+Last synchronized: 2026-10-05 after verified candidate `b7520c0d`. PR: #32. Active batch: **E — final verification; C has one upstream PHPForge blocker**.
 
 | Batch | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
-| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Complete** | Exact Batch A candidate `ea61258`: Pest, syntax, reference integrity, Pint and PHPBench 8.4/8.5 pass; live PostgreSQL schema isolation passes. Remaining analyzer/skip-scanner failures are tracked under D13. |
-| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **Verification in progress** | D07-D12 production fixes and focused regressions are committed through `29ae72d`; live PostgreSQL timeout sanitation is included. PR QA is the exit gate. |
-| C | D13 — PHPForge/tooling and dependency compatibility | Not started | Full unsuppressed PHPForge gates, lowest/latest dependencies and audit policy. |
-| D | Optional Runwire 2.1.1 integration | Not started | Starts only after D01-D13 correctness gates pass. |
-| E | Docs, performance/soak, downstream consumers and final CI | Not started | Exact-final-SHA release evidence. |
+| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Complete** | Exact Batch A candidate `ea61258`: focused regressions and live PostgreSQL schema isolation pass. |
+| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **Complete** | Focused regressions pass; live PostgreSQL timeout sanitation is covered; full PHP 8.4/8.5 stable/lowest QA is green on `b7520c0d`. |
+| C | D13 — PHPForge/tooling and dependency compatibility | **Blocked upstream** | Skip scanner/configuration are fixed and full PHPForge QA/analyzers are green. Production audit is clean. Remaining blocker: PHPBench 1.7.0 pulls abandoned `doctrine/annotations`, while PHPForge currently reports abandoned packages as non-blocking. PHPForge write access is unavailable from this integration (403), so this cannot be fixed in DBLayer without weakening the standard. |
+| D | Optional Runwire 2.1.1 integration | **Complete** | Passed-instance binding, strict nested budgets, pre-connect cancellation, CacheLayer sharing, ArrayKit lazy propagation, coroutine retry sleep, concurrent task isolation, worker replacement and explicit pool warmup are covered. DBLayer does not take over host lifecycle. |
+| E | Docs, performance/soak, downstream consumers and final CI | **Final verification** | 6.0 upgrade/runtime docs, representative PHPBench coverage, persistent-worker soak, Foundation/ReqShield candidate smokes and all repository-owned CI gates pass on `b7520c0d`. Final tracker SHA still needs the immutable final CI pass. |
 
 ### Batch A item tracker
 
@@ -46,12 +46,12 @@ Tracker statuses are updated only from committed code and verification evidence;
 
 | ID | Status | Exit requirement |
 | --- | --- | --- |
-| D07 | Implemented; verification pending | Warm cache hits, nested cancellation, deadlines, stream/batch and retry checkpoints preserve the strictest active budget. |
-| D08 | Implemented; verification pending | Active streaming statements are never reused from the prepared-statement cache; cleanup releases ownership. |
-| D09 | Implemented; verification pending | Scoped pool callbacks reject escaping Traversable/lazy results and always release the lease. |
-| D10 | Implemented; verification pending | Pool reset restores native timeout state; SQLite and live PostgreSQL regressions pass. |
-| D11 | Implemented; verification pending | LIKE escaping is single-pass and literal wildcard/backslash semantics are verified. |
-| D12 | Implemented; verification pending | DBLayer-owned private caches are discarded on reuse; caller-owned shared caches survive reset. |
+| D07 | Complete | Warm cache hits, nested cancellation, deadlines, stream/batch and retry checkpoints preserve the strictest active budget. |
+| D08 | Complete | Active streaming statements are never reused from the prepared-statement cache; cleanup releases ownership. |
+| D09 | Complete | Scoped pool callbacks reject escaping Traversable/lazy results and always release the lease. |
+| D10 | Complete | Pool reset restores native timeout state; SQLite and live PostgreSQL regressions pass. |
+| D11 | Complete | LIKE escaping is single-pass and literal wildcard/backslash semantics are verified. |
+| D12 | Complete | DBLayer-owned private caches are discarded on reuse; caller-owned shared caches survive reset. |
 
 ## Changes already applied
 
@@ -66,34 +66,37 @@ Tracker statuses are updated only from committed code and verification evidence;
 - The local ignored `composer.lock` was refreshed. This library does not track
   its lock file; consumers resolve the declared ranges independently.
 - Runwire `2.1.1` is declared in `require-dev` for the integration test target
-  and in `suggest` for optional production adoption. Runtime integration remains
-  planned; the dependency declaration does not implement it.
-
-No production defect fixes or Runwire integration have been implemented yet.
-Do not infer integration support from the dependency bump alone.
+  and in `suggest` for optional production adoption.
+- D01-D12 production correctness fixes are implemented with focused regressions.
+- Optional Runwire integration is implemented through passed host-owned runtime/request/scope
+  objects; DBLayer never starts or stops the host runtime.
+- Worker-local pools support explicit synchronous `warmUp()`; healthy PDO handles are
+  reused across requests and request-local runtime state is sanitized on release.
+- `docs/upgrade-6.0.rst` documents the CacheLayer 4 floor, changed tenancy/cache/
+  transaction/lazy-lifetime contracts, worker pooling and Runwire composition.
+- Persistent-worker soak coverage and candidate downstream smokes for Foundation and
+  ReqShield are part of the release branch.
 
 ## Current verification evidence
 
 | Check | Result and limit |
 | --- | --- |
-| Composer validation and platform requirements | Pass on PHP 8.5.4; PDO mysql, pgsql and sqlite installed; sqlsrv absent |
-| Full Pest suite after dependency update | 436 passed, 2,218 assertions, 1 skipped; live database execution was SQLite only |
-| `composer ic:process` | Pass after allowing Rector's local worker socket; no production source changes |
-| `composer ic:tests:details` and final `composer ic:tests` | Fail: PHPStan config is invalid and skip scanner finds 5 directives plus its PHPStan config error |
-| Remaining quality checks | Normalize, syntax, references, duplicates, comments, Pest, Pint, PHPCS, Deptrac, Psalm and Rector pass |
-| Live `composer audit --locked --no-dev --format=json` | 0 advisories, 0 abandoned production packages |
-| Live `composer audit --locked --format=json` | 0 advisories; nonzero exit for abandoned development dependency `doctrine/annotations`, required by PHPBench 1.7.0 |
-| Focused probes | 15 diagnostic records in [audit-probes.jsonl](evidence/2026-10-05-audit-probes.jsonl), with a [reproduction harness](evidence/reproduce-audit.md); each records current behavior, not passing regression coverage |
-| Exact committed-revision CI | Latest checked [run 37172666815](https://github.com/infocyph/DBLayer/actions/runs/37172666815) failed on the audited SHA; PHP 8.4/8.5 QA stable/lowest and both analyzer jobs failed; benchmarks and clean install passed |
-| Changed working tree CI | Not run; no commit or tag created |
-| Runtime integration, load, soak and downstream consumers | Not verified |
+| PHPForge QA | PASS on verified candidate `b7520c0d`: PHP 8.4/8.5, prefer-stable and prefer-lowest; Pest, Pint, PHPCS, Deptrac, Rector, syntax, references, duplicates, comments and skip scanner all green |
+| Static analysis | PASS on PHP 8.4 and PHP 8.5; PHPStan and Psalm both green without local suppression/baseline weakening |
+| PHPBench | PASS on PHP 8.4 and PHP 8.5; benchmark suite covers indexed reads, buffered/streamed rows, cache hit/miss, structured writes/upsert, transactions, relations, cursor pagination, statement reuse and runtime lifecycle |
+| Clean install | PASS; production install does not require Runwire |
+| Live database matrix | PHPForge provisions MySQL, MariaDB, PostgreSQL, SQL Server and SQLite plus configured replica/availability-group topologies; Batch A/B live PostgreSQL regressions pass |
+| Persistent-worker soak | PASS inside the full Pest matrix: repeated Runwire request lifecycles, distinct cache keys, pooled reuse and bounded memory/connection state |
+| Downstream consumers | PASS on candidate `b7520c0d`: ReqShield DBLayer bridge and Foundation DBLayer runtime/query-cache/persistent lifecycle tests with DBLayer 6 + CacheLayer 4 candidate constraints |
+| Production Composer audit | 0 advisories and 0 abandoned production packages |
+| Development Composer graph | **BLOCKED upstream**: PHPBench 1.7.0 requires abandoned `doctrine/annotations` 2.0.2; PHPForge's current auditor reports abandoned packages as non-blocking |
+| PHPForge upstream write attempt | Branch creation and issue creation both return GitHub 403 from the available integration; no DBLayer-side suppression/replacement was introduced |
+| Final immutable SHA | Pending the final workflow run after this tracker/evidence commit |
 
-Production-only audit success does not mean the library is vulnerability-free:
-Composer checks published dependency advisories, not first-party semantics.
-No live MySQL, MariaDB, PostgreSQL, SQL Server or physical replica/AG topology
-was available for this audit. Compilation tests across dialects do not replace
-those integrations. Existing hosted benchmark success is component evidence,
-not representative application RPM certification.
+The remaining D13 item is external to DBLayer's production graph but remains a
+release blocker under this plan's full-development-audit policy. Do not mark the
+combined 6.0 release fully accepted until PHPForge removes the abandoned benchmark
+dependency path and enforces abandoned packages as a release-audit failure.
 
 ## Required findings
 
