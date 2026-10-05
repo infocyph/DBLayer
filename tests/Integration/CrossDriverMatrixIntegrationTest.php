@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use Infocyph\CacheLayer\Cache\Cache;
 use Infocyph\DBLayer\Connection\Connection;
+use Infocyph\DBLayer\Connection\ConnectionConfig;
 use Infocyph\DBLayer\DB;
 
 it('runs core query and transaction flow on available drivers', function (string $driver): void {
@@ -117,3 +119,48 @@ it('preserves each pdo drivers native boolean result type', function (string $dr
             ->and($falsey)->toBe(0);
     }
 })->with('dblayer_drivers');
+
+
+it('isolates shared PostgreSQL result caches by effective schema', function (): void {
+    $baseConfig = dblayerRequireDriver('pgsql');
+    $suffix = bin2hex(random_bytes(4));
+    $schemaA = 'cache_scope_a_' . $suffix;
+    $schemaB = 'cache_scope_b_' . $suffix;
+    $admin = new Connection(ConnectionConfig::fromArray($baseConfig), 'cache-scope-admin');
+    $first = null;
+    $second = null;
+
+    try {
+        $admin->statement("create schema {$schemaA}");
+        $admin->statement("create schema {$schemaB}");
+        $admin->statement("create table {$schemaA}.items (id integer primary key, value text not null)");
+        $admin->statement("create table {$schemaB}.items (id integer primary key, value text not null)");
+        $admin->insert("insert into {$schemaA}.items (id, value) values (?, ?)", [1, 'schema-a']);
+        $admin->insert("insert into {$schemaB}.items (id, value) values (?, ?)", [1, 'schema-b']);
+
+        $cache = Cache::memory('dblayer-pg-schema-' . $suffix);
+        $first = new Connection(
+            ConnectionConfig::fromArray(array_replace($baseConfig, ['schema' => $schemaA])),
+            'shared',
+        );
+        $second = new Connection(
+            ConnectionConfig::fromArray(array_replace($baseConfig, ['schema' => $schemaB])),
+            'shared',
+        );
+        $first->setQueryCache($cache);
+        $second->setQueryCache($cache);
+
+        $firstRows = $first->table('items')->cacheFor(60)->get();
+        $secondRows = $second->table('items')->cacheFor(60)->get();
+
+        expect($firstRows[0]['value'] ?? null)->toBe('schema-a')
+            ->and($secondRows[0]['value'] ?? null)->toBe('schema-b')
+            ->and($first->cacheScopeFingerprint())->not->toBe($second->cacheScopeFingerprint());
+    } finally {
+        $first?->disconnect();
+        $second?->disconnect();
+        $admin->statement("drop schema if exists {$schemaA} cascade");
+        $admin->statement("drop schema if exists {$schemaB} cascade");
+        $admin->disconnect();
+    }
+});
