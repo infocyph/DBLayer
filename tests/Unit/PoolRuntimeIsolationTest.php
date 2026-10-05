@@ -99,3 +99,43 @@ it('discards a pooled wrapper released with an active transaction', function ():
 
     $second->release();
 });
+
+it('warms distinct PDO handles and retains them for worker reuse', function (): void {
+    $pool = new Pool([
+        'min_connections' => 2,
+        'max_connections' => 3,
+    ]);
+    $pool->addConfig('default', ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]));
+    $manager = new PoolManager($pool);
+
+    expect($pool->getStats()['total_connections'])->toBe(2)
+        ->and($manager->warmUp())->toBe(2);
+
+    $first = $manager->checkout();
+    $second = $manager->checkout();
+    $firstPdo = spl_object_id($first->connection()->getPdo());
+    $secondPdo = spl_object_id($second->connection()->getPdo());
+
+    expect($firstPdo)->not->toBe($secondPdo);
+
+    $first->release();
+    $second->release();
+
+    $reused = $manager->checkout();
+    $reusedPdo = spl_object_id($reused->connection()->getPdo());
+
+    expect([$firstPdo, $secondPdo])->toContain($reusedPdo)
+        ->and($pool->getStats()['total_connections'])->toBe(2);
+
+    $reused->release();
+});
+
+it('bounds explicit pool warmup by configured capacity', function (): void {
+    $manager = dblayerRuntimeIsolationPoolManager(2);
+
+    expect(fn(): int => $manager->warmUp(target: 3))
+        ->toThrow(\Infocyph\DBLayer\Exceptions\ConnectionException::class, 'warmup target');
+});
