@@ -15,6 +15,7 @@ final class ReleaseHostWorkload
         private readonly string $output,
         private readonly float $durationSeconds,
         private readonly int $trials,
+        private readonly string $revision,
         array $concurrencies,
     ) {
         $this->concurrencies = array_values(array_unique(array_map('intval', $concurrencies)));
@@ -48,6 +49,7 @@ final class ReleaseHostWorkload
 
         $payload = [
             'project' => basename($this->project),
+            'revision' => $this->revision,
             'duration_seconds' => $this->durationSeconds,
             'trials' => $this->trials,
             'concurrencies' => $this->concurrencies,
@@ -364,7 +366,7 @@ function releaseHostRequiredOption(array $options, string $key): string
     return trim($value);
 }
 
-$options = getopt('', ['project:', 'output:', 'duration::', 'trials::', 'concurrency::']);
+$options = getopt('', ['project:', 'output:', 'duration::', 'trials::', 'concurrency::', 'revision::']);
 $projectOption = releaseHostRequiredOption($options, 'project');
 $project = realpath($projectOption);
 if (!is_string($project)) {
@@ -376,4 +378,11 @@ $duration = max(1.0, (float) ($options['duration'] ?? 3.0));
 $trials = max(3, (int) ($options['trials'] ?? 3));
 $concurrency = explode(',', (string) ($options['concurrency'] ?? '1,2,4'));
 
-(new ReleaseHostWorkload($project, $output, $duration, $trials, $concurrency))->run();
+(new ReleaseHostWorkload(
+    $project,
+    $output,
+    $duration,
+    $trials,
+    (string) ($options['revision'] ?? 'unknown'),
+    $concurrency,
+))->run();
