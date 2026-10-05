@@ -7,6 +7,7 @@ namespace Infocyph\DBLayer\Connection\Concerns;
 use Infocyph\CacheLayer\Cache\Cache;
 use Infocyph\CacheLayer\Cache\CacheInterface;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Connection\QueryRuntimePolicy;
 use Infocyph\DBLayer\Connection\ReadReplicaSessionPolicy;
 use Infocyph\DBLayer\Connection\SqlStatementInspector;
 use Infocyph\DBLayer\Events\Events;
@@ -164,13 +165,7 @@ trait ConnectionInternals
      */
     private function assertNotCancelled(): void
     {
-        if ($this->queryCancellationChecker === null) {
-            return;
-        }
-
-        if (($this->queryCancellationChecker)()) {
-            throw ConnectionException::queryCancelled();
-        }
+        QueryRuntimePolicy::assertNotCancelled($this->queryCancellationChecker);
     }
 
     /**
@@ -178,17 +173,10 @@ trait ConnectionInternals
      */
     private function assertWithinQueryBudget(float $startedAt): void
     {
-        $deadlineAt = $this->resolveEffectiveDeadlineAt($startedAt);
-
-        if ($deadlineAt === null) {
-            return;
-        }
-
-        if (microtime(true) <= $deadlineAt) {
-            return;
-        }
-
-        throw ConnectionException::queryTimeout(microtime(true) - $startedAt);
+        QueryRuntimePolicy::assertWithinDeadline(
+            $this->resolveEffectiveDeadlineAt($startedAt),
+            $startedAt,
+        );
     }
 
     /**
