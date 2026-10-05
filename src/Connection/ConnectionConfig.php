@@ -17,7 +17,7 @@ final class ConnectionConfig
         'read_strategy' => 'random', 'read_health_cooldown' => 30, 'read_latency_ttl' => 15,
         'read_probe_sample_size' => 0, 'least_latency_ttl' => 15, 'statement_cache_enabled' => false,
         'statement_cache_size' => 64, 'query_comment_enabled' => false, 'query_comment_max_length' => 160,
-        'query_comment_context' => [], 'sticky' => false, 'security' => [],
+        'query_comment_context' => [], 'sticky' => false, 'cache_scope' => null, 'security' => [],
     ];
 
     private const array DRIVER_ALIASES = [
@@ -417,6 +417,10 @@ final class ConnectionConfig
                     throw ConnectionException::invalidConfiguration(sprintf("Config key '%s' is required for driver '%s'.", $key, $driver));
                 }
             }
+        }
+        $cacheScope = $config['cache_scope'] ?? null;
+        if ($cacheScope !== null && (!is_string($cacheScope) || trim($cacheScope) === '')) {
+            throw ConnectionException::invalidConfiguration("Config key 'cache_scope' must be null or a non-empty string.");
         }
     }
 
