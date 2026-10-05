@@ -66,12 +66,17 @@ trait QueryBuilderResults
             return $this->executor->selectCompiled($compiled);
         }
 
+        $cacheStartedAt = microtime(true);
+        $this->connection->assertQueryCheckpoint($cacheStartedAt);
+
         $result = $this->connection->queryCache()->remember(
             $this->resultCacheKey($sql, $bindingFingerprint),
             fn(): array => $this->executor->selectCompiled($compiled),
             $this->cacheTtl,
             $this->resultCacheTags(),
         );
+
+        $this->connection->assertQueryCheckpoint($cacheStartedAt);
 
         return $this->normalizeCachedRows($result);
     }
