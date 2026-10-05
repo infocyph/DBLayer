@@ -133,6 +133,43 @@ it('warms distinct PDO handles and retains them for worker reuse', function (): 
     $reused->release();
 });
 
+it('reconciles expired idle handles before reporting warm readiness', function (): void {
+    $pool = new Pool([
+        'min_connections' => 1,
+        'max_connections' => 1,
+        'idle_timeout' => 1,
+    ]);
+    $pool->addConfig('main', ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]));
+    $manager = new PoolManager($pool);
+
+    expect($manager->warmUp('main'))->toBe(1);
+
+    $lease = $manager->checkout('main');
+    $oldPdo = $lease->connection()->getPdo();
+    $lease->release();
+
+    $idleProperty = new ReflectionProperty($pool, 'idle');
+    /** @var array<string,array<int,array{connection:\Infocyph\DBLayer\Connection\Connection,idle_since:float}>> $idle */
+    $idle = $idleProperty->getValue($pool);
+    foreach ($idle['main'] as &$data) {
+        $data['idle_since'] = microtime(true) - 2;
+    }
+    unset($data);
+    $idleProperty->setValue($pool, $idle);
+
+    expect($manager->warmUp('main'))->toBe(1);
+
+    $replacement = $manager->checkout('main');
+
+    expect($replacement->connection()->isConnected())->toBeTrue()
+        ->and($replacement->connection()->getPdo())->not->toBe($oldPdo);
+
+    $replacement->release();
+});
+
 it('bounds explicit pool warmup by configured capacity', function (): void {
     $manager = dblayerRuntimeIsolationPoolManager(2);
 
