@@ -103,6 +103,15 @@ trait ConnectionStreaming
         };
     }
 
+    /**
+     * @param array<int|string,mixed> $bindings
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
+     * @return Generator<mixed>
+     */
     private function streamGenerator(
         string $sql,
         array $bindings,
@@ -257,10 +266,6 @@ trait ConnectionStreaming
     }
 
     /**
-     * @param array<int|string,mixed> $bindings
-     * @return Generator<mixed>
-     */
-    /**
      * @param array{
      *   runtime:\Infocyph\Runwire\RuntimeContext,
      *   request:?\Infocyph\Runwire\RequestContext,
@@ -305,10 +310,6 @@ trait ConnectionStreaming
         return 'dblayer_stream_' . $this->postgresStreamCursorSequence;
     }
 
-    /**
-     * @param array<int|string,mixed> $bindings
-     * @return Generator<mixed>
-     */
     /**
      * @param array{
      *   runtime:\Infocyph\Runwire\RuntimeContext,
