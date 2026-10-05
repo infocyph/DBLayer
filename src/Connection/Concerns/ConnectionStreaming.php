@@ -332,6 +332,80 @@ trait ConnectionStreaming
      *   request:?\Infocyph\Runwire\RequestContext,
      *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
      * }|null $runwireBinding
+     */
+    private function fetchStreamRow(
+        PDOStatement $statement,
+        int $mode,
+        float $startedAt,
+        ?array $runwireBinding,
+        bool $checkBudget,
+    ): mixed {
+        if ($runwireBinding !== null) {
+            return $this->runWithRunwireBinding(
+                $runwireBinding,
+                function () use ($statement, $mode, $startedAt): mixed {
+                    $this->assertQueryCheckpoint($startedAt);
+                    $row = $statement->fetch($mode);
+                    $this->assertQueryCheckpoint($startedAt);
+
+                    return $row;
+                },
+            );
+        }
+
+        if ($checkBudget) {
+            $this->assertQueryCheckpoint($startedAt);
+        }
+
+        $row = $statement->fetch($mode);
+
+        if ($checkBudget) {
+            $this->assertQueryCheckpoint($startedAt);
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param array<int|string,mixed> $bindings
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
+     */
+    private function openStreamStatement(string $sql, array $bindings, ?array $runwireBinding): PDOStatement
+    {
+        if ($runwireBinding === null) {
+            return $this->execute($sql, $bindings);
+        }
+
+        return $this->runWithRunwireBinding(
+            $runwireBinding,
+            fn(): PDOStatement => $this->execute($sql, $bindings),
+        );
+    }
+
+    private function releaseStreamStatement(?PDOStatement $statement, ?int $statementId): void
+    {
+        if ($statementId !== null) {
+            unset($this->activeStatementCursors[$statementId]);
+        }
+
+        if ($statement instanceof PDOStatement) {
+            $statement->closeCursor();
+        }
+
+        $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
+    }
+
+    /**
+     * @param array<int|string,mixed> $bindings
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
      * @return Generator<mixed>
      */
     private function streamGenerator(
@@ -349,12 +423,7 @@ trait ConnectionStreaming
 
         try {
             $this->assertStreamGeneration($reuseGeneration);
-            $statement = $runwireBinding === null
-                ? $this->execute($sql, $bindings)
-                : $this->runWithRunwireBinding(
-                    $runwireBinding,
-                    fn(): PDOStatement => $this->execute($sql, $bindings),
-                );
+            $statement = $this->openStreamStatement($sql, $bindings, $runwireBinding);
             $statementId = spl_object_id($statement);
             $this->activeStatementCursors[$statementId] = $statement;
             $mode = $fetchMode ?? $this->fetchMode;
@@ -363,28 +432,13 @@ trait ConnectionStreaming
                 : [];
 
             while (true) {
-                if ($runwireBinding === null) {
-                    if ($checkBudget) {
-                        $this->assertQueryCheckpoint($startedAt);
-                    }
-
-                    $row = $statement->fetch($mode);
-
-                    if ($checkBudget) {
-                        $this->assertQueryCheckpoint($startedAt);
-                    }
-                } else {
-                    $row = $this->runWithRunwireBinding(
-                        $runwireBinding,
-                        function () use ($statement, $mode, $startedAt): mixed {
-                            $this->assertQueryCheckpoint($startedAt);
-                            $row = $statement->fetch($mode);
-                            $this->assertQueryCheckpoint($startedAt);
-
-                            return $row;
-                        },
-                    );
-                }
+                $row = $this->fetchStreamRow(
+                    $statement,
+                    $mode,
+                    $startedAt,
+                    $runwireBinding,
+                    $checkBudget,
+                );
 
                 if ($row === false) {
                     break;
@@ -394,22 +448,10 @@ trait ConnectionStreaming
                     ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
                     : $row;
 
-                if ($reuseGeneration !== $this->runtimeReuseGeneration) {
-                    throw ConnectionException::invalidConfiguration(
-                        'Deferred database iterator outlived its connection lease.',
-                    );
-                }
+                $this->assertStreamGeneration($reuseGeneration);
             }
         } finally {
-            if ($statementId !== null) {
-                unset($this->activeStatementCursors[$statementId]);
-            }
-
-            if ($statement instanceof PDOStatement) {
-                $statement->closeCursor();
-            }
-
-            $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
+            $this->releaseStreamStatement($statement, $statementId);
         }
     }
 }
