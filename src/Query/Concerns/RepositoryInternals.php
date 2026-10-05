@@ -119,30 +119,6 @@ trait RepositoryInternals
     }
 
     /**
-     * Reject tenant reassignment while preserving payloads that omit the tenant.
-     *
-     * @param array<string,mixed> $attributes
-     * @return array<string,mixed>
-     */
-    private function assertTenantAttributes(array $attributes): array
-    {
-        if ($this->tenantId === null || !array_key_exists($this->tenantColumn, $attributes)) {
-            return $attributes;
-        }
-
-        $value = $attributes[$this->tenantColumn];
-        if ((!is_int($value) && !is_string($value)) || (string) $value !== (string) $this->tenantId) {
-            throw new InvalidArgumentException(sprintf(
-                'Tenant-scoped write cannot assign [%s] to tenant column [%s].',
-                is_scalar($value) || $value === null ? (string) $value : get_debug_type($value),
-                $this->tenantColumn,
-            ));
-        }
-
-        return $attributes;
-    }
-
-    /**
      * Apply active tenant to single-row or multi-row write payloads.
      *
      * @param array<string,mixed>|array<int,array<string,mixed>> $values
@@ -191,6 +167,30 @@ trait RepositoryInternals
             $values,
             fn(array $row): array => $this->applyWriteCastsToAttributes($row),
         );
+    }
+
+    /**
+     * Reject tenant reassignment while preserving payloads that omit the tenant.
+     *
+     * @param array<string,mixed> $attributes
+     * @return array<string,mixed>
+     */
+    private function assertTenantAttributes(array $attributes): array
+    {
+        if ($this->tenantId === null || !array_key_exists($this->tenantColumn, $attributes)) {
+            return $attributes;
+        }
+
+        $value = $attributes[$this->tenantColumn];
+        if ((!is_int($value) && !is_string($value)) || (string) $value !== (string) $this->tenantId) {
+            throw new InvalidArgumentException(sprintf(
+                'Tenant-scoped write cannot assign [%s] to tenant column [%s].',
+                is_scalar($value) || $value === null ? (string) $value : get_debug_type($value),
+                $this->tenantColumn,
+            ));
+        }
+
+        return $attributes;
     }
 
     /**
