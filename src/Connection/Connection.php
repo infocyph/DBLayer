@@ -310,6 +310,14 @@ final class Connection
      */
     public function assertQueryCheckpoint(float $startedAt): void
     {
+        if (
+            $this->queryCancellationChecker === null
+            && $this->queryDeadlineAt === null
+            && $this->queryTimeoutMs === null
+        ) {
+            return;
+        }
+
         $this->assertNotCancelled();
         $this->assertWithinQueryBudget($startedAt);
     }
