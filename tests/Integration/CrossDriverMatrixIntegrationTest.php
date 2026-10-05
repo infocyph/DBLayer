@@ -164,3 +164,20 @@ it('isolates shared PostgreSQL result caches by effective schema', function (): 
         $admin->disconnect();
     }
 });
+
+
+it('restores PostgreSQL statement_timeout before connection reuse', function (): void {
+    $connection = new Connection(
+        ConnectionConfig::fromArray(dblayerRequireDriver('pgsql')),
+        'pgsql-timeout-reset',
+    );
+
+    $connection->setQueryTimeoutMs(123);
+
+    expect((string) $connection->scalar("select current_setting('statement_timeout')"))->toBe('123ms')
+        ->and($connection->resetRuntimeStateForReuse())->toBeTrue()
+        ->and($connection->getQueryTimeoutMs())->toBeNull()
+        ->and((string) $connection->scalar("select current_setting('statement_timeout')"))->toBe('0');
+
+    $connection->disconnect();
+});
