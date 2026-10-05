@@ -106,9 +106,16 @@ The database-integrated form is opt-in on ``QueryBuilder``:
 
    $fresh = DB::table('users')->cacheFor(120)->withoutCache()->get();
 
-Automatic result identities include the logical connection, driver, database,
-result mode, compiled SQL fingerprint, and normalized scalar bindings. They do
-not contain credentials, TLS material, or physical replica indexes.
+Automatic result identities include a versioned logical cache scope: connection
+name, driver, database, table prefix, effective schema, database username/role
+identity, optional ``cache_scope``, result mode, compiled SQL fingerprint, and
+normalized scalar bindings. They do not contain passwords, TLS material, or
+physical replica indexes.
+
+Use ``cache_scope`` when result visibility depends on application/session state
+such as RLS or role/tenant policy that is not otherwise represented by the
+connection identity. Changing this scope intentionally produces a cold cache
+boundary.
 
 When multiple independent database deployments deliberately share the same
 CacheLayer backend, give those deployments distinct CacheLayer namespaces and/or
