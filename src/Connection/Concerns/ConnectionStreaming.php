@@ -126,10 +126,12 @@ trait ConnectionStreaming
 
         try {
             $this->assertStreamGeneration($reuseGeneration);
-            $statement = $this->runWithRunwireBinding(
-                $runwireBinding,
-                fn(): PDOStatement => $this->execute($sql, $bindings),
-            );
+            $statement = $runwireBinding === null
+                ? $this->execute($sql, $bindings)
+                : $this->runWithRunwireBinding(
+                    $runwireBinding,
+                    fn(): PDOStatement => $this->execute($sql, $bindings),
+                );
             $statementId = spl_object_id($statement);
             $this->activeStatementCursors[$statementId] = $statement;
             $mode = $fetchMode ?? $this->fetchMode;
@@ -139,16 +141,22 @@ trait ConnectionStreaming
 
             while (true) {
                 $this->assertStreamGeneration($reuseGeneration);
-                $row = $this->runWithRunwireBinding(
-                    $runwireBinding,
-                    function () use ($statement, $mode, $startedAt): mixed {
-                        $this->assertQueryCheckpoint($startedAt);
-                        $row = $statement->fetch($mode);
-                        $this->assertQueryCheckpoint($startedAt);
+                if ($runwireBinding === null) {
+                    $this->assertQueryCheckpoint($startedAt);
+                    $row = $statement->fetch($mode);
+                    $this->assertQueryCheckpoint($startedAt);
+                } else {
+                    $row = $this->runWithRunwireBinding(
+                        $runwireBinding,
+                        function () use ($statement, $mode, $startedAt): mixed {
+                            $this->assertQueryCheckpoint($startedAt);
+                            $row = $statement->fetch($mode);
+                            $this->assertQueryCheckpoint($startedAt);
 
-                        return $row;
-                    },
-                );
+                            return $row;
+                        },
+                    );
+                }
 
                 if ($row === false) {
                     break;
