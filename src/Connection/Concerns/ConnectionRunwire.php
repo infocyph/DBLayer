@@ -76,6 +76,31 @@ trait ConnectionRunwire
     }
 
     /**
+     * Execute one deferred iterator operation with a previously captured binding.
+     *
+     * @param array{
+     *   runtime:RuntimeContext,
+     *   request:?RequestContext,
+     *   scope:?CoroutineScope
+     * }|null $binding
+     *
+     * @internal
+     */
+    public function runWithRunwireBinding(?array $binding, callable $callback): mixed
+    {
+        if ($binding === null) {
+            return $callback();
+        }
+
+        return $this->withRunwire(
+            $binding['runtime'],
+            $callback,
+            $binding['request'],
+            $binding['scope'],
+        );
+    }
+
+    /**
      * Execute work while borrowing host-owned Runwire execution context.
      *
      * DBLayer never starts, globally binds, stops, or releases the host runtime.
