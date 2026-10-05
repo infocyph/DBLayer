@@ -975,6 +975,29 @@ abstract class Repository
      */
     public function upsert(array $values, array $uniqueBy, ?array $update = null): bool
     {
+        if ($this->tenantId !== null) {
+            $tenantColumn = $this->normalizeColumnName($this->tenantColumn, 'tenant_id');
+            $driver = $this->connection->getDriverName();
+
+            if (in_array($driver, ['mysql', 'mariadb'], true)) {
+                throw new InvalidArgumentException(
+                    'Tenant-scoped upsert is not supported on MySQL/MariaDB because duplicate-key resolution can target unrelated unique keys.',
+                );
+            }
+
+            if (!in_array($tenantColumn, $uniqueBy, true)) {
+                throw new InvalidArgumentException(
+                    'Tenant-scoped upsert requires the tenant column in the conflict target.',
+                );
+            }
+
+            if ($update !== null && in_array($tenantColumn, $update, true)) {
+                throw new InvalidArgumentException(
+                    'Tenant-scoped upsert cannot update the tenant column.',
+                );
+            }
+        }
+
         $payload = $this->applyTenantValues(
             $this->applyWriteCastsToValues($this->applyTenantValues($values)),
         );
