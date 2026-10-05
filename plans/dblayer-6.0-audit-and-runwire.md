@@ -17,6 +17,31 @@ come before throughput. Keep fixes inside existing owners where practical;
 justify every new production type. Do not weaken quality gates, add baselines,
 exclude failing code or edit vendor files.
 
+## Implementation tracker
+
+Last synchronized: 2026-10-05. PR: #32. Active batch: **A**.
+
+| Batch | Scope | Status | Evidence / next gate |
+| --- | --- | --- | --- |
+| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **In progress** | Implement regressions and fixes, then require PR QA on PHP 8.4/8.5 plus live-driver evidence where applicable. |
+| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | Not started | Starts only after Batch A code and QA are closed. |
+| C | D13 — PHPForge/tooling and dependency compatibility | Not started | Full unsuppressed PHPForge gates, lowest/latest dependencies and audit policy. |
+| D | Optional Runwire 2.1.1 integration | Not started | Starts only after D01-D13 correctness gates pass. |
+| E | Docs, performance/soak, downstream consumers and final CI | Not started | Exact-final-SHA release evidence. |
+
+### Batch A item tracker
+
+| ID | Status | Exit requirement |
+| --- | --- | --- |
+| D01 | In progress | Structured aggregate identifiers validated; injection regressions pass on every compiler path. |
+| D02 | In progress | Tenant conflicts/reassignment rejected after casts/hooks across repository write APIs. |
+| D03 | In progress | Versioned cache scope includes schema/security identity; PostgreSQL isolation regression covered. |
+| D04 | In progress | Native PDO transactions bypass result cache without opening PDO merely to test eligibility; native after-commit ownership is explicit. |
+| D05 | In progress | Schema invalidation uses the exact passed Connection/cache owner. |
+| D06 | In progress | Completed mutations record durable outcome before late budget failure and cannot leave stale cache/sticky state. |
+
+Tracker statuses are updated only from committed code and verification evidence; a code change alone is not marked complete until its required regression/QA evidence exists.
+
 ## Changes already applied
 
 - `composer.json`: ArrayKit floor `^5.2` → `^5.3` and CacheLayer `^3.4` → `^4.0`.
