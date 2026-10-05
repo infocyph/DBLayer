@@ -42,7 +42,7 @@ trait QueryBuilderResults
      */
     public function cursor(?int $fetchMode = null): Generator
     {
-        yield from $this->stream($fetchMode);
+        return $this->stream($fetchMode);
     }
 
     /**
@@ -195,6 +195,8 @@ trait QueryBuilderResults
         string $direction,
         ?array $runwireBinding,
     ): Generator {
+        $startedAt = microtime(true);
+
         foreach ($this->keysetChunks(
             $chunkSize,
             $column,
@@ -203,6 +205,11 @@ trait QueryBuilderResults
             $runwireBinding,
         ) as [$rows]) {
             foreach ($rows as $row) {
+                $this->connection->runWithRunwireBinding(
+                    $runwireBinding,
+                    fn(): mixed => $this->connection->assertQueryCheckpoint($startedAt),
+                );
+
                 yield $row;
             }
         }
