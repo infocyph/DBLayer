@@ -279,7 +279,7 @@ it('rejects cache-aware DBLayer writes inside externally owned native transactio
 
     try {
         expect(fn() => $connection->table('items')->where('id', '=', 1)->update(['value' => 'blocked']))
-            ->toThrow(ConnectionException::class, 'externally owned native PDO transaction')
+            ->toThrow(QueryException::class, 'externally owned native PDO transaction')
             ->and($connection->table('items')->where('id', '=', 1)->first()['value'])->toBe('original');
     } finally {
         if ($pdo->inTransaction()) {
