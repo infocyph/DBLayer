@@ -62,6 +62,26 @@ trait ConnectionInternals
     }
 
     /**
+     * Get read PDO connection (for read/write splitting).
+     */
+    public function getReadPdo(): PDO
+    {
+        if ($this->shouldUseWritePdoForRead()) {
+            return $this->getPdo();
+        }
+
+        if (!$this->config->hasReadConfig()) {
+            return $this->getPdo();
+        }
+
+        if ($this->readPdo === null) {
+            $this->connectRead();
+        }
+
+        return $this->readPdo ?? $this->getPdo();
+    }
+
+    /**
      * Whether this connection already has a query-result cache configured.
      */
     public function hasQueryCache(): bool
