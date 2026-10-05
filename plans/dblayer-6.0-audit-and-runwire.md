@@ -19,11 +19,11 @@ exclude failing code or edit vendor files.
 
 ## Implementation tracker
 
-Last synchronized: 2026-10-05. PR: #32. Active batch: **A — verification**.
+Last synchronized: 2026-10-05 at `ce6c27d`. PR: #32. Active batch: **A — verification**.
 
 | Batch | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
-| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Verification in progress** | Production fixes and `BatchAAuditRegressionTest` are committed through `57570d6`; PR #32 QA/live-driver evidence is the exit gate. |
+| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Verification in progress** | Production fixes are at `ce6c27d`; Batch A regressions and live PostgreSQL schema isolation pass except the delayed-write regression still has a PDO class-portability assertion to fix. PHP 8.4/8.5 benchmarks pass. D13 analyzer/skip-scanner failures remain separate. |
 | B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | Not started | Starts only after Batch A code and QA are closed. |
 | C | D13 — PHPForge/tooling and dependency compatibility | Not started | Full unsuppressed PHPForge gates, lowest/latest dependencies and audit policy. |
 | D | Optional Runwire 2.1.1 integration | Not started | Starts only after D01-D13 correctness gates pass. |
