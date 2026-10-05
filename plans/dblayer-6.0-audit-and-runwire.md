@@ -19,7 +19,7 @@ exclude failing code or edit vendor files.
 
 ## Implementation tracker
 
-Last synchronized: 2026-10-05 after verified candidate `b7520c0d`. PR: #32. Active batch: **E — final verification; C has one upstream PHPForge blocker**.
+Last synchronized: 2026-10-05. PR: #32. **All DBLayer-owned batches are complete; C remains blocked only by the upstream PHPForge/PHPBench abandoned-package path.**
 
 | Batch | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
@@ -27,7 +27,7 @@ Last synchronized: 2026-10-05 after verified candidate `b7520c0d`. PR: #32. Acti
 | B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **Complete** | Focused regressions pass; live PostgreSQL timeout sanitation is covered; full PHP 8.4/8.5 stable/lowest QA is green on `b7520c0d`. |
 | C | D13 — PHPForge/tooling and dependency compatibility | **Blocked upstream** | Skip scanner/configuration are fixed and full PHPForge QA/analyzers are green. Production audit is clean. Remaining blocker: PHPBench 1.7.0 pulls abandoned `doctrine/annotations`, while PHPForge currently reports abandoned packages as non-blocking. PHPForge write access is unavailable from this integration (403), so this cannot be fixed in DBLayer without weakening the standard. |
 | D | Optional Runwire 2.1.1 integration | **Complete** | Passed-instance binding, strict nested budgets, pre-connect cancellation, CacheLayer sharing, ArrayKit lazy propagation, coroutine retry sleep, concurrent task isolation, worker replacement and explicit pool warmup are covered. DBLayer does not take over host lifecycle. |
-| E | Docs, performance/soak, downstream consumers and final CI | **Final verification** | 6.0 upgrade/runtime docs, representative PHPBench coverage, persistent-worker soak, Foundation/ReqShield candidate smokes and all repository-owned CI gates pass on `b7520c0d`. Final tracker SHA still needs the immutable final CI pass. |
+| E | Docs, performance/soak, downstream consumers and final CI | **Complete** | 6.0 upgrade/runtime docs, representative PHPBench coverage, persistent-worker soak, Foundation/ReqShield candidate smokes and the complete PHP 8.4/8.5 stable/lowest PHPForge matrix pass on immutable candidate `ea4e6105`. This tracker-only status update changes no production/test behavior. |
 
 ### Batch A item tracker
 
@@ -91,7 +91,7 @@ Tracker statuses are updated only from committed code and verification evidence;
 | Production Composer audit | 0 advisories and 0 abandoned production packages |
 | Development Composer graph | **BLOCKED upstream**: PHPBench 1.7.0 requires abandoned `doctrine/annotations` 2.0.2; PHPForge's current auditor reports abandoned packages as non-blocking |
 | PHPForge upstream write attempt | Branch creation and issue creation both return GitHub 403 from the available integration; no DBLayer-side suppression/replacement was introduced |
-| Final immutable SHA | Pending the final workflow run after this tracker/evidence commit |
+| Final immutable SHA | PASS on `ea4e6105`: all PHPForge matrix jobs succeeded; Foundation and ReqShield downstream smokes succeeded. The subsequent tracker-only status commit changes no production/test behavior and is revalidated by PR checks. |
 
 The remaining D13 item is external to DBLayer's production graph but remains a
 release blocker under this plan's full-development-audit policy. Do not mark the
