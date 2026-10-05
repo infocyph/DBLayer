@@ -19,12 +19,12 @@ exclude failing code or edit vendor files.
 
 ## Implementation tracker
 
-Last synchronized: 2026-10-05 at `ce6c27d`. PR: #32. Active batch: **A — verification**.
+Last synchronized: 2026-10-05 at `ea61258`. PR: #32. Active batch: **B**.
 
 | Batch | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
-| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Verification in progress** | Production fixes are at `ce6c27d`; Batch A regressions and live PostgreSQL schema isolation pass except the delayed-write regression still has a PDO class-portability assertion to fix. PHP 8.4/8.5 benchmarks pass. D13 analyzer/skip-scanner failures remain separate. |
-| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | Not started | Starts only after Batch A code and QA are closed. |
+| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Complete** | Exact Batch A candidate `ea61258`: Pest, syntax, reference integrity, Pint and PHPBench 8.4/8.5 pass; live PostgreSQL schema isolation passes. Remaining analyzer/skip-scanner failures are tracked under D13. |
+| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **In progress** | Regression-first implementation now active after Batch A closure. |
 | C | D13 — PHPForge/tooling and dependency compatibility | Not started | Full unsuppressed PHPForge gates, lowest/latest dependencies and audit policy. |
 | D | Optional Runwire 2.1.1 integration | Not started | Starts only after D01-D13 correctness gates pass. |
 | E | Docs, performance/soak, downstream consumers and final CI | Not started | Exact-final-SHA release evidence. |
@@ -33,12 +33,12 @@ Last synchronized: 2026-10-05 at `ce6c27d`. PR: #32. Active batch: **A — verif
 
 | ID | Status | Exit requirement |
 | --- | --- | --- |
-| D01 | Implemented; verification pending | Structured aggregate identifiers validated; injection regressions pass on every compiler path. |
-| D02 | Implemented; verification pending | Tenant conflicts/reassignment rejected after casts/hooks across repository write APIs. |
-| D03 | Implemented; verification pending | Versioned cache scope includes schema/security identity; PostgreSQL isolation regression covered. |
-| D04 | Implemented; verification pending | Native PDO transactions bypass result cache without opening PDO merely to test eligibility; native after-commit ownership is explicit. |
-| D05 | Implemented; verification pending | Schema invalidation uses the exact passed Connection/cache owner. |
-| D06 | Implemented; verification pending | Completed mutations record durable outcome before late budget failure and cannot leave stale cache/sticky state. |
+| D01 | Complete | Structured aggregate identifiers validated; injection regressions pass on every compiler path. |
+| D02 | Complete | Tenant conflicts/reassignment rejected after casts/hooks across repository write APIs. |
+| D03 | Complete | Versioned cache scope includes schema/security identity; PostgreSQL isolation regression covered. |
+| D04 | Complete | Native PDO transactions bypass result cache without opening PDO merely to test eligibility; native after-commit ownership is explicit. |
+| D05 | Complete | Schema invalidation uses the exact passed Connection/cache owner. |
+| D06 | Complete | Completed mutations record durable outcome before late budget failure and cannot leave stale cache/sticky state. |
 
 Tracker statuses are updated only from committed code and verification evidence; a code change alone is not marked complete until its required regression/QA evidence exists.
 
