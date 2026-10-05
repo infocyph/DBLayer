@@ -152,15 +152,9 @@ it('does not report a cooperative timeout after a completed mutation', function 
 
     expect($query->get()[0]['value'])->toBe('original');
 
-    $pdo = $connection->getPdo();
-    expect($pdo)->toBeInstanceOf(Pdo\Sqlite::class);
-    $pdo->createFunction('batch_a_delay', static function (): int {
-        usleep(5_000);
-
-        return 1;
-    });
     $connection->statement(
-        'create trigger batch_a_update after update on items begin select batch_a_delay(); end',
+        'create trigger batch_a_update after update on items '
+        . 'begin select length(randomblob(2000000)); end',
     );
 
     $affected = $connection->withQueryTimeoutMs(
