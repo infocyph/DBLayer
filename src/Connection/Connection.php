@@ -364,27 +364,6 @@ final class Connection
     }
 
     /**
-     * Build the versioned, non-sensitive identity used by result-cache keys and tags.
-     */
-    public function cacheScopeFingerprint(): string
-    {
-        $schema = $this->config->get('schema');
-        $username = $this->config->get('username');
-        $explicitScope = $this->config->get('cache_scope');
-
-        return substr(hash('sha256', implode("\0", [
-            'v2',
-            $this->name,
-            $this->getDriverName(),
-            $this->getDatabaseName(),
-            $this->tablePrefix,
-            is_string($schema) ? $schema : '',
-            is_string($username) ? $username : '',
-            is_string($explicitScope) ? $explicitScope : '',
-        ])), 0, 32);
-    }
-
-    /**
      * Build the non-sensitive identity used only for shared data dependencies.
      *
      * Result visibility remains isolated by cacheScopeFingerprint(). Dependency
@@ -405,6 +384,27 @@ final class Connection
             $this->tablePrefix,
             is_string($schema) ? $schema : '',
             is_string($dependencyScope) ? $dependencyScope : '',
+        ])), 0, 32);
+    }
+
+    /**
+     * Build the versioned, non-sensitive identity used by result-cache keys and tags.
+     */
+    public function cacheScopeFingerprint(): string
+    {
+        $schema = $this->config->get('schema');
+        $username = $this->config->get('username');
+        $explicitScope = $this->config->get('cache_scope');
+
+        return substr(hash('sha256', implode("\0", [
+            'v2',
+            $this->name,
+            $this->getDriverName(),
+            $this->getDatabaseName(),
+            $this->tablePrefix,
+            is_string($schema) ? $schema : '',
+            is_string($username) ? $username : '',
+            is_string($explicitScope) ? $explicitScope : '',
         ])), 0, 32);
     }
 
