@@ -346,12 +346,15 @@ trait QueryBuilderKeysetPagination
             return $clone->get();
         }
 
-        return $this->connection->withRunwire(
+        /** @var list<array<string,mixed>> $rows */
+        $rows = $this->connection->withRunwire(
             $runwireBinding['runtime'],
             static fn(): array => $clone->get(),
             $runwireBinding['request'],
             $runwireBinding['scope'],
         );
+
+        return $rows;
     }
 
     /**
