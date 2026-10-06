@@ -807,6 +807,13 @@ trait ConnectionInternals
         }
     }
 
+    private function refreshQueryBudgetActive(): void
+    {
+        $this->queryBudgetActive = $this->queryCancellationChecker !== null
+            || $this->queryDeadlineAt !== null
+            || $this->queryTimeoutMs !== null;
+    }
+
     /**
      * Register one connection lifecycle hook.
      */
@@ -817,13 +824,6 @@ trait ConnectionInternals
         }
 
         $this->lifecycleHooks[$name][] = $hook;
-    }
-
-    private function refreshQueryBudgetActive(): void
-    {
-        $this->queryBudgetActive = $this->queryCancellationChecker !== null
-            || $this->queryDeadlineAt !== null
-            || $this->queryTimeoutMs !== null;
     }
 
     /**
