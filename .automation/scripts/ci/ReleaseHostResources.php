@@ -7,6 +7,18 @@ declare(strict_types=1);
  */
 final class ReleaseHostResources
 {
+    public static function exitForkedWorker(int $exitCode): never
+    {
+        if ($exitCode < 0 || $exitCode > 255) {
+            throw new InvalidArgumentException('Worker exit status must be between 0 and 255.');
+        }
+        // Exec avoids inherited test shutdown hooks. The exit helper must not reload
+        // configured extensions and inflate measured native RSS after the workload.
+        pcntl_exec(PHP_BINARY, ['-n', '-r', 'exit(' . $exitCode . ');']);
+
+        throw new RuntimeException('Unable to terminate forked release workload worker.');
+    }
+
     /** @return array{rss_bytes:int,sockets:int,pids:list<int>} */
     public static function snapshot(int $pid): array
     {
@@ -41,12 +53,13 @@ final class ReleaseHostResources
      * @param list<int> $pids
      * @return array{worker_process_failures:int,peak_rss_bytes:int,resource_samples:int}
      */
-    public static function waitForWorkers(array $pids): array
+    public static function waitForWorkers(array $pids, ?Closure $onSample = null): array
     {
         $failures = 0;
         $peakRss = 0;
         $samples = 0;
         while ($pids !== []) {
+            $onSample?->__invoke();
             $resources = self::snapshot(self::pid());
             $peakRss = max($peakRss, $resources['rss_bytes']);
             $samples++;

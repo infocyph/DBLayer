@@ -6,6 +6,7 @@ use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 
 require_once __DIR__ . '/ReleaseHostResources.php';
+require_once __DIR__ . '/ReleaseHostStartBarrier.php';
 
 /**
  * @phpstan-type WorkerResult array{successes:int,errors:int,queries:int,reads:int,writes:int,peak_rss_bytes:int,peak_php_heap_bytes:int,pid:int,cpu_user_seconds:float,cpu_system_seconds:float,latency_ms:list<float>}
@@ -349,7 +350,7 @@ final class ReleaseHostWorkload
             throw new RuntimeException("Unable to create trial directory: {$directory}");
         }
 
-        $startAt = microtime(true) + 0.35;
+        $barrier = new ReleaseHostStartBarrier($directory, $concurrency);
         $pids = [];
 
         for ($worker = 0; $worker < $concurrency; $worker++) {
@@ -359,31 +360,27 @@ final class ReleaseHostWorkload
             }
 
             if ($pid === 0) {
-                $result = $this->runWorker($worker, $startAt);
+                $result = $this->runWorker($worker, $barrier);
                 file_put_contents(
                     $directory . '/worker-' . $worker . '.json',
                     json_encode($result, JSON_THROW_ON_ERROR),
                 );
-                $workerCode = $result['errors'] === 0
-                    ? ''
-                    : 'throw new RuntimeException("Release host worker failed.");';
-
-                pcntl_exec(PHP_BINARY, ['-r', $workerCode]);
-
-                throw new RuntimeException('Unable to terminate forked release workload worker.');
+                ReleaseHostResources::exitForkedWorker($result['errors'] === 0 ? 0 : 1);
             }
 
             $pids[] = $pid;
         }
 
-        $resources = ReleaseHostResources::waitForWorkers($pids);
+        $resources = ReleaseHostResources::waitForWorkers($pids, $barrier->releaseIfReady(...));
 
         $workers = [];
         for ($worker = 0; $worker < $concurrency; $worker++) {
             $file = $directory . '/worker-' . $worker . '.json';
             $workers[] = $this->readWorkerResult($file);
             unlink($file);
+            unlink($directory . '/worker-' . $worker . '.ready');
         }
+        unlink($directory . '/start');
         rmdir($directory);
 
         $result = $this->aggregateWorkers($workers, $concurrency, $trial);
@@ -458,7 +455,7 @@ final class ReleaseHostWorkload
     }
 
     /** @return WorkerResult */
-    private function runWorker(int $worker, float $startAt): array
+    private function runWorker(int $worker, ReleaseHostStartBarrier $barrier): array
     {
         $connection = $this->connection('release-host-' . $worker);
         $successes = 0;
@@ -469,12 +466,9 @@ final class ReleaseHostWorkload
         try {
             $connection->scalar('select 1');
 
-            while (microtime(true) < $startAt) {
-                usleep(1_000);
-            }
-
+            $barrier->awaitRelease($worker);
             $cpuBefore = ReleaseHostResources::cpuTime();
-            $endAt = $startAt + $this->durationSeconds;
+            $endAt = microtime(true) + $this->durationSeconds;
 
             while (microtime(true) < $endAt) {
                 $sequence++;
