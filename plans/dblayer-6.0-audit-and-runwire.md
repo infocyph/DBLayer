@@ -1,15 +1,16 @@
 # DBLayer 6.0 consolidated audit feedback and release plan
 
-Updated: 2026-10-06 (Asia/Dhaka). **Remediation implemented; final committed-revision release certification pending.**
+Updated: 2026-10-06 (Asia/Dhaka). **Required remediation implemented; runtime certification recorded. Current branch checks govern release acceptance.**
 
 This file consolidates the initial library audit, updated-code review, Runwire
 integration requirements, worker-pool/configuration proposals and release gates.
 Initial baseline: `087f179ecac3e5555c346ce84cfc353050f8e3cb` (5.1).
 Committed base: `0493ea56fe7978e7233be156032097afa0f27dc6`, PR #32.
-The subsequent authorized remediation changes production code, regressions,
-release tooling and documentation in the working tree. Local verification
-applies to those changes; earlier hosted results apply only to the committed
-base and cannot certify this new candidate.
+Remediation implementation: `244a4b71e06bfa0efb139bf5dd4c2d04a42e7064`.
+The subsequent scanner correction changes a test prerequisite guard and this
+tracker. Runtime evidence below applies to the immutable implementation; the
+[current PR checks](https://github.com/infocyph/DBLayer/pull/32/checks) govern
+the final branch revision. Earlier hosted results on the base do not certify it.
 
 The audit is risk-based: repository-wide detectors, existing tests, Graphify
 navigation, source inspection and focused adversarial probes. It does not claim
@@ -25,21 +26,22 @@ exclude failing code or edit vendor files.
 
 ## Implementation tracker
 
-Last synchronized: 2026-10-06. PR: #32. Reviewed head:
-`0493ea56fe7978e7233be156032097afa0f27dc6`.
+Last synchronized: 2026-10-06. PR: #32. Certified implementation:
+`244a4b71e06bfa0efb139bf5dd4c2d04a42e7064`.
 
-The original adversarial cases remain covered. R08-R10 are implemented and
-verified locally. R07's instrumentation and duration gates are implemented;
-final hosted release evidence remains required. No merge, tag or deployment
+The original adversarial cases remain covered. R08-R10 are fixed and R07's
+corrected host comparison and actual five-minute soak pass on the certified
+implementation. The scanner correction passes the full local release guard.
+All current PR workflows must pass before release. No merge, tag or deployment
 has been performed.
 
 | Batch | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
 | A | Tenant ownership and cache correctness | **Implemented; verified locally** | R09 qualified/unqualified/joined PostgreSQL invalidation and warm-cache identity migration pass. |
 | B | Budgets, cursors and lease lifetime | **Implemented; verified locally** | R08 direct/pooled/unbuffered transitions, nested policies, post-fetch cancellation and restoration pass. |
-| C | Tooling/dependency compatibility | **Verified locally; final matrix pending** | PHPForge release guard passes with zero advisories. Accepted development-only doctrine/annotations warning remains non-blocking. |
-| D | Passed Runwire and worker pool | **Implemented; verified locally** | Existing context/lease/warmup regressions remain green. Soak exercises idle expiry, bounded native retries and iterator fencing under load. Proposed extra configuration below is deferred, not required by these fixes. |
-| E | Performance, soak, consumer and final CI | **Open release certification** | Corrected RSS/duration/evidence gates must run on the immutable final candidate; rerun hosted QA, consumers and 5.1 comparison. |
+| C | Tooling/dependency compatibility | **Release guard passes; current matrix enforced** | Zero advisories and no skip directives. Current PHP 8.4/8.5 stable/lowest QA and clean install are mandatory. Accepted development-only doctrine/annotations warning remains non-blocking. |
+| D | Passed Runwire and worker pool | **Implemented; sustained host checks pass** | Five-minute soak proves idle/maximum-age expiry, bounded native retries and iterator fencing under load. Proposed extra configuration below is deferred, not required by these fixes. |
+| E | Performance, soak, consumer and final CI | **Implementation certified; current branch CI enforced** | Revised evidence/native RSS/duration and 5.1 budgets pass; Foundation/ReqShield pass. Require current PR workflows on the final branch revision. |
 
 ### Batch A item tracker
 
@@ -63,9 +65,9 @@ has been performed.
 | D11 | Complete | LIKE escaping is single-pass and literal wildcard/backslash semantics are verified. |
 | D12 | Complete | DBLayer-owned private caches are discarded on reuse; caller-owned shared caches survive reset. |
 
-Implementation status distinguishes working-tree fixes from committed-revision
-release acceptance. Only final hosted results close the retained R07 release
-certification gate. Tag/release remains a maintainer action.
+Implementation certification is distinct from branch/release acceptance.
+R07's runtime evidence is recorded below; all workflows must pass on the branch
+revision selected for release. Tag/release remains a maintainer action.
 
 ## Changes already applied
 
@@ -90,20 +92,22 @@ certification gate. Tag/release remains a maintainer action.
 - `docs/upgrade-6.0.rst` documents the CacheLayer 4 floor, changed tenancy/cache/
   transaction/lazy-lifetime contracts, worker pooling and Runwire composition.
 - Persistent-worker lifecycle regressions and candidate downstream smokes for
-  Foundation and ReqShield are part of the release branch. Final committed-revision
-  sustained host certification remains open (R07).
+  Foundation and ReqShield are part of the release branch. R07's corrected
+  sustained host certification passes on the implementation candidate.
 
 ## Verification evidence and limits
 
-The first remediation (`c8e583c`), checked with PHP 8.5.4, real temporary
+The final remediation and scanner correction, checked with PHP 8.5.4, real temporary
 MySQL 9.7/PostgreSQL 18 services and SQLite:
 
 - `composer ic:process`: passes; generated changes were reviewed.
-- `composer ic:tests:details`: **716 passed / 3515 assertions**; all configured
+- `composer ic:tests:details`: **728 passed / 3612 assertions**; all configured
   detectors pass.
 - `composer ic:release:guard`: passes, including manifest validation, stable
   runtime constraints, audit and the complete quality suite. Audit reports zero
   advisories; the accepted development-only abandoned package stays non-blocking.
+- `composer ic:skipper`: passes across all **254 PHP files**. The fork ownership
+  regression is mandatory, matching the existing Linux/pcntl test prerequisites.
 - Explicit PHPStan analysis of `.automation/scripts/ci` passes with the active
   maximum-level type checks and complexity limits. This check is now also a
   required release-performance workflow step.
@@ -150,8 +154,37 @@ Ownership, stale/forged handles, bounds, expiry, invalid durations, reentrant
 invalidation and child-process isolation have regressions. Its cached-read
 profile is **76.95 microseconds CPU / 124.86 microseconds wall time**, compared
 with **142.89 / 228.28** before this follow-up. This isolated profile does not
-certify complete request throughput; the full matched comparison and final
-release guard/hosted release acceptance remain required for the follow-up.
+certify complete request throughput. The subsequent full local comparison
+against 5.1's released dependency ranges passes all unchanged budgets: seven
+eight-second matched pairs at each concurrency 1/2/4 have median throughput
+regressions **0.45%, 1.71%, -0.51%**, with no workload errors. Source hashes
+match the committed implementation `244a4b71e06bfa0efb139bf5dd4c2d04a42e7064`.
+Substantial per-trial variance remains in the retained diagnostic samples;
+the local release guard passes. Hosted implementation evidence is recorded below;
+final branch acceptance requires the current PR workflows.
+
+The follow-up's hosted Pest, style, dependency, reference and duplicate-code
+checks passed, but QA correctly rejected a conditional `markTestSkipped()`
+directive added to the fork regression. The directive has been removed;
+the actual fork test remains mandatory and the local detector/release guard
+pass. The final branch must pass the same complete hosted QA matrix.
+
+The corrected [host performance and soak](https://github.com/infocyph/DBLayer/actions/runs/37432735601)
+passes on implementation `244a4b7`, with [both consumers](https://github.com/infocyph/DBLayer/actions/runs/37432735606)
+also passing. Artifact candidate `57d2e56b2553148b6ba6702561799018b275616a`
+is the PR merge with parents 5.1/`244a4b7`; its tree
+`400d5d75aabd0ea8ea5524061601f95d173e75f3` exactly matches the implementation.
+All **21 matched trials** against `087f179e` pass unchanged throughput/latency/
+native-RSS budgets; paired median throughput regressions are
+**-0.32%, -0.95%, -1.34%** at concurrency 1/2/4, with no workload errors.
+
+The hosted soak performed **425,668 requests** over **300.004 seconds**,
+including 421,280 successes, 4,388 expected cancellations and 2,128 iterator
+fences. Every resource/lifecycle check passed: zero unexpected errors, no
+active lease leaks, zero socket growth, maximum queue depth 4, native high-water
+RSS **66.88 MiB**, and RSS growth **4.46 MiB**. Both generations prove idle
+expiry, held-lease maximum-age replacement after release and native retry
+recovery. The result explicitly satisfies release duration.
 
 Earlier green hosted runs on committed base `0493ea56` are historical evidence:
 [QA](https://github.com/infocyph/DBLayer/actions/runs/37419888853),
@@ -159,7 +192,7 @@ Earlier green hosted runs on committed base `0493ea56` are historical evidence:
 [performance](https://github.com/infocyph/DBLayer/actions/runs/37419888403).
 Their candidate merge tree matched that base, with throughput regression below
 2%. Their four-second soak and PHP-heap RSS field are superseded by the corrected
-instrumentation and must not certify the new working tree.
+instrumentation and must not certify the remediated branch.
 
 Historical diagnostic records remain in
 [the 2026-10-06 recheck](evidence/2026-10-06-recheck-probes.jsonl),
@@ -209,10 +242,10 @@ Those recorded failures predate remediation and are not current expected results
   retain their own providers. Regressions:
   `tests/Unit/PrivateQueryCacheLockProviderTest.php`.
 
-## Remaining release gate: R07 final certification
+## Release acceptance checks
 
-Commit the reviewed working tree and run the updated QA/consumer/performance
-workflows on that immutable candidate. Require valid revised evidence, the 5.1
+Run the updated QA/consumer/performance workflows on the branch revision
+selected for release. Require valid revised evidence, the 5.1
 matched throughput/latency/actual-RSS comparison within existing budgets, and
 five-minute Runwire host load with every resource/lifecycle check passing.
 Local before/after measurements against `0493ea56` are implementation diagnostics;
@@ -222,7 +255,7 @@ they do not replace the final 5.1 release comparison or the hosted matrix.
 
 Passed-instance integration and the original R02-R03/R06 cases are implemented
 and tested. The remediation preserves these contracts; final committed-revision
-release certification remains open. Runwire supplies execution context, cancellation/deadline and
+release acceptance requires current branch checks. Runwire supplies execution context, cancellation/deadline and
 coroutine primitives; its capability enum provides no asynchronous PDO API.
 Do not promise nonblocking database I/O from a context binding or fiber alone.
 
@@ -490,10 +523,10 @@ If urgent security fixes must ship independently, use a narrowly scoped 5.1.1
 patch on the old compatible dependency range, with its own regression and CI
 evidence. An additive Runwire-only change could fit 5.2 if no compatibility is
 dropped, but that is not the requested combined dependency-floor candidate.
-R08-R10 and R07 tooling are implemented and verified locally. Release acceptance
-still requires the final immutable candidate's hosted QA/consumer matrices,
-matched 5.1 workload and sustained Runwire evidence. Earlier green checks on
-`0493ea56` do not certify the new working tree.
+R08-R10 are fixed and R07's matched 5.1 workload and five-minute Runwire evidence
+pass on the implementation candidate. The corrected full local release guard
+passes. Release acceptance requires all current PR workflows on the final
+branch revision; earlier green checks on `0493ea56` do not certify it.
 
 The upgrade guide covers the dependency, tenancy, cache, native-transaction,
 iterator, worker-pool and optional Runwire contracts, including cold cache

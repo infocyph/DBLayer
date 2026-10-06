@@ -77,9 +77,6 @@ it('keeps private-cache generation fencing during reentrant computation', functi
 });
 
 it('discards inherited active private-cache locks in forked children', function (): void {
-    if (!function_exists('pcntl_fork')) {
-        $this->markTestSkipped('pcntl is required for process ownership verification.');
-    }
     $provider = new PrivateQueryCacheLockProvider();
     $parentHandle = $provider->acquire('same', 0);
     $pid = pcntl_fork();
