@@ -74,6 +74,8 @@ as lookup pages after reading the guides.
    api-repository-relations
    api-query-builder
    api-repository
+   api-connection
+   api-pooling
    api-connection-config
    api-driver-capabilities
 
