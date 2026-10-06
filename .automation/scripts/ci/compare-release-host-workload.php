@@ -70,10 +70,21 @@ final class ReleaseHostComparator
         $candidateRss = $this->medianMetric($candidateRuns, 'peak_rss_bytes');
         $baselineQueryRatio = $this->queryRatio($baselineRuns);
         $candidateQueryRatio = $this->queryRatio($candidateRuns);
-        $throughputRegression = $baselineRps > 0.0
-            ? (($baselineRps - $candidateRps) / $baselineRps) * 100.0
-            : 100.0;
+        $pairedThroughputRegressions = $this->pairedThroughputRegressions(
+            $baselineRuns,
+            $candidateRuns,
+        );
+        $throughputRegression = $this->medianValues($pairedThroughputRegressions);
         $failures = [];
+
+        if (count($baselineRuns) !== count($candidateRuns)) {
+            $failures[] = sprintf(
+                'Concurrency %d has %d baseline trials but %d candidate trials.',
+                $concurrency,
+                count($baselineRuns),
+                count($candidateRuns),
+            );
+        }
 
         $errorCount = $this->sumMetric($baselineRuns, 'errors')
             + $this->sumMetric($candidateRuns, 'errors')
@@ -86,7 +97,7 @@ final class ReleaseHostComparator
 
         if ($throughputRegression > $this->maxThroughputRegressionPercent) {
             $failures[] = sprintf(
-                'Concurrency %d median successful-RPS regression %.2f%% exceeds %.2f%%.',
+                'Concurrency %d median matched-pair successful-RPS regression %.2f%% exceeds %.2f%%.',
                 $concurrency,
                 $throughputRegression,
                 $this->maxThroughputRegressionPercent,
@@ -117,6 +128,7 @@ final class ReleaseHostComparator
             'concurrency' => $concurrency,
             'baseline_median_rps' => $baselineRps,
             'candidate_median_rps' => $candidateRps,
+            'paired_throughput_regressions_percent' => $pairedThroughputRegressions,
             'throughput_regression_percent' => $throughputRegression,
             'baseline_median_p95_ms' => $baselineP95,
             'candidate_median_p95_ms' => $candidateP95,
@@ -153,6 +165,47 @@ final class ReleaseHostComparator
         ksort($groups);
 
         return $groups;
+    }
+
+    /**
+     * @param list<float> $values
+     */
+    private function medianValues(array $values): float
+    {
+        return $this->medianValues($values);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $baselineRuns
+     * @param list<array<string,mixed>> $candidateRuns
+     * @return list<float>
+     */
+    private function pairedThroughputRegressions(array $baselineRuns, array $candidateRuns): array
+    {
+        $count = min(count($baselineRuns), count($candidateRuns));
+        $regressions = [];
+
+        for ($index = 0; $index < $count; $index++) {
+            $baselineRps = $baselineRuns[$index]['successful_rps'] ?? null;
+            $candidateRps = $candidateRuns[$index]['successful_rps'] ?? null;
+
+            if (
+                (!is_int($baselineRps) && !is_float($baselineRps))
+                || (!is_int($candidateRps) && !is_float($candidateRps))
+                || (float) $baselineRps <= 0.0
+            ) {
+                $regressions[] = 100.0;
+
+                continue;
+            }
+
+            $regressions[] = (
+                ((float) $baselineRps - (float) $candidateRps)
+                / (float) $baselineRps
+            ) * 100.0;
+        }
+
+        return $regressions;
     }
 
     /**
