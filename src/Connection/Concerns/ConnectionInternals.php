@@ -41,11 +41,7 @@ trait ConnectionInternals
      */
     public function assertQueryCheckpoint(float $startedAt): void
     {
-        if (
-            $this->queryCancellationChecker === null
-            && $this->queryDeadlineAt === null
-            && $this->queryTimeoutMs === null
-        ) {
+        if (!$this->queryBudgetActive) {
             return;
         }
 
@@ -107,9 +103,7 @@ trait ConnectionInternals
      */
     public function hasActiveQueryBudget(): bool
     {
-        return $this->queryCancellationChecker !== null
-            || $this->queryDeadlineAt !== null
-            || $this->queryTimeoutMs !== null;
+        return $this->queryBudgetActive;
     }
 
     /**
@@ -823,6 +817,13 @@ trait ConnectionInternals
         }
 
         $this->lifecycleHooks[$name][] = $hook;
+    }
+
+    private function refreshQueryBudgetActive(): void
+    {
+        $this->queryBudgetActive = $this->queryCancellationChecker !== null
+            || $this->queryDeadlineAt !== null
+            || $this->queryTimeoutMs !== null;
     }
 
     /**
