@@ -375,7 +375,7 @@ if (!is_string($project)) {
 
 $output = releaseHostRequiredOption($options, 'output');
 $duration = max(1.0, (float) ($options['duration'] ?? 3.0));
-$trials = max(3, (int) ($options['trials'] ?? 3));
+$trials = max(1, (int) ($options['trials'] ?? 3));
 $concurrency = explode(',', (string) ($options['concurrency'] ?? '1,2,4'));
 
 (new ReleaseHostWorkload(
