@@ -457,7 +457,7 @@ it('keeps examples and integration coverage in sync', function (): void {
     sort($exampleNames);
 
     $coverageMap = [
-        'bootstrap.php' => ['ExamplesParityIntegrationTest.php'],
+        'bootstrap.php' => ['ExamplesParityIntegrationTest.php', 'ReleaseRunwireHarnessTest.php'],
         'chunking.php' => ['ExamplesParityIntegrationTest.php'],
         'complete_repository.php' => [
             'ExamplesParityIntegrationTest.php',

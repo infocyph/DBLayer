@@ -54,11 +54,12 @@ trait ConnectionStreaming
         $reuseGeneration = $this->runtimeReuseGeneration;
 
         if ($this->runwireRuntime === null && !$this->queryBudgetActive) {
-            if (!$this->poolManaged) {
-                return $this->streamDirectGenerator($sql, $bindings, $fetchMode);
-            }
-
-            return $this->streamFastGenerator($sql, $bindings, $fetchMode, $reuseGeneration);
+            return $this->streamFastGenerator(
+                $sql,
+                $bindings,
+                $fetchMode,
+                $this->poolManaged ? $reuseGeneration : null,
+            );
         }
 
         return $this->streamGenerator(
@@ -229,7 +230,6 @@ trait ConnectionStreaming
         int $mode,
         float $startedAt,
         ?array $runwireBinding,
-        bool $checkBudget,
     ): mixed {
         if ($runwireBinding !== null) {
             return $this->runWithRunwireBinding(
@@ -244,13 +244,13 @@ trait ConnectionStreaming
             );
         }
 
-        if ($checkBudget) {
+        if ($this->queryBudgetActive) {
             $this->assertQueryCheckpoint($startedAt);
         }
 
         $row = $statement->fetch($mode);
 
-        if ($checkBudget) {
+        if ($this->queryBudgetActive) {
             $this->assertQueryCheckpoint($startedAt);
         }
 
@@ -422,47 +422,19 @@ trait ConnectionStreaming
      * @param array<int|string,mixed> $bindings
      * @return Generator<mixed>
      */
-    private function streamDirectGenerator(
-        string $sql,
-        array $bindings,
-        ?int $fetchMode,
-    ): Generator {
-        $statement = $this->execute($sql, $bindings);
-        $statementId = spl_object_id($statement);
-        $this->activeStatementCursors[$statementId] = $statement;
-        $mode = $fetchMode ?? $this->fetchMode;
-        $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
-            ? $this->sqlServerBigIntColumns($statement)
-            : [];
-
-        try {
-            while (($row = $statement->fetch($mode)) !== false) {
-                yield $sqlServerBigIntColumns !== []
-                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
-                    : $row;
-            }
-        } finally {
-            unset($this->activeStatementCursors[$statementId]);
-            $statement->closeCursor();
-        }
-    }
-
-    /**
-     * @param array<int|string,mixed> $bindings
-     * @return Generator<mixed>
-     */
     private function streamFastGenerator(
         string $sql,
         array $bindings,
         ?int $fetchMode,
-        int $reuseGeneration,
+        ?int $reuseGeneration,
     ): Generator {
-        if ($reuseGeneration !== $this->runtimeReuseGeneration) {
+        if ($reuseGeneration !== null && $reuseGeneration !== $this->runtimeReuseGeneration) {
             throw ConnectionException::invalidConfiguration(
                 'Deferred database iterator outlived its connection lease.',
             );
         }
 
+        $startedAt = microtime(true);
         $statement = $this->execute($sql, $bindings);
         $statementId = spl_object_id($statement);
         $this->activeStatementCursors[$statementId] = $statement;
@@ -472,7 +444,21 @@ trait ConnectionStreaming
             : [];
 
         try {
-            while (($row = $statement->fetch($mode)) !== false) {
+            while (true) {
+                if ($this->queryBudgetActive) {
+                    $this->assertQueryCheckpoint($startedAt);
+                }
+
+                $row = $statement->fetch($mode);
+
+                if ($this->queryBudgetActive) {
+                    $this->assertQueryCheckpoint($startedAt);
+                }
+
+                if ($row === false) {
+                    break;
+                }
+
                 yield $sqlServerBigIntColumns !== []
                     ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
                     : $row;
@@ -502,7 +488,6 @@ trait ConnectionStreaming
         $startedAt = microtime(true);
         $statement = null;
         $statementId = null;
-        $checkBudget = $runwireBinding !== null || $this->hasActiveQueryBudget();
         $this->activeStreamIterators++;
 
         try {
@@ -521,7 +506,6 @@ trait ConnectionStreaming
                     $mode,
                     $startedAt,
                     $runwireBinding,
-                    $checkBudget,
                 );
 
                 if ($row === false) {

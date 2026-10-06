@@ -1,14 +1,15 @@
 # DBLayer 6.0 consolidated audit feedback and release plan
 
-Updated: 2026-10-05 (Asia/Dhaka). **Release blocked.**
+Updated: 2026-10-06 (Asia/Dhaka). **Remediation implemented; final committed-revision release certification pending.**
 
 This file consolidates the initial library audit, updated-code review, Runwire
 integration requirements, worker-pool/configuration proposals and release gates.
 Initial baseline: `087f179ecac3e5555c346ce84cfc353050f8e3cb` (5.1).
-Latest reviewed candidate: `a33cbe7b955a10add97170592394f101e4dfefce`, PR #32.
-The latest review began with a clean working tree and changed no production
-code or test assertions. Evidence is tied to these revisions; this consolidation
-does not claim a new code verification run.
+Committed base: `0493ea56fe7978e7233be156032097afa0f27dc6`, PR #32.
+The subsequent authorized remediation changes production code, regressions,
+release tooling and documentation in the working tree. Local verification
+applies to those changes; earlier hosted results apply only to the committed
+base and cannot certify this new candidate.
 
 The audit is risk-based: repository-wide detectors, existing tests, Graphify
 navigation, source inspection and focused adversarial probes. It does not claim
@@ -24,22 +25,21 @@ exclude failing code or edit vendor files.
 
 ## Implementation tracker
 
-Last synchronized: 2026-10-06. PR: #32. Final candidate:
-`7fe810e28382f3f4ae36738cae490525827d7ca1`.
+Last synchronized: 2026-10-06. PR: #32. Reviewed head:
+`0493ea56fe7978e7233be156032097afa0f27dc6`.
 
-The implementation work from the `d93e3230` review is complete. R01-R07 are
-closed by production fixes, focused regressions and exact-final-revision release
-evidence. Security & Standards, Foundation/ReqShield downstream smoke and the
-representative matched-performance + sustained Runwire soak gates all pass on
-the same immutable candidate. PR #32 remains open/draft and unmerged.
+The original adversarial cases remain covered. R08-R10 are implemented and
+verified locally. R07's instrumentation and duration gates are implemented;
+final hosted release evidence remains required. No merge, tag or deployment
+has been performed.
 
 | Batch | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
-| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Complete** | R01, R04 and R05 resolved. Tenant-scoped upsert rejects unsafe conflict contracts, shared dependency tags invalidate across visibility scopes, and cache-aware DBLayer writes reject unmanaged native-PDO transactions before mutation. |
-| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **Complete** | R02-R03 resolved. Deferred/live streams are fenced from pool reuse, lazy/stream iteration preserves captured Runwire cancellation/deadline policy, and existing D08-D12 regressions remain green. |
-| C | D13 — PHPForge/tooling and dependency compatibility | **Complete** | Exact-head PHP 8.4/8.5 stable/lowest QA, analysis, benchmarks and clean install are green. The PHPBench → `doctrine/annotations` development-tool warning remains explicitly accepted and non-blocking. |
-| D | Optional Runwire 2.1.1 integration | **Complete** | Runwire binding, cancellation/deadline propagation, lazy/stream lifetime enforcement, pool warmup expiry reconciliation, worker-generation reuse/replacement and CacheLayer sharing are implemented and covered. |
-| E | Docs, representative performance/soak, downstream consumers and final CI | **Complete** | Exact-final Security & Standards, Foundation/ReqShield smoke, matched-performance comparison and sustained Runwire soak all pass on `7fe810e2`. |
+| A | Tenant ownership and cache correctness | **Implemented; verified locally** | R09 qualified/unqualified/joined PostgreSQL invalidation and warm-cache identity migration pass. |
+| B | Budgets, cursors and lease lifetime | **Implemented; verified locally** | R08 direct/pooled/unbuffered transitions, nested policies, post-fetch cancellation and restoration pass. |
+| C | Tooling/dependency compatibility | **Verified locally; final matrix pending** | PHPForge release guard passes with zero advisories. Accepted development-only doctrine/annotations warning remains non-blocking. |
+| D | Passed Runwire and worker pool | **Implemented; verified locally** | Existing context/lease/warmup regressions remain green. Soak exercises idle expiry, bounded native retries and iterator fencing under load. Proposed extra configuration below is deferred, not required by these fixes. |
+| E | Performance, soak, consumer and final CI | **Open release certification** | Corrected RSS/duration/evidence gates must run on the immutable final candidate; rerun hosted QA, consumers and 5.1 comparison. |
 
 ### Batch A item tracker
 
@@ -47,7 +47,7 @@ the same immutable candidate. PR #32 remains open/draft and unmerged.
 | --- | --- | --- |
 | D01 | Complete | Structured aggregate identifiers validated; injection regressions pass on every compiler path. |
 | D02 | Complete | Tenant-scoped upsert rejects unsafe conflict targets, forbids tenant-column reassignment and rejects MySQL/MariaDB scoped upsert where unrelated unique-key conflicts cannot be constrained safely. |
-| D03 | Complete | Result visibility remains isolated while table dependency tags share a stable physical-data identity across cache visibility scopes. |
+| D03 | Implemented; verified locally | Qualified dependencies share tags across default schemas; unqualified tables remain schema-specific. Result identity rotates with dependency identity to bypass legacy cached entries. |
 | D04 | Complete | Native reads bypass result cache and cache-aware DBLayer writes inside externally owned native PDO transactions are rejected before mutation; callers retaining raw PDO ownership must own their cache policy. |
 | D05 | Complete | Schema invalidation uses the exact passed Connection/cache owner. |
 | D06 | Complete | Completed mutations record durable outcome before late budget failure and cannot leave stale cache/sticky state. |
@@ -56,17 +56,16 @@ the same immutable candidate. PR #32 remains open/draft and unmerged.
 
 | ID | Status | Exit requirement |
 | --- | --- | --- |
-| D07 | Complete | Cache/nested cancellation, row-level lazy cancellation, deferred-stream binding and pre-PDO cancellation regressions pass. |
+| D07 | Implemented; verified locally | Captured bindings and currently active row/fetch policies compose; direct, pooled and unbuffered cancellation/deadline transition regressions pass. |
 | D08 | Complete | Active streaming statements are never reused from the prepared-statement cache; cleanup releases ownership. |
 | D09 | Complete | Scoped callbacks reject Traversable escape; active/deferred streams fence their wrapper from unsafe pool reuse after lease release. |
 | D10 | Complete | Pool reset restores native timeout state; SQLite and live PostgreSQL regressions pass. |
 | D11 | Complete | LIKE escaping is single-pass and literal wildcard/backslash semantics are verified. |
 | D12 | Complete | DBLayer-owned private caches are discarded on reuse; caller-owned shared caches survive reset. |
 
-Tracker statuses are updated only from committed code and verification evidence.
-All D01-D12 and R01-R07 release requirements are closed on the exact final
-candidate. Tag/release remains a maintainer action; no merge, tag or deployment
-was performed by this plan synchronization.
+Implementation status distinguishes working-tree fixes from committed-revision
+release acceptance. Only final hosted results close the retained R07 release
+certification gate. Tag/release remains a maintainer action.
 
 ## Changes already applied
 
@@ -82,8 +81,8 @@ was performed by this plan synchronization.
   its lock file; consumers resolve the declared ranges independently.
 - Runwire `2.1.1` is declared in `require-dev` for the integration test target
   and in `suggest` for optional production adoption.
-- Initial D01-D12 fixes are implemented with focused regressions; the current
-  findings reopen the composition cases listed in the tracker above.
+- Initial D01-D12 and R01-R06 fixes retain regressions. The subsequent R08-R10
+  fixes and R07 instrumentation are summarized below.
 - Optional Runwire integration is implemented through passed host-owned runtime/request/scope
   objects; DBLayer never starts or stops the host runtime.
 - Worker-local pools support explicit synchronous `warmUp()`; healthy PDO handles are
@@ -91,82 +90,109 @@ was performed by this plan synchronization.
 - `docs/upgrade-6.0.rst` documents the CacheLayer 4 floor, changed tenancy/cache/
   transaction/lazy-lifetime contracts, worker pooling and Runwire composition.
 - Persistent-worker lifecycle regressions and candidate downstream smokes for
-  Foundation and ReqShield are part of the release branch. Sustained host soak
-  remains open (R07).
+  Foundation and ReqShield are part of the release branch. Final committed-revision
+  sustained host certification remains open (R07).
 
 ## Verification evidence and limits
 
-- Exact candidate [PHPForge CI](https://github.com/infocyph/DBLayer/actions/runs/37340922191)
-  succeeds across PHP 8.4/8.5 stable/lowest QA and analysis, benchmark execution,
-  and clean install. Job metadata confirms configured service startup steps;
-  raw job-log retrieval returned empty files, so this recheck does not independently
-  inspect live-service participation assertions inside those logs.
-- Exact candidate [consumer smokes](https://github.com/infocyph/DBLayer/actions/runs/37340921121)
-  succeed for Foundation and ReqShield. PR #32 remains open; no merge/tag was
-  performed in this review.
-- Focused local regression suite: 26 passed / 116 assertions, including Batch
-  A/B, Runwire integration, pool runtime isolation and persistent lifecycle.
-- `composer ic:tests`: 459 passed / 2323 assertions and 3 failed. The failures
-  are explicit missing local PostgreSQL/MySQL service prerequisites in the
-  cross-driver and migration integration tests. The host also lacks
-  `pdo_sqlsrv`. They are not presented as product regressions or silently skipped.
-  Skip scanner, normalize, syntax, references, duplicates, comments, Pint,
-  PHPCS, Deptrac, PHPStan, Psalm and Rector all pass.
-- `composer validate --strict` and platform requirements pass after refreshing
-  the ignored local lock to the declared cognitive-complexity 1.2.0 pin.
-  Production audit: zero advisories and zero abandoned packages. Full dev audit:
-  zero advisories, accepted PHPBench → doctrine/annotations abandonment warning.
-  That accepted warning is not reopened as a blocker.
-- Eight adversarial SQLite probe outcomes are saved in
-  [review-probes.jsonl](evidence/2026-10-05-update-review-probes.jsonl), with the
-  [reproduction harness](evidence/reproduce-update-review.md). These are
-  diagnostics, not new green-suite assertions or live-server certification.
+Current working-tree remediation, checked with PHP 8.5.4, real temporary
+MySQL 9.7/PostgreSQL 18 services and SQLite:
 
-Historical evidence for the original 5.1 audit is retained in
-[original probe outcomes](evidence/2026-10-05-audit-probes.jsonl) and the
-[original reproduction harness](evidence/reproduce-audit.md). Those records
-predate the fixes; they do not describe the current candidate. Completed
-remediation details are summarized in the tracker instead of repeated as open
-findings.
+- `composer ic:process`: passes; generated changes were reviewed.
+- `composer ic:tests:details`: **716 passed / 3515 assertions**; all configured
+  detectors pass.
+- `composer ic:release:guard`: passes, including manifest validation, stable
+  runtime constraints, audit and the complete quality suite. Audit reports zero
+  advisories; the accepted development-only abandoned package stays non-blocking.
+- Explicit PHPStan analysis of `.automation/scripts/ci` passes with the active
+  maximum-level type checks and complexity limits. This check is now also a
+  required release-performance workflow step.
+- Local before/after diagnostic versus `0493ea56`: seven matched eight-second
+  trials at concurrency 1/2/4 pass unchanged throughput/latency/native-RSS
+  budgets; paired median regressions are **-1.85%, 0.62%, 0.44%**. No workload
+  errors. The earlier three-second diagnostic failed at concurrency 2
+  (**2.017%**); longer trials assess that near-threshold short-run result rather
+  than changing the budget. Both results remain in temporary review evidence.
+  These measurements do not certify 6.0 against the 5.1 release baseline.
+- The local five-minute soak passed **342,984 requests** (339,449 successes,
+  3,535 expected cancellations), 1,714 iterator fences, zero unexpected errors,
+  no active lease leaks and zero socket growth. Actual load duration was
+  **300.005 seconds**; sampled process-tree RSS peaked at **52.64 MiB**,
+  native process high-water RSS at **54.03 MiB**, and RSS growth was **5.92 MiB**.
+  Every recorded acceptance check passed. The subsequent direct maximum-age
+  expiry probe also passes its integration regression and is required in final
+  CI alongside idle expiry; it preserves a live lease beyond its age limit,
+  then verifies replacement on release.
+- PHP 8.4, lowest dependencies, MariaDB, SQL Server, physical replication,
+  production clean install and current downstream consumers require the final
+  hosted matrix. The local host still lacks `pdo_sqlsrv`.
 
-## Closed findings from the `d93e3230` review
+Earlier green hosted runs on committed base `0493ea56` are historical evidence:
+[QA](https://github.com/infocyph/DBLayer/actions/runs/37419888853),
+[consumers](https://github.com/infocyph/DBLayer/actions/runs/37419888441) and
+[performance](https://github.com/infocyph/DBLayer/actions/runs/37419888403).
+Their candidate merge tree matched that base, with throughput regression below
+2%. Their four-second soak and PHP-heap RSS field are superseded by the corrected
+instrumentation and must not certify the new working tree.
 
-The `d93e3230` correctness/lifecycle findings R01-R06 are resolved and covered
-by committed regressions. Only release acceptance R07 remains open.
+Historical diagnostic records remain in
+[the 2026-10-06 recheck](evidence/2026-10-06-recheck-probes.jsonl),
+[5.1 outcomes](evidence/2026-10-05-audit-probes.jsonl),
+[5.1 harness](evidence/reproduce-audit.md),
+[previous review outcomes](evidence/2026-10-05-update-review-probes.jsonl) and
+[previous harness](evidence/reproduce-update-review.md).
+Those recorded failures predate remediation and are not current expected results.
 
-| ID | Priority | Remaining issue | Related audit item |
-| --- | --- | --- | --- |
-| R07 | Release gate | Exact-head matched performance comparison and sustained Runwire host soak must complete successfully after the GitHub runner interruption | Batch E |
+## Implemented remediation
 
-### R07 — Release gate: representative performance and soak certified
+- **R08:** the ordinary fetch loop tests the current budget before and after
+  each native fetch. The captured/unbuffered path also consults the current
+  budget rather than freezing its presence at creation. Common direct/pooled
+  logic is consolidated while cursor ownership and captured bindings remain.
+  Regressions: `tests/Unit/StreamPolicyTransitionTest.php`.
+- **R09:** dependency identity excludes the default schema; `cacheTableTag()`
+  resolves unqualified tables into their configured schema and preserves an
+  explicit qualified schema. Result visibility remains role/schema/scope-specific.
+  Dependency identity moves to v2 and result identity to v3 together, preventing
+  warm entries bearing old tags from surviving the transition. Deployment
+  isolation and bounded tag memoization remain. Regressions:
+  `tests/Unit/CacheDependencySchemaTest.php` and
+  `tests/Integration/InstanceQueryCacheIntegrationTest.php`.
+- **R10:** evidence requires seven unique matched trials at each of concurrency
+  1/2/4, exact expected revisions, matching environment/workload metadata and
+  complete finite metrics with positive successful work. Trials pair by
+  concurrency/trial identity. Empty, malformed, missing, duplicate and mismatched
+  inputs fail. Existing throughput/latency/native-RSS budgets remain unchanged.
+  Regressions: `tests/Unit/ReleaseHostComparatorTest.php`.
+- **R07 tooling:** host trials sample live controller/descendant OS RSS every
+  50 ms and retain each worker's PID/native high-water RSS and CPU usage separately. PHP allocator
+  measurements are explicitly heap measurements. The Linux resource sampler
+  records process identities and sockets, handles exited workers/descriptors,
+  and fails on unavailable native memory metrics rather than substituting heap.
+  The soak keeps load running until both request and elapsed duration targets
+  are met. CI requires at least **300 seconds** of load, peak RSS at most
+  **256 MiB**, RSS growth at most **32 MiB**, bounded sockets/queue/connections,
+  zero unexpected errors and no active lease leaks. Idle expiry, 30-second
+  maximum connection lifetime, native lock-timeout retry recovery, cancellations,
+  tenant changes, iterator fencing and generation overlap are exercised. Short
+  smoke runs explicitly do not satisfy release duration. Regressions:
+  `tests/Unit/ReleaseHostResourcesTest.php` and
+  `tests/Integration/ReleaseRunwireHarnessTest.php`.
 
-Owner: [release tracker](#implementation-tracker).
-The exact final candidate `7fe810e28382f3f4ae36738cae490525827d7ca1`
-passes the dedicated DBLayer 6.0 Release Performance workflow. The matched
-baseline/candidate comparison enforces a 2% median successful-RPS regression
-ceiling on the same PostgreSQL/PHP runner and records exact revisions in the
-uploaded evidence.
+## Remaining release gate: R07 final certification
 
-Final paired results are within budget at every tested concurrency:
-1.3269% regression at concurrency 1, 1.4233% at concurrency 2 and 1.6436% at
-concurrency 4. Query/request ratios and peak RSS remain effectively matched,
-with no comparison failures.
-
-The sustained Runwire worker soak also passes: 3,000 requests at concurrency 4,
-2,970 successful requests, 30 expected cancellations, 14 iterator-fence checks,
-zero unexpected errors, zero socket growth, zero measured memory growth,
-bounded queue depth of 4, zero active connections after both phases, tenant
-switching verified and deployment-generation overlap verified. Two worker
-generations each finish with no active-connection leak.
-
-This closes the representative performance/host-soak release gate. PHPBench
-remains component-level evidence; the dedicated release-performance workflow is
-the representative acceptance gate.
+Commit the reviewed working tree and run the updated QA/consumer/performance
+workflows on that immutable candidate. Require valid revised evidence, the 5.1
+matched throughput/latency/actual-RSS comparison within existing budgets, and
+five-minute Runwire host load with every resource/lifecycle check passing.
+Local before/after measurements against `0493ea56` are implementation diagnostics;
+they do not replace the final 5.1 release comparison or the hosted matrix.
 
 ## Runwire and worker-pool contracts
 
-The passed-instance integration is implemented; R02-R03, R06 and the remaining
-measurement/lifecycle gates must close before release acceptance. Runwire supplies execution context, cancellation/deadline and
+Passed-instance integration and the original R02-R03/R06 cases are implemented
+and tested. The remediation preserves these contracts; final committed-revision
+release certification remains open. Runwire supplies execution context, cancellation/deadline and
 coroutine primitives; its capability enum provides no asynchronous PDO API.
 Do not promise nonblocking database I/O from a context binding or fiber alone.
 
@@ -276,9 +302,9 @@ Current `Pool::addConfig()` creates up to `min_connections` lazy Connection
 wrappers subject to the pool-wide maximum. It does not establish PDO handles,
 and later expiry/removal does not continuously replenish the minimum.
 `Pool::warmUp()` and `PoolManager::warmUp()` now explicitly open distinct primary
-handles. R06 remains open because their initial ready count includes expired
-idle handles. Live-server warmup, replenishment and bounded maintenance still
-require the acceptance evidence below.
+handles. R06's expired-idle case is fixed and its regression passes. Live-server
+warmup, replenishment and bounded maintenance still require the acceptance
+evidence below when those contracts are retained for this release.
 
 - Use the existing instance warmup operation on the pool owner, invoked by
   the host after worker/PID/generation creation and before readiness. Keep
@@ -376,11 +402,11 @@ and [PostgreSQL explicit locking](https://www.postgresql.org/docs/current/explic
 
 | Batch | Remaining work | Required exit evidence |
 | --- | --- | --- |
-| A | R01, R04, R05: conflict ownership and cache commit/invalidation boundaries | Failing-before/passing-after regressions; real conflict-update drivers; PostgreSQL role/RLS/schema and competing native-transaction readers |
-| B | R02, R03: live cursors, leases and iterator context | Partial/abandoned streams, cancellation within batches, completed-request escape and safe reuse across supported drivers |
+| A | Implemented R09 | Keep qualified/unqualified/joined PostgreSQL and legacy-cache migration regressions green on the final revision |
+| B | Implemented R08 | Keep direct/pooled/unbuffered/nested policy and cursor/lease regressions green on the final revision |
 | C | Preserve completed tooling/dependency gates | Unsuppressed PHPForge checks, latest/lowest constraints, clean production install; accepted development warning stays visible |
-| D | R06 and retained worker/configuration requirements | Accurate ready counts, expiry/disconnect recovery, bounded host-owned maintenance and configuration behavior documented/tested |
-| E | R07, consumer checks and final CI | Matched representative baseline/candidate results, sustained host soak, current consumers and exact-final-SHA evidence |
+| D | Implemented lifecycle contracts | Preserve context, warmup and lease isolation; extra proposed configuration is deferred from this remediation |
+| E | R07 certification and final CI | Run corrected evidence validation/RSS/duration gates, matched 5.1 comparison, current consumers and exact-final-SHA CI |
 
 For each code batch run PHPForge processors sequentially, targeted regressions,
 then required detailed/full checks. Do not change assertions or detectors to
@@ -434,12 +460,37 @@ If urgent security fixes must ship independently, use a narrowly scoped 5.1.1
 patch on the old compatible dependency range, with its own regression and CI
 evidence. An additive Runwire-only change could fit 5.2 if no compatibility is
 dropped, but that is not the requested combined dependency-floor candidate.
-Implementation is complete and the exact-head Security & Standards and downstream
-consumer gates are green. Release remains blocked only on R07: one clean
-exact-head completion of the representative performance comparison and sustained
-Runwire host soak after the GitHub runner interruption.
+R08-R10 and R07 tooling are implemented and verified locally. Release acceptance
+still requires the final immutable candidate's hosted QA/consumer matrices,
+matched 5.1 workload and sustained Runwire evidence. Earlier green checks on
+`0493ea56` do not certify the new working tree.
 
-The upgrade guide already covers the DBLayer 6.0 dependency, tenancy, cache,
-native-transaction, iterator, worker-pool and optional Runwire contracts. Tag
-only after R07 is green on the immutable final SHA. PR #32 remains open and
-unmerged; no production deployment has been performed from this branch.
+The upgrade guide covers the dependency, tenancy, cache, native-transaction,
+iterator, worker-pool and optional Runwire contracts, including cold cache
+identity migration and policies activated during iteration. No merge, tag,
+release or deployment has been performed by this remediation.
+
+## Reproduce current verification
+
+Use the declared development dependencies, Linux native process telemetry,
+PDO SQLite and provisioned PostgreSQL/MySQL services with the documented test
+environment variables. Run PHPForge's doctor/config commands, processors,
+detailed tests and final release guard. Focused files for the new cases are:
+
+```sh
+php vendor/bin/pest \
+  --configuration vendor/infocyph/phpforge/resources/pest.xml \
+  --bootstrap vendor/autoload.php \
+  tests/Unit/StreamPolicyTransitionTest.php \
+  tests/Unit/CacheDependencySchemaTest.php \
+  tests/Unit/ReleaseHostComparatorTest.php \
+  tests/Unit/ReleaseHostResourcesTest.php \
+  tests/Integration/InstanceQueryCacheIntegrationTest.php \
+  tests/Integration/ReleaseRunwireHarnessTest.php
+```
+
+The updated `.github/workflows/release-performance.yml` contains the canonical
+matched comparison and five-minute soak commands. Expected revisions are
+mandatory comparator inputs. Retain artifacts/lifecycle telemetry from the
+final candidate in CI; do not replace missing native RSS with PHP heap or
+accept a short smoke as sustained certification.

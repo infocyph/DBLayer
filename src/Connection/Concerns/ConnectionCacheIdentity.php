@@ -34,22 +34,23 @@ trait ConnectionCacheIdentity
             return $this->cacheDependencyFingerprintMemo;
         }
 
-        $schema = $this->config->get('schema');
         $dependencyScope = $this->config->get('cache_dependency_scope');
 
         return $this->cacheDependencyFingerprintMemo = substr(hash('sha256', implode("\0", [
-            'v1',
+            'v2',
             $this->name,
             $this->getDriverName(),
             $this->getDatabaseName(),
             $this->tablePrefix,
-            is_string($schema) ? $schema : '',
             is_string($dependencyScope) ? $dependencyScope : '',
         ])), 0, 32);
     }
 
     /**
-     * Build the versioned, non-sensitive identity used by result-cache keys and tags.
+     * Build the versioned, non-sensitive result-cache visibility identity.
+     *
+     * Rotate result keys with dependency tags so old tagged entries cannot survive
+     * a dependency-identity migration without their corresponding invalidations.
      */
     public function cacheScopeFingerprint(): string
     {
@@ -62,7 +63,7 @@ trait ConnectionCacheIdentity
         $explicitScope = $this->config->get('cache_scope');
 
         return $this->cacheScopeFingerprintMemo = substr(hash('sha256', implode("\0", [
-            'v2',
+            'v3',
             $this->name,
             $this->getDriverName(),
             $this->getDatabaseName(),

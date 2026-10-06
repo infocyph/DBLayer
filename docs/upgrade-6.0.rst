@@ -45,6 +45,16 @@ security context, or another application-level boundary can change result
 visibility without changing the normal connection identity. Do not put secrets
 or credentials in ``cache_scope``.
 
+Invalidation dependencies use the resolved physical schema/table independently
+of result visibility. Connections with different default schemas therefore
+share an invalidation tag for the same explicitly qualified table. Unqualified
+tables still resolve within each connection's configured schema, and
+``cache_dependency_scope`` can separate deployments sharing a cache backend.
+
+Result keys rotate together with dependency identities. Warm entries carrying
+the previous tag format are intentionally bypassed after upgrading, so writes
+using the new tags cannot leave those old entries visible to new readers.
+
 Native Transactions
 -------------------
 
@@ -74,6 +84,11 @@ Streaming, Lazy Results, and Pool Leases
 
 Prepared statements that own active streaming cursors are not reused until that
 cursor is released.
+
+Each fetch checks the currently active cancellation and deadline policy before
+and after the native call, including policies introduced while an iterator is
+paused. The ordinary unbound path retains these checks when a host later lends
+its Runwire context.
 
 ``PoolManager::using()`` is callback-scoped and rejects a ``Traversable`` result
 that would escape after its connection lease has already been released. For a

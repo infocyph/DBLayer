@@ -65,6 +65,13 @@ jobs:
         working-directory: candidate
         run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
 
+      - name: Analyze release evidence tooling
+        working-directory: candidate
+        run: >-
+          php vendor/bin/phpstan analyse
+          --configuration=vendor/infocyph/phpforge/resources/phpstan.neon.dist
+          .automation/scripts/ci --no-progress
+
       - name: Create release evidence directory
         run: mkdir -p release-evidence
 
@@ -117,16 +124,20 @@ jobs:
                   --warmup=1 \
                   --trials=1 \
                   --concurrency="$concurrency" \
-                  --revision="$revision"
+                  --revision="$revision" \
+                  --pair="$pair"
               done
             done
           done
 
           jq -s '{
+            schema_version: .[0].schema_version,
+            workload: .[0].workload,
+            environment: .[0].environment,
             project: .[0].project,
             revision: .[0].revision,
             duration_seconds: .[0].duration_seconds,
-            trials: length,
+            trials: 7,
             warmup_seconds: .[0].warmup_seconds,
             concurrencies: ([.[].concurrencies[]] | unique),
             php_version: .[0].php_version,
@@ -134,10 +145,13 @@ jobs:
           }' release-evidence/pairs/baseline-c*-p*.json > release-evidence/baseline-host.json
 
           jq -s '{
+            schema_version: .[0].schema_version,
+            workload: .[0].workload,
+            environment: .[0].environment,
             project: .[0].project,
             revision: .[0].revision,
             duration_seconds: .[0].duration_seconds,
-            trials: length,
+            trials: 7,
             warmup_seconds: .[0].warmup_seconds,
             concurrencies: ([.[].concurrencies[]] | unique),
             php_version: .[0].php_version,
@@ -151,14 +165,19 @@ jobs:
           --candidate=release-evidence/candidate-host.json
           --output=release-evidence/host-comparison.json
           --max-regression=2
+          --baseline-revision="$(git -C baseline rev-parse HEAD)"
+          --candidate-revision="$(git -C candidate rev-parse HEAD)"
 
       - name: Run sustained Runwire worker soak
-        run: >-
-          php candidate/.automation/scripts/ci/release-runwire-soak.php
-          --project=candidate
-          --output=release-evidence/runwire-soak.json
-          --requests=3000
-          --concurrency=4
+        run: |
+          php candidate/.automation/scripts/ci/release-runwire-soak.php \
+            --project=candidate \
+            --output=release-evidence/runwire-soak.json \
+            --requests=3000 \
+            --concurrency=4 \
+            --duration=300 \
+            --revision="$(git -C candidate rev-parse HEAD)"
+          jq -e '.passed and .release_duration_met' release-evidence/runwire-soak.json
 
       - name: Upload release performance evidence
         if: always()

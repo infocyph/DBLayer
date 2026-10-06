@@ -5,11 +5,17 @@ declare(strict_types=1);
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 
+require_once __DIR__ . '/ReleaseHostResources.php';
+
+/**
+ * @phpstan-type WorkerResult array{successes:int,errors:int,queries:int,reads:int,writes:int,peak_rss_bytes:int,peak_php_heap_bytes:int,pid:int,cpu_user_seconds:float,cpu_system_seconds:float,latency_ms:list<float>}
+ */
 final class ReleaseHostWorkload
 {
     /** @var list<int> */
     private array $concurrencies;
 
+    /** @param list<int|string> $concurrencies */
     public function __construct(
         private readonly string $project,
         private readonly string $output,
@@ -17,8 +23,13 @@ final class ReleaseHostWorkload
         private readonly int $trials,
         private readonly string $revision,
         private readonly float $warmupSeconds,
+        private readonly int $pair,
         array $concurrencies,
     ) {
+        if (!is_finite($durationSeconds) || $durationSeconds < 1.0
+            || !is_finite($warmupSeconds) || $warmupSeconds < 0.0) {
+            throw new InvalidArgumentException('Workload durations must be finite and within their declared bounds.');
+        }
         $this->concurrencies = array_values(array_unique(array_map('intval', $concurrencies)));
     }
 
@@ -51,6 +62,9 @@ final class ReleaseHostWorkload
         }
 
         $payload = [
+            'schema_version' => 2,
+            'workload' => 'dblayer-release-host-v1',
+            'environment' => $this->environment(),
             'project' => basename($this->project),
             'revision' => $this->revision,
             'duration_seconds' => $this->durationSeconds,
@@ -65,6 +79,38 @@ final class ReleaseHostWorkload
         if (file_put_contents($this->output, $encoded . PHP_EOL) === false) {
             throw new RuntimeException("Unable to write workload result: {$this->output}");
         }
+    }
+
+    /** @return array<string,string> */
+    private function environment(): array
+    {
+        $extensions = [];
+        foreach (get_loaded_extensions() as $extension) {
+            $extensions[$extension] = phpversion($extension) ?: 'builtin';
+        }
+        ksort($extensions);
+        $cpu = file_get_contents('/proc/cpuinfo');
+        $connection = $this->connection('release-host-environment');
+        try {
+            $database = $connection->scalar('select version()');
+            $client = $connection->getPdo()->getAttribute(PDO::ATTR_CLIENT_VERSION);
+            if (!is_string($database) || !is_string($client)) {
+                throw new RuntimeException('Unable to identify database server and native client.');
+            }
+        } finally {
+            $connection->disconnect();
+        }
+
+        return [
+            'php' => PHP_VERSION,
+            'extensions' => json_encode($extensions, JSON_THROW_ON_ERROR),
+            'os' => php_uname('s') . ' ' . php_uname('r'),
+            'architecture' => php_uname('m'),
+            'cpu' => is_string($cpu) && preg_match('/^model name\s*:\s*(.+)$/m', $cpu, $matches) === 1
+                ? $matches[1] : php_uname('m'),
+            'database' => $database . ' / client ' . $client,
+            'dataset' => '2000-items-16-tenants-v1',
+        ];
     }
 
     private function connection(string $name): Connection
@@ -108,27 +154,15 @@ final class ReleaseHostWorkload
         }
 
         $connection->transaction(static function (Connection $database) use ($id): void {
-            if ((int) $database->scalar('select count(*) from release_perf_items where id = ?', [$id]) !== 1) {
+            $count = $database->scalar('select count(*) from release_perf_items where id = ?', [$id]);
+            if ($count !== 1 && $count !== '1') {
                 throw new RuntimeException('Transactional-read correctness mismatch.');
             }
 
             $database->scalar('select score from release_perf_items where id = ?', [$id]);
         });
 
-        $streamed = 0;
-        foreach ($connection->stream(
-            'select id, score from release_perf_items where id >= ? order by id limit 10',
-            [$id],
-        ) as $streamRow) {
-            if (!is_array($streamRow)) {
-                throw new RuntimeException('Stream row shape mismatch.');
-            }
-            $streamed++;
-        }
-
-        if ($streamed < 1) {
-            throw new RuntimeException('Stream correctness mismatch.');
-        }
+        $this->verifyStream($connection, $id);
 
         if ($sequence % 20 === 0) {
             $ownedId = $worker + 1;
@@ -150,8 +184,27 @@ final class ReleaseHostWorkload
         }
     }
 
+    private function verifyStream(Connection $connection, int $id): void
+    {
+        $streamed = 0;
+        foreach ($connection->stream(
+            'select id, score from release_perf_items where id >= ? order by id limit 10',
+            [$id],
+        ) as $streamRow) {
+            if (!is_array($streamRow)) {
+                throw new RuntimeException('Stream row shape mismatch.');
+            }
+            $streamed++;
+        }
+
+        if ($streamed < 1) {
+            throw new RuntimeException('Stream correctness mismatch.');
+        }
+
+    }
+
     /**
-     * @param list<array<string,mixed>> $workers
+     * @param list<WorkerResult> $workers
      * @return array<string,mixed>
      */
     private function aggregateWorkers(array $workers, int $concurrency, int $trial): array
@@ -163,19 +216,29 @@ final class ReleaseHostWorkload
         $reads = 0;
         $writes = 0;
         $peakRss = 0;
+        $peakHeap = 0;
+        $cpuUser = 0.0;
+        $cpuSystem = 0.0;
+        $workerResources = [];
 
         foreach ($workers as $worker) {
-            $successes += (int) ($worker['successes'] ?? 0);
-            $errors += (int) ($worker['errors'] ?? 0);
-            $queries += (int) ($worker['queries'] ?? 0);
-            $reads += (int) ($worker['reads'] ?? 0);
-            $writes += (int) ($worker['writes'] ?? 0);
-            $peakRss += (int) ($worker['peak_rss_bytes'] ?? 0);
+            $successes += $worker['successes'];
+            $errors += $worker['errors'];
+            $queries += $worker['queries'];
+            $reads += $worker['reads'];
+            $writes += $worker['writes'];
+            $peakRss += $worker['peak_rss_bytes'];
+            $peakHeap += $worker['peak_php_heap_bytes'];
+            $cpuUser += $worker['cpu_user_seconds'];
+            $cpuSystem += $worker['cpu_system_seconds'];
+            $workerResources[] = [
+                'pid' => $worker['pid'],
+                'peak_rss_bytes' => $worker['peak_rss_bytes'],
+                'peak_php_heap_bytes' => $worker['peak_php_heap_bytes'],
+            ];
 
-            foreach (($worker['latency_ms'] ?? []) as $latency) {
-                if (is_int($latency) || is_float($latency)) {
-                    $latencies[] = (float) $latency;
-                }
+            foreach ($worker['latency_ms'] as $latency) {
+                $latencies[] = $latency;
             }
         }
 
@@ -183,7 +246,7 @@ final class ReleaseHostWorkload
 
         return [
             'concurrency' => $concurrency,
-            'trial' => $trial,
+            'trial' => $this->pair > 0 ? $this->pair : $trial,
             'successful_requests' => $successes,
             'errors' => $errors,
             'successful_rps' => $successes / $this->durationSeconds,
@@ -195,9 +258,14 @@ final class ReleaseHostWorkload
             'writes' => $writes,
             'peak_rss_bytes' => $peakRss,
             'connections' => $concurrency,
+            'peak_php_heap_bytes' => $peakHeap,
+            'cpu_user_seconds' => $cpuUser,
+            'cpu_system_seconds' => $cpuSystem,
+            'worker_resource_peaks' => $workerResources,
         ];
     }
 
+    /** @param list<float> $sorted */
     private function percentile(array $sorted, float $quantile): float
     {
         if ($sorted === []) {
@@ -206,7 +274,7 @@ final class ReleaseHostWorkload
 
         $index = (int) floor((count($sorted) - 1) * $quantile);
 
-        return (float) $sorted[$index];
+        return $sorted[$index];
     }
 
     private function resetDataset(): void
@@ -296,7 +364,7 @@ final class ReleaseHostWorkload
                     $directory . '/worker-' . $worker . '.json',
                     json_encode($result, JSON_THROW_ON_ERROR),
                 );
-                $workerCode = ($result['errors'] ?? 1) === 0
+                $workerCode = $result['errors'] === 0
                     ? ''
                     : 'throw new RuntimeException("Release host worker failed.");';
 
@@ -308,37 +376,88 @@ final class ReleaseHostWorkload
             $pids[] = $pid;
         }
 
-        $processFailures = 0;
-        foreach ($pids as $pid) {
-            pcntl_waitpid($pid, $status);
-            if (!pcntl_wifexited($status) || pcntl_wexitstatus($status) !== 0) {
-                $processFailures++;
-            }
-        }
+        $resources = ReleaseHostResources::waitForWorkers($pids);
 
         $workers = [];
         for ($worker = 0; $worker < $concurrency; $worker++) {
             $file = $directory . '/worker-' . $worker . '.json';
-            $contents = is_file($file) ? file_get_contents($file) : false;
-            if (!is_string($contents) || $contents === '') {
-                $workers[] = ['errors' => 1, 'latency_ms' => []];
-
-                continue;
-            }
-
-            $decoded = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
-            $workers[] = is_array($decoded) ? $decoded : ['errors' => 1, 'latency_ms' => []];
+            $workers[] = $this->readWorkerResult($file);
             unlink($file);
         }
         rmdir($directory);
 
         $result = $this->aggregateWorkers($workers, $concurrency, $trial);
-        $result['worker_process_failures'] = $processFailures;
+        $result['worker_process_failures'] = $resources['worker_process_failures'];
+        $result['worker_peak_rss_bytes_sum'] = $result['peak_rss_bytes'];
+        $result['peak_rss_bytes'] = $resources['peak_rss_bytes'];
+        $result['resource_samples'] = $resources['resource_samples'];
 
         return $result;
     }
 
-    /** @return array<string,mixed> */
+    /** @return WorkerResult */
+    private function readWorkerResult(string $file): array
+    {
+        $contents = file_get_contents($file);
+        if (!is_string($contents) || $contents === '') {
+            throw new RuntimeException("Missing worker result: {$file}.");
+        }
+        $decoded = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Malformed worker result.');
+        }
+        $counts = [];
+        foreach (['successes', 'errors', 'queries', 'reads', 'writes', 'peak_rss_bytes', 'peak_php_heap_bytes', 'pid'] as $metric) {
+            $value = $decoded[$metric] ?? null;
+            if (!is_int($value) || $value < 0) {
+                throw new RuntimeException("Invalid worker metric: {$metric}.");
+            }
+            $counts[$metric] = $value;
+        }
+        $latencies = $decoded['latency_ms'] ?? null;
+        if (!is_array($latencies) || !array_is_list($latencies)) {
+            throw new RuntimeException('Missing worker latency samples.');
+        }
+
+        return [
+            'successes' => $counts['successes'], 'errors' => $counts['errors'],
+            'queries' => $counts['queries'], 'reads' => $counts['reads'], 'writes' => $counts['writes'],
+            'peak_rss_bytes' => $counts['peak_rss_bytes'],
+            'peak_php_heap_bytes' => $counts['peak_php_heap_bytes'],
+            'pid' => $counts['pid'],
+            'cpu_user_seconds' => $this->workerCpuMetric($decoded, 'cpu_user_seconds'),
+            'cpu_system_seconds' => $this->workerCpuMetric($decoded, 'cpu_system_seconds'),
+            'latency_ms' => $this->validateLatencies($latencies),
+        ];
+    }
+
+    /** @param array<array-key,mixed> $record */
+    private function workerCpuMetric(array $record, string $field): float
+    {
+        $value = $record[$field] ?? null;
+        if ((!is_float($value) && !is_int($value)) || !is_finite((float) $value) || $value < 0.0) {
+            throw new RuntimeException("Missing worker CPU metric: {$field}.");
+        }
+
+        return (float) $value;
+    }
+
+    /** @param list<mixed> $values
+     * @return list<float> */
+    private function validateLatencies(array $values): array
+    {
+        $latencies = [];
+        foreach ($values as $value) {
+            if ((!is_int($value) && !is_float($value)) || !is_finite((float) $value) || $value < 0) {
+                throw new RuntimeException('Invalid worker latency sample.');
+            }
+            $latencies[] = (float) $value;
+        }
+
+        return $latencies;
+    }
+
+    /** @return WorkerResult */
     private function runWorker(int $worker, float $startAt): array
     {
         $connection = $this->connection('release-host-' . $worker);
@@ -354,6 +473,7 @@ final class ReleaseHostWorkload
                 usleep(1_000);
             }
 
+            $cpuBefore = ReleaseHostResources::cpuTime();
             $endAt = $startAt + $this->durationSeconds;
 
             while (microtime(true) < $endAt) {
@@ -372,15 +492,20 @@ final class ReleaseHostWorkload
             }
 
             $stats = $connection->getStats();
+            $cpuAfter = ReleaseHostResources::cpuTime();
 
             return [
                 'successes' => $successes,
                 'errors' => $errors,
                 'latency_ms' => $latencies,
-                'queries' => (int) ($stats['queries'] ?? 0),
-                'reads' => (int) ($stats['reads'] ?? 0),
-                'writes' => (int) ($stats['writes'] ?? 0),
-                'peak_rss_bytes' => memory_get_peak_usage(true),
+                'queries' => $stats['queries'],
+                'reads' => $stats['reads'],
+                'writes' => $stats['writes'],
+                'peak_rss_bytes' => ReleaseHostResources::peakRssBytes(),
+                'peak_php_heap_bytes' => memory_get_peak_usage(true),
+                'pid' => ReleaseHostResources::pid(),
+                'cpu_user_seconds' => $cpuAfter['user_seconds'] - $cpuBefore['user_seconds'],
+                'cpu_system_seconds' => $cpuAfter['system_seconds'] - $cpuBefore['system_seconds'],
             ];
         } finally {
             $connection->disconnect();
@@ -388,19 +513,21 @@ final class ReleaseHostWorkload
     }
 }
 
-/** @return non-empty-string */
+/** @param array<array-key,mixed> $options
+ * @return non-empty-string */
 function releaseHostRequiredOption(array $options, string $key): string
 {
     $value = $options[$key] ?? null;
 
-    if (!is_string($value) || trim($value) === '') {
+    $value = is_string($value) ? trim($value) : '';
+    if ($value === '') {
         throw new InvalidArgumentException("Missing required --{$key} option.");
     }
 
-    return trim($value);
+    return $value;
 }
 
-$options = getopt('', ['project:', 'output:', 'duration::', 'trials::', 'concurrency::', 'revision::', 'warmup::']);
+$options = getopt('', ['project:', 'output:', 'duration::', 'trials::', 'concurrency::', 'revision::', 'warmup::', 'pair::']);
 $projectOption = releaseHostRequiredOption($options, 'project');
 $project = realpath($projectOption);
 if (!is_string($project)) {
@@ -410,14 +537,15 @@ if (!is_string($project)) {
 $output = releaseHostRequiredOption($options, 'output');
 $duration = max(1.0, (float) ($options['duration'] ?? 3.0));
 $trials = max(1, (int) ($options['trials'] ?? 3));
-$concurrency = explode(',', (string) ($options['concurrency'] ?? '1,2,4'));
+$concurrency = explode(',', releaseHostRequiredOption($options + ['concurrency' => '1,2,4'], 'concurrency'));
 
 (new ReleaseHostWorkload(
     $project,
     $output,
     $duration,
     $trials,
-    (string) ($options['revision'] ?? 'unknown'),
+    releaseHostRequiredOption($options, 'revision'),
     max(0.0, (float) ($options['warmup'] ?? 1.0)),
+    max(0, (int) ($options['pair'] ?? 0)),
     $concurrency,
 ))->run();
