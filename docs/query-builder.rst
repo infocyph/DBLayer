@@ -262,6 +262,15 @@ keyset batches and releases each statement between batches. ``cursor()`` and
 ``stream()`` hold one PDO statement. ``unbufferedStream()`` adds a driver-level
 bounded-memory guarantee but also occupies the connection while active.
 
+.. warning::
+
+   A streaming or lazy iterator is connection-bound for its full lifetime. Do
+   not return ``cursor()``, ``stream()``, ``unbufferedStream()``, ``lazy()`` or
+   another connection-backed ``Traversable`` from ``PoolManager::using()``.
+   That callback releases its lease before the iterator can be consumed and
+   DBLayer rejects the escape. For pooled streaming, hold an explicit
+   ``ConnectionLease`` until iteration finishes and release it in ``finally``.
+
 Cursor pagination tolerates ordinary concurrent inserts and deletes, but it is
 not a historical snapshot. When an export requires one fixed view of the data,
 run the traversal inside an explicitly configured repeatable-read transaction.
