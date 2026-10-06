@@ -19,7 +19,6 @@ use Throwable;
 trait ConnectionStreaming
 {
     use ConnectionMonitoring;
-
     /**
      * Active streaming cursor statements keyed by object id.
      *
