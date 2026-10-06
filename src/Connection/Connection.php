@@ -146,6 +146,11 @@ final class Connection
     private array $queryCommentContext;
 
     /**
+     * Whether any cooperative query cancellation/deadline/timeout budget is active.
+     */
+    private bool $queryBudgetActive = false;
+
+    /**
      * Optional absolute query deadline (microtime(true) timestamp).
      */
     private ?float $queryDeadlineAt = null;
@@ -1124,6 +1129,7 @@ final class Connection
     public function setQueryDeadlineAt(?float $deadlineAt): self
     {
         $this->queryDeadlineAt = $deadlineAt;
+        $this->refreshQueryBudgetActive();
 
         return $this;
     }
@@ -1140,6 +1146,7 @@ final class Connection
         }
 
         $this->queryTimeoutMs = $next;
+        $this->refreshQueryBudgetActive();
         $this->syncServerSideStatementTimeouts();
 
         return $this;
@@ -1325,11 +1332,13 @@ final class Connection
         $this->queryCancellationChecker = $previous === null
             ? $checker
             : static fn(): bool => $previous() || $checker();
+        $this->refreshQueryBudgetActive();
 
         try {
             return $callback();
         } finally {
             $this->queryCancellationChecker = $previous;
+            $this->refreshQueryBudgetActive();
         }
     }
 
@@ -1341,11 +1350,13 @@ final class Connection
         $previous = $this->queryDeadlineAt;
         $deadlineAt = microtime(true) + max(0.0, $seconds);
         $this->queryDeadlineAt = $previous === null ? $deadlineAt : min($previous, $deadlineAt);
+        $this->refreshQueryBudgetActive();
 
         try {
             return $callback();
         } finally {
             $this->queryDeadlineAt = $previous;
+            $this->refreshQueryBudgetActive();
         }
     }
 
@@ -1652,6 +1663,7 @@ final class Connection
         $this->queryTimeoutMs = null;
         $this->queryDeadlineAt = null;
         $this->queryCancellationChecker = null;
+        $this->queryBudgetActive = false;
         $this->queryRetryPolicy = null;
         $this->queryRecorder = null;
         $this->pretending = false;
@@ -1691,11 +1703,7 @@ final class Connection
         float $start,
         int &$attemptsUsed,
     ): array {
-        if (
-            $this->queryCancellationChecker !== null
-            || $this->queryDeadlineAt !== null
-            || $this->queryTimeoutMs !== null
-        ) {
+        if ($this->queryBudgetActive) {
             $this->assertNotCancelled();
             $this->assertWithinQueryBudget($start);
         }
