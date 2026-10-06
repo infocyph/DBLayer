@@ -75,7 +75,28 @@ jobs:
           mkdir -p release-evidence/pairs
 
           for concurrency in 1 2 4; do
-            for pair in 1 2 3 4 5 6; do
+            # Discard one complete matched pair so runner/database startup state
+            # never becomes release evidence for this concurrency.
+            for target in baseline candidate; do
+              if [ "$target" = baseline ]; then
+                revision="$baseline_sha"
+              else
+                revision="$candidate_sha"
+              fi
+
+              php candidate/.automation/scripts/ci/release-host-workload.php \
+                --project="$target" \
+                --output="release-evidence/pairs/conditioning-${target}-c${concurrency}.json" \
+                --duration=3 \
+                --warmup=1 \
+                --trials=1 \
+                --concurrency="$concurrency" \
+                --revision="$revision"
+            done
+
+            # Use an odd sample count so the median is an observed matched pair,
+            # not an average straddling the release threshold.
+            for pair in 1 2 3 4 5 6 7; do
               if (( (pair + concurrency) % 2 == 0 )); then
                 order=(baseline candidate)
               else
@@ -92,7 +113,7 @@ jobs:
                 php candidate/.automation/scripts/ci/release-host-workload.php \
                   --project="$target" \
                   --output="release-evidence/pairs/${target}-c${concurrency}-p${pair}.json" \
-                  --duration=6 \
+                  --duration=8 \
                   --warmup=1 \
                   --trials=1 \
                   --concurrency="$concurrency" \
@@ -110,7 +131,7 @@ jobs:
             concurrencies: ([.[].concurrencies[]] | unique),
             php_version: .[0].php_version,
             runs: [.[].runs[]]
-          }' release-evidence/pairs/baseline-*.json > release-evidence/baseline-host.json
+          }' release-evidence/pairs/baseline-c*-p*.json > release-evidence/baseline-host.json
 
           jq -s '{
             project: .[0].project,
@@ -121,7 +142,7 @@ jobs:
             concurrencies: ([.[].concurrencies[]] | unique),
             php_version: .[0].php_version,
             runs: [.[].runs[]]
-          }' release-evidence/pairs/candidate-*.json > release-evidence/candidate-host.json
+          }' release-evidence/pairs/candidate-c*-p*.json > release-evidence/candidate-host.json
 
       - name: Enforce matched performance budgets
         run: >-
