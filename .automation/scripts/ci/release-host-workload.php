@@ -16,6 +16,7 @@ final class ReleaseHostWorkload
         private readonly float $durationSeconds,
         private readonly int $trials,
         private readonly string $revision,
+        private readonly float $warmupSeconds,
         array $concurrencies,
     ) {
         $this->concurrencies = array_values(array_unique(array_map('intval', $concurrencies)));
@@ -42,6 +43,8 @@ final class ReleaseHostWorkload
                 throw new InvalidArgumentException('Concurrency values must be positive.');
             }
 
+            $this->warmUp($concurrency);
+
             for ($trial = 1; $trial <= $this->trials; $trial++) {
                 $runs[] = $this->runTrial($concurrency, $trial);
             }
@@ -52,6 +55,7 @@ final class ReleaseHostWorkload
             'revision' => $this->revision,
             'duration_seconds' => $this->durationSeconds,
             'trials' => $this->trials,
+            'warmup_seconds' => $this->warmupSeconds,
             'concurrencies' => $this->concurrencies,
             'php_version' => PHP_VERSION,
             'runs' => $runs,
@@ -239,6 +243,36 @@ final class ReleaseHostWorkload
         }
     }
 
+    private function warmUp(int $concurrency): void
+    {
+        if ($this->warmupSeconds <= 0.0) {
+            return;
+        }
+
+        $connections = [];
+        try {
+            for ($worker = 0; $worker < $concurrency; $worker++) {
+                $connection = $this->connection('release-host-warmup-' . $worker);
+                $connection->scalar('select 1');
+                $connections[] = $connection;
+            }
+
+            $endAt = microtime(true) + $this->warmupSeconds;
+            $sequence = 0;
+
+            while (microtime(true) < $endAt) {
+                foreach ($connections as $worker => $connection) {
+                    $sequence++;
+                    $this->executeRequest($connection, $worker, $sequence);
+                }
+            }
+        } finally {
+            foreach ($connections as $connection) {
+                $connection->disconnect();
+            }
+        }
+    }
+
     /** @return array<string,mixed> */
     private function runTrial(int $concurrency, int $trial): array
     {
@@ -366,7 +400,7 @@ function releaseHostRequiredOption(array $options, string $key): string
     return trim($value);
 }
 
-$options = getopt('', ['project:', 'output:', 'duration::', 'trials::', 'concurrency::', 'revision::']);
+$options = getopt('', ['project:', 'output:', 'duration::', 'trials::', 'concurrency::', 'revision::', 'warmup::']);
 $projectOption = releaseHostRequiredOption($options, 'project');
 $project = realpath($projectOption);
 if (!is_string($project)) {
@@ -384,5 +418,6 @@ $concurrency = explode(',', (string) ($options['concurrency'] ?? '1,2,4'));
     $duration,
     $trials,
     (string) ($options['revision'] ?? 'unknown'),
+    max(0.0, (float) ($options['warmup'] ?? 1.0)),
     $concurrency,
 ))->run();
