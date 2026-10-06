@@ -264,7 +264,7 @@ final class ReleaseRunwireSoak
                 try {
                     $lease->connection()->withRunwire(
                         $runtime,
-                        static fn(): int => 1,
+                        fn(): int => (int) $lease->connection()->scalar('select 1'),
                         $request,
                         $scope,
                     );
