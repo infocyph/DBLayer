@@ -39,10 +39,9 @@ trait ConnectionStreaming
      */
     public function stream(string $sql, array $bindings = [], ?int $fetchMode = null): Generator
     {
-        $runwireBinding = $this->runwireBinding();
         $reuseGeneration = $this->runtimeReuseGeneration;
 
-        if ($runwireBinding === null && !$this->hasActiveQueryBudget()) {
+        if ($this->runwireRuntime === null && !$this->queryBudgetActive) {
             return $this->streamFastGenerator($sql, $bindings, $fetchMode, $reuseGeneration);
         }
 
@@ -50,7 +49,7 @@ trait ConnectionStreaming
             $sql,
             $bindings,
             $fetchMode,
-            $runwireBinding,
+            $this->runwireBinding(),
             $reuseGeneration,
         );
     }
@@ -413,33 +412,29 @@ trait ConnectionStreaming
         ?int $fetchMode,
         int $reuseGeneration,
     ): Generator {
-        $statement = null;
-        $statementId = null;
-        $this->activeStreamIterators++;
+        if ($reuseGeneration !== $this->runtimeReuseGeneration) {
+            throw ConnectionException::invalidConfiguration(
+                'Deferred database iterator outlived its connection lease.',
+            );
+        }
+
+        $statement = $this->execute($sql, $bindings);
+        $statementId = spl_object_id($statement);
+        $this->activeStatementCursors[$statementId] = $statement;
+        $mode = $fetchMode ?? $this->fetchMode;
+        $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
+            ? $this->sqlServerBigIntColumns($statement)
+            : [];
 
         try {
-            $this->assertStreamGeneration($reuseGeneration);
-            $statement = $this->execute($sql, $bindings);
-            $statementId = spl_object_id($statement);
-            $this->activeStatementCursors[$statementId] = $statement;
-            $mode = $fetchMode ?? $this->fetchMode;
-            $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
-                ? $this->sqlServerBigIntColumns($statement)
-                : [];
-
             while (($row = $statement->fetch($mode)) !== false) {
                 yield $sqlServerBigIntColumns !== []
                     ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
                     : $row;
-
-                if ($reuseGeneration !== $this->runtimeReuseGeneration) {
-                    throw ConnectionException::invalidConfiguration(
-                        'Deferred database iterator outlived its connection lease.',
-                    );
-                }
             }
         } finally {
-            $this->releaseStreamStatement($statement, $statementId);
+            unset($this->activeStatementCursors[$statementId]);
+            $statement->closeCursor();
         }
     }
 
