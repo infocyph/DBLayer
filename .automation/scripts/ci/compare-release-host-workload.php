@@ -172,7 +172,19 @@ final class ReleaseHostComparator
      */
     private function medianValues(array $values): float
     {
-        return $this->medianValues($values);
+        if ($values === []) {
+            return 0.0;
+        }
+
+        sort($values, SORT_NUMERIC);
+        $count = count($values);
+        $middle = intdiv($count, 2);
+
+        if ($count % 2 === 1) {
+            return $values[$middle];
+        }
+
+        return ($values[$middle - 1] + $values[$middle]) / 2.0;
     }
 
     /**
