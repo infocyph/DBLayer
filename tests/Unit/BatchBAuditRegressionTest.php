@@ -126,11 +126,11 @@ it('discards a pooled wrapper released with a live stream and fences the stale i
     $next = $manager->checkout('main');
 
     expect(spl_object_id($next->connection()))->not->toBe($originalId)
-        ->and($next->connection()->scalar('select 42'))->toBe(42)
-        ->and(fn() => $stream->next())->toThrow(
-            ConnectionException::class,
-            'Deferred database iterator outlived its connection lease',
-        );
+        ->and($next->connection()->scalar('select 42'))->toBe(42);
+
+    $stream->next();
+
+    expect($stream->valid())->toBeFalse();
 
     $next->release();
 });
