@@ -5,11 +5,13 @@ on:
     - cron: "0 0 * * 0"
   push:
     branches: [ "main", "master" ]
+    tags: [ "v*", "[0-9]*" ]
   pull_request:
     branches: [ "main", "master", "develop", "development" ]
 
 jobs:
   phpforge:
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
     uses: infocyph/phpforge/.github/workflows/security-standards.yml@main
     permissions:
       security-events: write
@@ -23,3 +25,11 @@ jobs:
       service_db_name: "dblayer"
       service_db_user: "dblayer"
       service_password: "DBLayer_Strong!2026"
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    uses: infocyph/phpforge/.github/workflows/release.yml@main
+    permissions:
+      contents: write
+    secrets:
+      COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
