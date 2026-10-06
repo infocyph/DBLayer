@@ -18,7 +18,6 @@ use Throwable;
  */
 trait ConnectionStreaming
 {
-    use ConnectionMonitoring;
     /**
      * Active streaming cursor statements keyed by object id.
      *
@@ -40,12 +39,19 @@ trait ConnectionStreaming
      */
     public function stream(string $sql, array $bindings = [], ?int $fetchMode = null): Generator
     {
+        $runwireBinding = $this->runwireBinding();
+        $reuseGeneration = $this->runtimeReuseGeneration;
+
+        if ($runwireBinding === null && !$this->hasActiveQueryBudget()) {
+            return $this->streamFastGenerator($sql, $bindings, $fetchMode, $reuseGeneration);
+        }
+
         return $this->streamGenerator(
             $sql,
             $bindings,
             $fetchMode,
-            $this->runwireBinding(),
-            $this->runtimeReuseGeneration,
+            $runwireBinding,
+            $reuseGeneration,
         );
     }
 
@@ -399,6 +405,46 @@ trait ConnectionStreaming
 
     /**
      * @param array<int|string,mixed> $bindings
+     * @return Generator<mixed>
+     */
+    private function streamFastGenerator(
+        string $sql,
+        array $bindings,
+        ?int $fetchMode,
+        int $reuseGeneration,
+    ): Generator {
+        $statement = null;
+        $statementId = null;
+        $this->activeStreamIterators++;
+
+        try {
+            $this->assertStreamGeneration($reuseGeneration);
+            $statement = $this->execute($sql, $bindings);
+            $statementId = spl_object_id($statement);
+            $this->activeStatementCursors[$statementId] = $statement;
+            $mode = $fetchMode ?? $this->fetchMode;
+            $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
+                ? $this->sqlServerBigIntColumns($statement)
+                : [];
+
+            while (($row = $statement->fetch($mode)) !== false) {
+                yield $sqlServerBigIntColumns !== []
+                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
+                    : $row;
+
+                if ($reuseGeneration !== $this->runtimeReuseGeneration) {
+                    throw ConnectionException::invalidConfiguration(
+                        'Deferred database iterator outlived its connection lease.',
+                    );
+                }
+            }
+        } finally {
+            $this->releaseStreamStatement($statement, $statementId);
+        }
+    }
+
+    /**
+     * @param array<int|string,mixed> $bindings
      * @param array{
      *   runtime:\Infocyph\Runwire\RuntimeContext,
      *   request:?\Infocyph\Runwire\RequestContext,
@@ -452,6 +498,4 @@ trait ConnectionStreaming
             $this->releaseStreamStatement($statement, $statementId);
         }
     }
-
-
 }
