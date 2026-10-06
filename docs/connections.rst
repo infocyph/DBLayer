@@ -5,7 +5,7 @@ Introduction
 ------------
 
 This guide covers direct connection ownership, read/write split behavior,
-replica selection strategies, and pooled connection lifecycle.
+replica selection strategies, pooled connection lifecycle, and external proxies.
 
 .. contents:: On This Page
    :depth: 2
@@ -131,7 +131,133 @@ Strategy Behavior Summary
 and PostgreSQL read handles. SQLite read handles always receive
 ``PRAGMA query_only = ON``; the option is therefore not accepted for SQLite.
 
-When a replica fails, DBLayer applies cooldown-based suppression before retry.
+Selection happens when a read PDO is opened or reconnected. Subsequent queries
+reuse that handle; strategies do not redistribute every query. Round-robin and
+health state belong to each ``Connection`` instance, not a shared cluster-wide
+scheduler.
+
+When connection attempts fail, DBLayer deprioritizes those replicas for
+``read_health_cooldown`` seconds. It tries alternative replicas and falls back
+to the write PDO if read connection establishment fails. Default query recovery
+allows one reconnect retry for connection errors on reads outside transactions;
+writes are not replayed automatically. Multiple ``write`` entries are selected
+randomly when connecting, without health-aware writer failover or primary
+promotion. Cluster election and fencing belong to the database infrastructure.
+
+.. _external-database-proxies:
+
+External Proxies and Database Listeners
+---------------------------------------
+
+DBLayer uses the normal PDO driver and the proxy/listener's ``host`` and
+``port``. Keep ``driver`` matched to the backend SQL dialect. Proxy credentials,
+TLS, routing, backend pool sizes, and high availability are configured by the
+deployment owner; DBLayer does not provision or manage these services.
+
+.. list-table:: Pooling and routing deployment options
+   :header-rows: 1
+   :widths: 15 22 28 35
+
+   * - Database
+     - Pooling option
+     - Routing / HA option
+     - DBLayer connection
+   * - PostgreSQL
+     - PgBouncer
+     - Pgpool-II
+     - ``driver=pgsql`` with the PostgreSQL-facing host and port.
+   * - MySQL
+     - ProxySQL backend pooling
+     - ProxySQL or a compatible MaxScale deployment
+     - ``driver=mysql`` with the MySQL-facing host and port.
+   * - MariaDB
+     - ProxySQL backend pooling
+     - MaxScale or ProxySQL
+     - ``driver=mariadb`` with the MariaDB/MySQL-facing host and port.
+   * - Microsoft SQL Server
+     - PDO_SQLSRV / ODBC pooling
+     - Always On availability-group listener
+     - ``driver=mssql`` with the listener host, port, and database.
+   * - SQLite
+     - Application-side connection reuse
+     - No network proxy; file locking and transactions
+     - ``driver=sqlite`` with a file path in ``database``; no network endpoint.
+
+The columns describe deployment roles. ProxySQL is a routing proxy even when
+used primarily for pooling. Always On is database-engine high availability,
+with listener-based routing, rather than a Pgpool-II-style middleware service.
+SQLite WAL is a concurrency option, not a pooler or HA mechanism. Performance,
+licensing, and supported topology comparisons depend on the selected product
+version and workload.
+
+These paths describe expected protocol compatibility. Standard driver and
+physical-replica integration tests do not certify every proxy version, pooling
+mode, routing policy, or listener topology. Validate the intended deployment.
+
+DBLayer can also connect directly to database servers and provide its own
+process-local pool and replica routing. Connecting through middleware adds
+the deployment's configured pooling/routing capabilities; it does not give
+DBLayer ownership of the middleware or its cluster lifecycle.
+
+For a proxy that owns read/write routing, use its single endpoint and leave
+``read`` and ``write`` unset. If the deployment exposes separate writer and
+reader endpoints, put those in ``write`` and ``read`` respectively. DBLayer's
+sticky routing only chooses its own write PDO; consistency through that PDO
+still depends on the proxy's transaction and read-after-write policy.
+
+PgBouncer Pooling Modes
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Session pooling preserves a backend session for each connected client.
+Transaction pooling changes backend ownership between transactions and requires
+workload-specific validation. DBLayer uses native prepared statements by
+default, even when its statement cache is disabled. Protocol-level prepared
+statements require a compatible PgBouncer version and nonzero
+``max_prepared_statements``. SQL-level ``PREPARE``/``DEALLOCATE`` are a separate
+restriction.
+
+Session ``SET``/``RESET``, session advisory locks, temporary tables with session
+lifetime, and ``LISTEN`` cannot assume session affinity in transaction pooling.
+DBLayer's PostgreSQL statement timeout uses session ``SET statement_timeout``;
+read-session policy and startup ``schema``/``search_path`` also need validation
+with the proxy's supported parameter handling. Client-side deadline and
+cancellation checks do not guarantee interruption of a blocking PDO call.
+PgBouncer statement pooling disallows multi-statement transactions, so it does
+not support DBLayer workloads that require them. See the
+`PgBouncer feature map <https://www.pgbouncer.org/features.html>`_.
+
+SQL Server Listeners and Driver Pooling
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+DBLayer emits ``ApplicationIntent`` from ``application_intent``; read PDOs
+always request ``ReadOnly``. Read-only routing still requires a readable
+secondary and routing configuration on the availability group. The current
+DSN builder does not expose ``MultiSubnetFailover`` or a ``ConnectionPooling``
+setting; arbitrary config keys do not enable those connection-string options.
+
+Microsoft's PHP driver uses ODBC connection pooling. It is enabled by default
+on Windows; Linux/macOS require ODBC pooling configuration. This driver-level
+reuse is separate from DBLayer's pool and SQL Server's internal worker threads.
+See `Microsoft connection pooling
+<https://learn.microsoft.com/en-us/sql/connect/php/connection-pooling-microsoft-drivers-for-php-for-sql-server>`_
+and `Always On connection options
+<https://learn.microsoft.com/en-us/sql/connect/php/connection-options>`_.
+
+SQLite File Connections
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The application pool can reuse connections to the same file. Enable WAL
+explicitly through application/deployment initialization if the workload needs
+it; DBLayer does not enable WAL automatically. WAL permits readers alongside a
+writer, but still permits only one writer at a time. Configure bounded lock
+waiting and transaction lifetimes accordingly. Independent ``:memory:`` PDO
+connections contain independent databases, so they cannot be treated as one
+shared pooled database. See `SQLite WAL <https://www.sqlite.org/wal.html>`_.
+
+Proxy routing and pooling details are documented by
+`Pgpool-II <https://www.pgpool.net/docs/latest/en/html/intro-whatis.html>`_,
+`ProxySQL <https://proxysql.com/documentation/>`_, and
+`MaxScale listeners <https://mariadb.com/docs/maxscale/reference/maxscale-listeners>`_.
 
 Using Multiple Database Connections
 -----------------------------------
@@ -164,6 +290,14 @@ isolated by named connection.
 
 Pooling
 -------
+
+Each pool belongs to its owning PHP process/worker. It reuses application-side
+connections and can coexist with an external proxy's backend pool. Pool limits
+do not apply across all workers: budget the sum of their capacities against
+proxy and database limits. Each pooled ``Connection`` can hold both a write PDO
+and a read PDO, while ``warmUp()`` opens primary handles only. Session-mode
+proxies can retain backend connections for as long as these client handles stay
+open.
 
 The static facade provides a convenience wrapper:
 
@@ -291,7 +425,8 @@ reuse contract if new connection-scoped mutable state is introduced.
 Operational Notes
 -----------------
 
-- ``max_connections`` bounds total open pooled connections across configured names.
+- ``max_connections`` bounds pooled ``Connection`` instances across configured
+  names in one pool; it is not a global limit on native database sessions.
 - ``idle_timeout`` evicts idle connections.
 - ``max_lifetime`` rotates old connections.
 - ``health_check_interval`` controls probe cadence.

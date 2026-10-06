@@ -128,6 +128,19 @@ for MySQL/SQLite, `connect_timeout` for PostgreSQL, and `LoginTimeout` for SQL
 Server. PDO and native-client versions may still impose driver-specific timeout
 and persistent-connection semantics.
 
+### External Proxies and Database Listeners
+
+DBLayer can target PostgreSQL poolers (PgBouncer/Pgpool-II), MySQL/MariaDB
+proxies (ProxySQL/MaxScale), and SQL Server availability-group listeners through
+the normal driver and endpoint configuration. This is expected protocol
+compatibility; specific proxy modes and HA topologies require deployment tests.
+DBLayer's pool is local to each PHP worker, and cluster promotion remains owned
+by the database infrastructure. See the [connection deployment guide](docs/connections.rst#external-proxies-and-database-listeners)
+for PgBouncer session/prepared-statement restrictions, ODBC pooling, the current
+`MultiSubnetFailover` limitation, and SQLite file/WAL behavior.
+The [examples guide](examples/README.md) includes named bootstrap profiles and
+runnable worker-pooling and SQLite replica-routing demonstrations.
+
 ### Query Controls
 
 ```php

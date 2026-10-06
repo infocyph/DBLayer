@@ -53,6 +53,8 @@ MySQL/MariaDB     ``host``, ``port``, ``username``, ``password``, ``charset``,
                   ``ssl_key``, ``ssl_verify_server_cert``
 PostgreSQL        ``host``, ``port``, ``username``, ``password``, ``charset``,
                   ``schema``, ``sslmode``
+SQL Server        ``host``, ``port``, ``username``, ``password``, ``encrypt``,
+                  ``trust_server_certificate``, ``application_intent``
 SQLite            ``database``; network, credential, charset, collation,
                   schema, and TLS settings are rejected
 ================  ============================================================
@@ -66,9 +68,23 @@ PostgreSQL maps ``charset``, ``schema``, ``timeout``, and ``sslmode`` to libpq
 ``sslmode`` DSN parameters. Supported SSL modes are ``disable``, ``allow``,
 ``prefer``, ``require``, ``verify-ca``, and ``verify-full``.
 
-``timeout`` uses PDO's timeout attribute for MySQL/SQLite and libpq
-``connect_timeout`` for PostgreSQL. Native clients can impose additional
-driver- and version-specific behavior.
+An omitted, null, or empty PostgreSQL ``schema`` receives the driver's ``public``
+default. It therefore still emits startup ``search_path``; an empty string does
+not disable that parameter. A pooler must accept and preserve the intended
+startup setting according to its supported parameter handling.
+
+SQL Server maps ``encrypt``, ``trust_server_certificate``, and
+``application_intent`` to the PDO_SQLSRV connection string. Read handles request
+``ApplicationIntent=ReadOnly``. ``MultiSubnetFailover`` is not currently exposed.
+
+``timeout`` uses PDO's timeout attribute for MySQL/SQLite, libpq
+``connect_timeout`` for PostgreSQL, and ``LoginTimeout`` for SQL Server. Use
+``timeout`` rather than an ineffective ``login_timeout`` config key. Native
+clients can impose additional driver- and version-specific behavior.
+
+For external poolers and proxies, use their client-facing ``host``/``port`` and
+the backend's normal ``driver``. See :ref:`external-database-proxies` for pooling
+mode, session-state, routing, and listener limitations.
 
 Table Prefix Semantics
 ----------------------

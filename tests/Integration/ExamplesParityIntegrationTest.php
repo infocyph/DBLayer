@@ -32,6 +32,78 @@ it('matches bootstrap example connection setup flow', function (string $driver):
     expect($primaryDriver)->toBe($reportingDriver);
 })->with('dblayer_drivers');
 
+it('registers deployment profiles lazily without creating workers or database handles', function (): void {
+    $poolConfig = require __DIR__ . '/../../examples/bootstrap.php';
+
+    foreach ([
+        'mysql_main' => 'mysql',
+        'mysql_split' => 'mysql',
+        'mysql_proxy' => 'mysql',
+        'mariadb_proxy' => 'mariadb',
+        'pgsql_reporting' => 'pgsql',
+        'pgsql_pooler' => 'pgsql',
+        'pgsql_middleware' => 'pgsql',
+        'mssql_listener' => 'mssql',
+        'sqlite_local' => 'sqlite',
+    ] as $name => $driver) {
+        expect(DB::connection($name)->isConnected())->toBeFalse()
+            ->and(DB::connection($name)->getConfig()->getDriver())->toBe($driver);
+    }
+
+    foreach (['mysql_proxy', 'mariadb_proxy', 'pgsql_pooler', 'pgsql_middleware'] as $name) {
+        expect(DB::connection($name)->getConfig()->hasReadConfig())->toBeFalse()
+            ->and(DB::connection($name)->getConfig()->hasWriteConfig())->toBeFalse();
+    }
+
+    expect(DB::getDefaultConnection())->toBe('mysql_main')
+        ->and(DB::connection('pgsql_pooler')->getConfig()->get('schema'))->toBe('public')
+        ->and(DB::connection('mysql_split')->getConfig()->getReadConfigs())->toHaveCount(2)
+        ->and(DB::connection('mysql_split')->getConfig()->isSticky())->toBeTrue()
+        ->and(DB::connection('mssql_listener')->getConfig()->get('encrypt'))->toBeTrue()
+        ->and(DB::connection('mssql_listener')->getConfig()->get('trust_server_certificate'))->toBeFalse()
+        ->and($poolConfig)->toMatchArray(['min_connections' => 2, 'max_connections' => 10]);
+});
+
+it('runs the worker example with shared file handles and releases all task leases', function (): void {
+    $database = tempnam(sys_get_temp_dir(), 'dblayer-worker-example-');
+    if ($database === false) {
+        throw new RuntimeException('Unable to create the example database.');
+    }
+
+    try {
+        $process = new Process([
+            PHP_BINARY,
+            __DIR__ . '/../../examples/pooled_worker.php',
+        ], env: ['DBLAYER_SQLITE_PATH' => $database]);
+        $process->mustRun();
+
+        $summary = json_decode($process->getOutput(), true, flags: JSON_THROW_ON_ERROR);
+        expect($summary)->toMatchArray([
+            'connection' => 'sqlite_local',
+            'ready' => 2,
+            'results' => [1, 1, 1],
+            'active_after_tasks' => 0,
+            'idle_after_tasks' => 2,
+            'connections_after_drain' => 0,
+        ]);
+    } finally {
+        unlink($database);
+    }
+});
+
+it('runs the replica example with the same written rows visible on both read handles', function (): void {
+    $process = new Process([PHP_BINARY, __DIR__ . '/../../examples/read_replicas.php']);
+    $process->mustRun();
+
+    expect($process->getOutput())->toContain(
+        'First read row count: 1',
+        'First replica index: 0',
+        'Second read row count: 1',
+        'Second replica index: 1',
+        'Strategy: round_robin',
+    );
+});
+
 it('matches chunking example flow', function (string $driver): void {
     dblayerAddConnectionForDriver($driver);
     $schemaDriver = dblayerConnectionDriver();
@@ -477,6 +549,7 @@ it('keeps examples and integration coverage in sync', function (): void {
             'PrefixAndNamedConnectionIntegrationTest.php',
         ],
         'observability.php' => ['ObservabilityIntegrationTest.php'],
+        'pooled_worker.php' => ['ExamplesParityIntegrationTest.php', 'ReleaseRunwireHarnessTest.php'],
         'read_replicas.php' => [
             'ExamplesParityIntegrationTest.php',
             'ReplicaStrategiesIntegrationTest.php',

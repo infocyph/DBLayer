@@ -10,6 +10,13 @@ Each snippet is independent so you can copy only what you need.
 Bootstrap Once
 --------------
 
+For complete deployment configurations, see ``examples/bootstrap.php`` and
+``examples/README.md``. The bootstrap registers direct, proxy, and listener
+profiles lazily and returns worker-local pool settings. The executable
+``examples/pooled_worker.php`` demonstrates warmup, exclusive task leases,
+optional passed Runwire context, and host-controlled drain. See
+:ref:`external-database-proxies` for deployment limitations.
+
 .. code-block:: php
 
    use Infocyph\DBLayer\DB;
