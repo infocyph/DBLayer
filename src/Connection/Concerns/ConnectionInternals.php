@@ -752,7 +752,10 @@ trait ConnectionInternals
         $cached = $this->statementCache[$bucket][$fingerprint] ?? null;
 
         if ($cached instanceof PDOStatement) {
-            if (isset($this->activeStatementCursors[spl_object_id($cached)])) {
+            if (
+                $this->activeStatementCursors !== []
+                && isset($this->activeStatementCursors[spl_object_id($cached)])
+            ) {
                 return $pdo->prepare($sql);
             }
 
