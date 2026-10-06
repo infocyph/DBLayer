@@ -37,6 +37,26 @@ Manual Transaction
        throw $e;
    }
 
+Native PDO Transaction Ownership
+--------------------------------
+
+DBLayer-managed transactions and externally owned native PDO transactions have
+different ownership contracts. If application code begins a transaction directly
+on the underlying PDO handle, DBLayer does not own that commit lifecycle.
+
+While an externally owned native transaction is active:
+
+- query-result caching is bypassed;
+- ``Connection::afterCommit()`` is rejected because DBLayer cannot know when the
+  external owner will commit;
+- cache-aware structured DBLayer writes are rejected rather than pretending that
+  invalidation can be deferred safely.
+
+Use ``DB::transaction()`` or ``Connection::transaction()`` when DBLayer should
+own commit-aware cache invalidation and after-commit callbacks. If the application
+owns the native PDO transaction, it must also own the corresponding cache and
+commit side-effect policy.
+
 Retry Attempts
 --------------
 
