@@ -251,6 +251,34 @@ it('invalidates shared table data across explicit cache visibility scopes', func
     }
 });
 
+it('invalidates memoized cache identities when database or table prefix changes', function (): void {
+    $connection = dblayerBatchAConnection([
+        'cache_scope' => 'tenant-visible',
+        'cache_dependency_scope' => 'deployment-a',
+    ]);
+
+    $initialScope = $connection->cacheScopeFingerprint();
+    $initialDependency = $connection->cacheDependencyFingerprint();
+
+    expect($connection->cacheScopeFingerprint())->toBe($initialScope)
+        ->and($connection->cacheDependencyFingerprint())->toBe($initialDependency);
+
+    $connection->setTablePrefix('tenant_');
+
+    $prefixedScope = $connection->cacheScopeFingerprint();
+    $prefixedDependency = $connection->cacheDependencyFingerprint();
+
+    expect($prefixedScope)->not->toBe($initialScope)
+        ->and($prefixedDependency)->not->toBe($initialDependency)
+        ->and($connection->cacheScopeFingerprint())->toBe($prefixedScope)
+        ->and($connection->cacheDependencyFingerprint())->toBe($prefixedDependency);
+
+    $connection->setDatabaseName('memoized-cache-identity.sqlite');
+
+    expect($connection->cacheScopeFingerprint())->not->toBe($prefixedScope)
+        ->and($connection->cacheDependencyFingerprint())->not->toBe($prefixedDependency);
+});
+
 it('bypasses result cache inside externally owned PDO transactions', function (): void {
     $connection = dblayerBatchAPopulatedConnection();
     $connection->setQueryCache(Cache::memory('dblayer-batch-a-native-transaction'));
