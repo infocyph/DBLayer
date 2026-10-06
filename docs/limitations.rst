@@ -31,6 +31,15 @@ Connection and Consistency Notes
 
 - Connection pooling is most useful in long-running workers and daemons. In
   classic PHP-FPM request lifecycles, pooled reuse is usually less impactful.
+- Pools and replica selection state belong to the owning PHP process and
+  connection instance. DBLayer does not provide a pool shared across workers,
+  per-query redistribution over live replicas, or automatic primary promotion.
+- Read-replica failover and fallback to the write PDO do not provide
+  health-aware writer failover. Writes are not automatically replayed after a
+  connection failure.
+- External proxy/listener compatibility depends on deployment configuration;
+  PgBouncer transaction/statement pooling and SQL Server Always On require
+  additional validation. See :ref:`external-database-proxies`.
 - Read-replica consistency is not guaranteed by default. For read-after-write
   behavior, use sticky mode, transactions, or force reads to write PDO.
 - Read-only transaction mode is best-effort and driver-dependent.

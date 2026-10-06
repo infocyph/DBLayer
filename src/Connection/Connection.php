@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Connection;
 
 use Generator;
+use Infocyph\DBLayer\Connection\Concerns\ConnectionCacheIdentity;
 use Infocyph\DBLayer\Connection\Concerns\ConnectionInternals;
+use Infocyph\DBLayer\Connection\Concerns\ConnectionMonitoring;
 use Infocyph\DBLayer\Connection\Concerns\ConnectionResultNormalization;
+use Infocyph\DBLayer\Connection\Concerns\ConnectionRunwire;
 use Infocyph\DBLayer\Connection\Concerns\ConnectionStreaming;
 use Infocyph\DBLayer\Driver\Contracts\DriverInterface;
 use Infocyph\DBLayer\Driver\Contracts\QueryCompilerInterface;
@@ -47,8 +50,11 @@ use Throwable;
  */
 final class Connection
 {
+    use ConnectionCacheIdentity;
     use ConnectionInternals;
+    use ConnectionMonitoring;
     use ConnectionResultNormalization;
+    use ConnectionRunwire;
     use ConnectionStreaming;
 
     /**
@@ -124,6 +130,11 @@ final class Connection
      * Whether connection is in non-executing "pretend" mode.
      */
     private bool $pretending = false;
+
+    /**
+     * Whether any cooperative query cancellation/deadline/timeout budget is active.
+     */
+    private bool $queryBudgetActive = false;
 
     /**
      * Optional cancellation checker called before query attempts.
@@ -268,6 +279,12 @@ final class Connection
      */
     public function afterCommit(callable $callback): void
     {
+        if ($this->managedTransactionLevel() === 0 && $this->hasActiveNativeTransaction()) {
+            throw ConnectionException::transactionError(
+                'afterCommit callbacks require DBLayer-managed transaction ownership.',
+            );
+        }
+
         $this->getTransactionManager()->afterCommit($this, $callback);
     }
 
@@ -353,29 +370,6 @@ final class Connection
         $this->begin();
 
         return true;
-    }
-
-    /**
-     * Build a stable non-sensitive CacheLayer tag for a structured table dependency.
-     */
-    public function cacheTableTag(string $table, ?string $suffix = null): string
-    {
-        $table = strtolower(trim($table));
-        $schema = $this->config->get('schema');
-
-        if (!str_contains($table, '.') && is_string($schema) && $schema !== '') {
-            $table = strtolower($schema) . '.' . $table;
-        }
-
-        $identity = hash('xxh3', implode("\0", [
-            $this->name,
-            $this->getDriverName(),
-            $this->getDatabaseName(),
-            $this->tablePrefix,
-        ]));
-        $tag = 'db.' . $identity . '.table.' . hash('xxh3', $table);
-
-        return $suffix === null || $suffix === '' ? $tag : $tag . '.' . $suffix;
     }
 
     /**
@@ -597,26 +591,6 @@ final class Connection
     }
 
     /**
-     * Get read PDO connection (for read/write splitting).
-     */
-    public function getReadPdo(): PDO
-    {
-        if ($this->shouldUseWritePdoForRead()) {
-            return $this->getPdo();
-        }
-
-        if (!$this->config->hasReadConfig()) {
-            return $this->getPdo();
-        }
-
-        if ($this->readPdo === null) {
-            $this->connectRead();
-        }
-
-        return $this->readPdo ?? $this->getPdo();
-    }
-
-    /**
      * Get read-replica selection telemetry for this connection.
      *
      * @return array{
@@ -646,6 +620,16 @@ final class Connection
     public function getTablePrefix(): string
     {
         return $this->tablePrefix;
+    }
+
+    /**
+     * Whether the already-open write handle is inside a PDO-owned transaction.
+     *
+     * This check never opens a new PDO connection.
+     */
+    public function hasActiveNativeTransaction(): bool
+    {
+        return $this->pdo?->inTransaction() ?? false;
     }
 
     /**
@@ -682,6 +666,30 @@ final class Connection
     public function inTransaction(): bool
     {
         return $this->managedTransactionLevel() > 0 || ($this->pdo?->inTransaction() ?? false);
+    }
+
+    /**
+     * Invalidate query-cache tags after a managed commit, or immediately when
+     * an externally owned native transaction makes deferred commit ownership unknowable.
+     *
+     * @param list<string> $tags
+     */
+    public function invalidateQueryCacheTagsAfterCommit(array $tags): void
+    {
+        if ($tags === [] || !$this->hasQueryCache()) {
+            return;
+        }
+
+        $cache = $this->queryCache();
+        if ($this->managedTransactionLevel() === 0 && $this->hasActiveNativeTransaction()) {
+            throw ConnectionException::invalidConfiguration(
+                'Cache invalidation cannot be deferred for an externally owned native PDO transaction.',
+            );
+        }
+
+        $this->afterCommit(static function () use ($cache, $tags): void {
+            $cache->invalidateTags($tags);
+        });
     }
 
     /**
@@ -859,7 +867,7 @@ final class Connection
                     throw ConnectionException::maxReconnectAttemptsReached(self::MAX_RECONNECT_ATTEMPTS);
                 }
 
-                usleep(100_000 * $attempt);
+                $this->cooperativeSleep(0.1 * $attempt);
             }
         }
     }
@@ -869,14 +877,23 @@ final class Connection
      */
     public function resetRuntimeStateForReuse(): bool
     {
-        if ($this->managedTransactionLevel() > 0 || ($this->pdo?->inTransaction() ?? false)) {
+        $this->runtimeReuseGeneration++;
+
+        if (
+            $this->managedTransactionLevel() > 0
+            || ($this->pdo?->inTransaction() ?? false)
+            || $this->activeStreamIterators > 0
+            || $this->activeStatementCursors !== []
+        ) {
+            $this->closeActiveStatementCursors();
+
             return false;
         }
 
         $this->transactionManager?->clear();
         $this->resetRequestRuntimeState();
 
-        return true;
+        return $this->sanitizeRuntimeStateForReuse();
     }
 
     /**
@@ -1078,6 +1095,7 @@ final class Connection
     public function setDatabaseName(string $database): self
     {
         $this->config = $this->config->with('database', $database);
+        $this->resetCacheIdentityFingerprints();
         $this->disconnect();
 
         return $this;
@@ -1111,6 +1129,7 @@ final class Connection
     public function setQueryDeadlineAt(?float $deadlineAt): self
     {
         $this->queryDeadlineAt = $deadlineAt;
+        $this->refreshQueryBudgetActive();
 
         return $this;
     }
@@ -1127,6 +1146,7 @@ final class Connection
         }
 
         $this->queryTimeoutMs = $next;
+        $this->refreshQueryBudgetActive();
         $this->syncServerSideStatementTimeouts();
 
         return $this;
@@ -1138,6 +1158,7 @@ final class Connection
     public function setTablePrefix(string $prefix): self
     {
         $this->tablePrefix = $prefix;
+        $this->resetCacheIdentityFingerprints();
         $this->compiler->setTablePrefix($prefix);
 
         return $this;
@@ -1153,37 +1174,6 @@ final class Connection
         $this->execute($sql, $bindings);
 
         return true;
-    }
-
-    /**
-     * Stream query rows lazily without buffering via fetchAll().
-     *
-     * @param array<int|string,mixed> $bindings
-     * @return Generator<mixed>
-     */
-    public function stream(string $sql, array $bindings = [], ?int $fetchMode = null): Generator
-    {
-        $statement = $this->execute($sql, $bindings);
-        $mode = $fetchMode ?? $this->fetchMode;
-        $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
-            ? $this->sqlServerBigIntColumns($statement)
-            : [];
-
-        try {
-            while (true) {
-                $row = $statement->fetch($mode);
-
-                if ($row === false) {
-                    break;
-                }
-
-                yield $sqlServerBigIntColumns !== []
-                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
-                    : $row;
-            }
-        } finally {
-            $statement->closeCursor();
-        }
     }
 
     public function supportsInsertIgnore(): bool
@@ -1339,12 +1329,16 @@ final class Connection
     public function withQueryCancellation(callable $checker, callable $callback): mixed
     {
         $previous = $this->queryCancellationChecker;
-        $this->queryCancellationChecker = $checker;
+        $this->queryCancellationChecker = $previous === null
+            ? $checker
+            : static fn(): bool => $previous() || $checker();
+        $this->refreshQueryBudgetActive();
 
         try {
             return $callback();
         } finally {
             $this->queryCancellationChecker = $previous;
+            $this->refreshQueryBudgetActive();
         }
     }
 
@@ -1356,11 +1350,13 @@ final class Connection
         $previous = $this->queryDeadlineAt;
         $deadlineAt = microtime(true) + max(0.0, $seconds);
         $this->queryDeadlineAt = $previous === null ? $deadlineAt : min($previous, $deadlineAt);
+        $this->refreshQueryBudgetActive();
 
         try {
             return $callback();
         } finally {
             $this->queryDeadlineAt = $previous;
+            $this->refreshQueryBudgetActive();
         }
     }
 
@@ -1547,6 +1543,17 @@ final class Connection
             return $pretendResult();
         }
 
+        if (
+            $isWrite
+            && $this->hasQueryCache()
+            && $this->managedTransactionLevel() === 0
+            && $this->hasActiveNativeTransaction()
+        ) {
+            throw ConnectionException::invalidConfiguration(
+                'Cache-aware DBLayer writes are not supported inside an externally owned native PDO transaction; use a DBLayer-managed transaction or an explicit caller-owned cache policy.',
+            );
+        }
+
         $start = microtime(true);
         $success = false;
         $rowsAffected = null;
@@ -1611,8 +1618,15 @@ final class Connection
      */
     private function markExecutionSuccess(float $start, bool $isWrite, string $sql, array $bindings): void
     {
-        $this->assertWithinQueryBudget($start);
         $this->recordQuery($isWrite);
+
+        // A synchronous PDO mutation that returned successfully has already
+        // completed. Reporting a cooperative elapsed-time timeout here would
+        // invite callers to retry a mutation that may have committed.
+        if (!$isWrite) {
+            $this->assertWithinQueryBudget($start);
+        }
+
         $this->recordPretend($sql, $bindings);
     }
 
@@ -1649,6 +1663,7 @@ final class Connection
         $this->queryTimeoutMs = null;
         $this->queryDeadlineAt = null;
         $this->queryCancellationChecker = null;
+        $this->queryBudgetActive = false;
         $this->queryRetryPolicy = null;
         $this->queryRecorder = null;
         $this->pretending = false;
@@ -1688,6 +1703,11 @@ final class Connection
         float $start,
         int &$attemptsUsed,
     ): array {
+        if ($this->queryBudgetActive) {
+            $this->assertNotCancelled();
+            $this->assertWithinQueryBudget($start);
+        }
+
         $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
         $attempt = 0;
 

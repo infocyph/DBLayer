@@ -1222,7 +1222,7 @@ class QueryBuilder
     {
         $this->type ??= 'select';
 
-        yield from $this->connection->stream(
+        return $this->connection->stream(
             $this->toSelectSql(),
             $this->getBindings(),
             $fetchMode,
@@ -1359,7 +1359,7 @@ class QueryBuilder
     {
         $this->type ??= 'select';
 
-        yield from $this->connection->unbufferedStream(
+        return $this->connection->unbufferedStream(
             $this->toSelectSql(),
             $this->getBindings(),
             $fetchMode,

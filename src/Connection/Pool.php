@@ -365,6 +365,71 @@ final class Pool
     }
 
     /**
+     * Open distinct primary PDO handles up to the requested ready target.
+     *
+     * This is host-invoked warmup only; it does not install timers or own a
+     * worker/event-loop lifecycle. Active connected leases count toward target.
+     */
+    public function warmUp(string $name = 'default', ?int $target = null): int
+    {
+        if (!isset($this->configs[$name])) {
+            throw ConnectionException::configNotFound($name);
+        }
+
+        $target ??= $this->poolConfig['min_connections'];
+        if ($target < 0 || $target > $this->poolConfig['max_connections']) {
+            throw ConnectionException::invalidConfiguration(
+                'Pool warmup target must be between zero and max_connections.',
+            );
+        }
+
+        $this->removeStaleIdleConnections();
+        $ready = $this->activeConnectedCount($name);
+
+        if ($ready >= $target) {
+            return $ready;
+        }
+
+        $held = [];
+
+        try {
+            while ($ready < $target) {
+                $connection = $this->getConnection($name);
+                $held[] = $connection;
+
+                if (!$connection->isConnected()) {
+                    $connection->getPdo();
+                }
+
+                $ready++;
+            }
+        } finally {
+            foreach ($held as $connection) {
+                $this->releaseConnection($name, $connection);
+            }
+        }
+
+        return $ready;
+    }
+
+    private function activeConnectedCount(string $name): int
+    {
+        $ready = 0;
+
+        foreach ($this->connections[$name] ?? [] as $id => $data) {
+            if (isset($this->idle[$name][$id])) {
+                continue;
+            }
+
+            if ($data['connection']->isConnected()) {
+                $ready++;
+            }
+        }
+
+        return $ready;
+    }
+
+    /**
      * Check if we can create a new connection.
      */
     private function canCreateConnection(): bool
@@ -411,6 +476,7 @@ final class Pool
     {
         $config = $this->configs[$name];
         $connection = new Connection($config, $name);
+        $connection->markPoolManaged();
 
         // Attach HealthCheck monitor tuned with pool config.
         $connection->attachHealthCheck(
@@ -446,9 +512,9 @@ final class Pool
         $connectionId = array_key_first($this->idle[$name]);
         $data = $this->idle[$name][$connectionId];
 
-        // Check idle timeout.
-        $idleTime = microtime(true) - $data['idle_since'];
-        if ($this->poolConfig['idle_timeout'] > 0 && $idleTime >= $this->poolConfig['idle_timeout']) {
+        // Check idle timeout and maximum wrapper lifetime before reuse.
+        $now = microtime(true);
+        if ($this->idleConnectionExpired($name, $connectionId, $data['idle_since'], $now)) {
             $this->removeConnection($name, $data['connection']);
 
             // Try next one.
@@ -467,6 +533,18 @@ final class Pool
         }
 
         return $data['connection'];
+    }
+
+    private function idleConnectionExpired(string $name, int $id, float $idleSince, float $now): bool
+    {
+        $idleExpired = $this->poolConfig['idle_timeout'] > 0
+            && ($now - $idleSince) >= $this->poolConfig['idle_timeout'];
+
+        $createdAt = $this->connections[$name][$id]['created_at'] ?? $now;
+        $lifetimeExpired = $this->poolConfig['max_lifetime'] > 0
+            && ($now - $createdAt) >= $this->poolConfig['max_lifetime'];
+
+        return $idleExpired || $lifetimeExpired;
     }
 
     /**
@@ -513,10 +591,8 @@ final class Pool
         $now = microtime(true);
 
         foreach ($this->idle as $name => $connections) {
-            foreach ($connections as $data) {
-                $idleTime = $now - $data['idle_since'];
-
-                if ($this->poolConfig['idle_timeout'] > 0 && $idleTime >= $this->poolConfig['idle_timeout']) {
+            foreach ($connections as $id => $data) {
+                if ($this->idleConnectionExpired($name, $id, $data['idle_since'], $now)) {
                     $this->removeConnection($name, $data['connection']);
                 }
             }

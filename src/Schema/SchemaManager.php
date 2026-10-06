@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Infocyph\DBLayer\Schema;
 
 use Infocyph\DBLayer\Connection\Connection;
-use Infocyph\DBLayer\DB;
 use Infocyph\DBLayer\Exceptions\MigrationException;
 use Infocyph\DBLayer\Exceptions\SchemaException;
 use Throwable;
@@ -167,8 +166,11 @@ final readonly class SchemaManager
     /** @param list<string> $tables */
     private function invalidateTables(array $tables): void
     {
-        $tags = array_map(fn(string $table): string => $this->connection->cacheTableTag($table), array_values(array_unique($tables)));
-        DB::invalidateCacheTagsAfterCommit($tags, $this->connection->getName());
+        $tags = array_map(
+            fn(string $table): string => $this->connection->cacheTableTag($table),
+            array_values(array_unique($tables)),
+        );
+        $this->connection->invalidateQueryCacheTagsAfterCommit($tags);
     }
 
     private function physicalTable(string $table): string

@@ -316,6 +316,11 @@ trait QueryBuilderKeysetPagination
     }
 
     /**
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
      * @return list<array<string,mixed>>
      */
     private function fetchChunkById(
@@ -323,6 +328,7 @@ trait QueryBuilderKeysetPagination
         string $column,
         mixed $lastId,
         string $direction,
+        ?array $runwireBinding = null,
     ): array {
         $clone = $this->cloneBuilder();
         $clone->withoutCache();
@@ -336,10 +342,27 @@ trait QueryBuilderKeysetPagination
         $clone->orderBy($column, $direction);
         $clone->limit = $chunkSize;
 
-        return $clone->get();
+        if ($runwireBinding === null) {
+            return $clone->get();
+        }
+
+        /** @var list<array<string,mixed>> $rows */
+        $rows = $this->connection->withRunwire(
+            $runwireBinding['runtime'],
+            static fn(): array => $clone->get(),
+            $runwireBinding['request'],
+            $runwireBinding['scope'],
+        );
+
+        return $rows;
     }
 
     /**
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
      * @return Generator<array{0:list<array<string,mixed>>,1:int}>
      */
     private function keysetChunks(
@@ -347,6 +370,7 @@ trait QueryBuilderKeysetPagination
         string $column,
         mixed $fromId,
         string $direction,
+        ?array $runwireBinding = null,
     ): Generator {
         if ($chunkSize <= 0) {
             throw QueryException::invalidLimit($chunkSize);
@@ -357,7 +381,13 @@ trait QueryBuilderKeysetPagination
         $direction = $this->normalizeKeysetDirection($direction);
 
         for ($page = 1; ; $page++) {
-            $rows = $this->fetchChunkById($chunkSize, $column, $lastId, $direction);
+            $rows = $this->fetchChunkById(
+                $chunkSize,
+                $column,
+                $lastId,
+                $direction,
+                $runwireBinding,
+            );
 
             if ($rows === []) {
                 return;

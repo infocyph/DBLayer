@@ -243,7 +243,7 @@ abstract class Repository
             function (array $row): array {
                 $prepared = $this->applyWriteCastsToAttributes($this->applyTenantAttributes($row));
 
-                return $this->runPayloadHooks('beforeCreate', $prepared);
+                return $this->applyTenantAttributes($this->runPayloadHooks('beforeCreate', $prepared));
             },
             $rows,
         );
@@ -351,7 +351,7 @@ abstract class Repository
     public function create(array $attributes): array
     {
         $payload = $this->applyWriteCastsToAttributes($this->applyTenantAttributes($attributes));
-        $payload = $this->runPayloadHooks('beforeCreate', $payload);
+        $payload = $this->applyTenantAttributes($this->runPayloadHooks('beforeCreate', $payload));
 
         $this->query()->insert($payload);
 
@@ -895,8 +895,8 @@ abstract class Repository
             return 0;
         }
 
-        $payload = $this->applyWriteCastsToAttributes($values);
-        $payload = $this->runPayloadHooks('beforeUpdate', $payload);
+        $payload = $this->assertTenantAttributes($this->applyWriteCastsToAttributes($values));
+        $payload = $this->assertTenantAttributes($this->runPayloadHooks('beforeUpdate', $payload));
 
         return $this->updatePreparedById($id, $payload);
     }
@@ -910,9 +910,9 @@ abstract class Repository
     ): bool {
         $column = $versionColumn ?? $this->optimisticLockColumn ?? 'version';
 
-        $payload = $this->applyWriteCastsToAttributes($values);
+        $payload = $this->assertTenantAttributes($this->applyWriteCastsToAttributes($values));
         $payload[$column] = (int) $expectedVersion + 1;
-        $payload = $this->runPayloadHooks('beforeUpdate', $payload);
+        $payload = $this->assertTenantAttributes($this->runPayloadHooks('beforeUpdate', $payload));
 
         $affected = $this->queryWithoutSoftDeletes()
           ->where($this->normalizeColumnName($this->primaryKey(), 'id'), '=', $id)
@@ -947,8 +947,8 @@ abstract class Repository
             return $existing;
         }
 
-        $payload = $this->applyWriteCastsToAttributes($values);
-        $payload = $this->runPayloadHooks('beforeUpdate', $payload);
+        $payload = $this->assertTenantAttributes($this->applyWriteCastsToAttributes($values));
+        $payload = $this->assertTenantAttributes($this->runPayloadHooks('beforeUpdate', $payload));
 
         $primaryKey = $this->primaryKey();
         if (array_key_exists($primaryKey, $existing)) {
@@ -975,7 +975,32 @@ abstract class Repository
      */
     public function upsert(array $values, array $uniqueBy, ?array $update = null): bool
     {
-        $payload = $this->applyWriteCastsToValues($this->applyTenantValues($values));
+        $payload = $this->applyTenantValues(
+            $this->applyWriteCastsToValues($this->applyTenantValues($values)),
+        );
+
+        if ($this->tenantId !== null) {
+            $tenantColumn = $this->normalizeColumnName($this->tenantColumn, 'tenant_id');
+            $driver = $this->connection->getDriverName();
+
+            if (in_array($driver, ['mysql', 'mariadb'], true)) {
+                throw new InvalidArgumentException(
+                    'Tenant-scoped upsert is not supported on MySQL/MariaDB because duplicate-key resolution can target unrelated unique keys.',
+                );
+            }
+
+            if (!in_array($tenantColumn, $uniqueBy, true)) {
+                throw new InvalidArgumentException(
+                    'Tenant-scoped upsert requires the tenant column in the conflict target.',
+                );
+            }
+
+            if ($update !== null && in_array($tenantColumn, $update, true)) {
+                throw new InvalidArgumentException(
+                    'Tenant-scoped upsert cannot update the tenant column.',
+                );
+            }
+        }
 
         return $this->query()->upsert($payload, $uniqueBy, $update);
     }

@@ -17,6 +17,51 @@ function dblayerInstanceCachedSqliteConnection(): Connection
     );
 }
 
+it('invalidates qualified and joined PostgreSQL dependencies across default schemas', function (): void {
+    $config = dblayerRequireDriver('pgsql');
+    $schemaA = dblayerTable('cache_schema_a');
+    $schemaB = dblayerTable('cache_schema_b');
+    $first = new Connection(ConnectionConfig::fromArray($config + ['schema' => $schemaA]), 'schema-cache');
+    $second = new Connection(ConnectionConfig::fromArray($config + ['schema' => $schemaB]), 'schema-cache');
+    $setup = new Connection(ConnectionConfig::fromArray($config), 'schema-cache-setup');
+    $cache = Cache::memory('schema-cache-' . bin2hex(random_bytes(4)));
+    $first->setQueryCache($cache);
+    $second->setQueryCache($cache);
+
+    try {
+        $setup->statement("create schema {$schemaA}");
+        $setup->statement("create schema {$schemaB}");
+        $setup->statement("create table {$schemaA}.items (id integer primary key, value text)");
+        $setup->statement("create table {$schemaB}.items (id integer primary key, value text)");
+        $setup->statement("create table {$schemaB}.labels (item_id integer primary key, label text)");
+        $first->table('items')->insert(['id' => 1, 'value' => 'original']);
+        $second->table('items')->insert(['id' => 1, 'value' => 'isolated']);
+        $second->table('labels')->insert(['item_id' => 1, 'label' => 'before']);
+
+        $read = fn(): ?array => $second->table("{$schemaA}.items")->cacheFor(60)->first();
+        $join = fn(): array => $first->table('items')
+            ->join("{$schemaB}.labels", 'items.id', '=', "{$schemaB}.labels.item_id")
+            ->select('items.value', "{$schemaB}.labels.label")->cacheFor(60)->get();
+
+        expect($read()['value'])->toBe('original')
+            ->and($join()[0]['label'])->toBe('before');
+        $first->table('items')->where('id', '=', 1)->update(['value' => 'changed']);
+        $second->table('labels')->where('item_id', '=', 1)->update(['label' => 'after']);
+
+        expect($read()['value'])->toBe('changed')
+            ->and($join()[0]['label'])->toBe('after')
+            ->and($second->table('items')->cacheFor(60)->first()['value'])->toBe('isolated');
+        $second->table("{$schemaA}.items")->where('id', '=', 1)->update(['value' => 'qualified-write']);
+        expect($first->table('items')->cacheFor(60)->first()['value'])->toBe('qualified-write');
+    } finally {
+        $first->disconnect();
+        $second->disconnect();
+        $setup->statement("drop schema if exists {$schemaA} cascade");
+        $setup->statement("drop schema if exists {$schemaB} cascade");
+        $setup->disconnect();
+    }
+});
+
 it('uses an explicitly connection-owned cache without static DB registration', function (): void {
     $connection = dblayerInstanceCachedSqliteConnection();
     $cache = Cache::memory('instance-query-cache-' . bin2hex(random_bytes(4)));

@@ -1,0 +1,189 @@
+name: "DBLayer 6.0 Release Performance"
+
+on:
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dblayer-release-performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-performance:
+    name: "Matched host workload and Runwire soak"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: dblayer_perf
+          POSTGRES_USER: dblayer
+          POSTGRES_PASSWORD: dblayer
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dblayer -d dblayer_perf"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DBLAYER_PERF_HOST: 127.0.0.1
+      DBLAYER_PERF_PORT: "5432"
+      DBLAYER_PERF_DATABASE: dblayer_perf
+      DBLAYER_PERF_USER: dblayer
+      DBLAYER_PERF_PASSWORD: dblayer
+
+    steps:
+      - name: Checkout DBLayer candidate
+        uses: actions/checkout@v7
+        with:
+          path: candidate
+
+      - name: Checkout matched baseline
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha || 'main' }}
+          path: baseline
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: "pdo_pgsql, pcntl, mbstring"
+          coverage: none
+          tools: composer:v2
+
+      - name: Install baseline dependencies
+        working-directory: baseline
+        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+
+      - name: Install candidate dependencies
+        working-directory: candidate
+        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+
+      - name: Analyze release evidence tooling
+        working-directory: candidate
+        run: >-
+          php vendor/bin/phpstan analyse
+          --configuration=vendor/infocyph/phpforge/resources/phpstan.neon.dist
+          .automation/scripts/ci --no-progress
+
+      - name: Create release evidence directory
+        run: mkdir -p release-evidence
+
+      - name: Measure alternating matched host workload
+        run: |
+          baseline_sha="$(git -C baseline rev-parse HEAD)"
+          candidate_sha="$(git -C candidate rev-parse HEAD)"
+          mkdir -p release-evidence/pairs
+
+          for concurrency in 1 2 4; do
+            # Discard one complete matched pair so runner/database startup state
+            # never becomes release evidence for this concurrency.
+            for target in baseline candidate; do
+              if [ "$target" = baseline ]; then
+                revision="$baseline_sha"
+              else
+                revision="$candidate_sha"
+              fi
+
+              php candidate/.automation/scripts/ci/release-host-workload.php \
+                --project="$target" \
+                --output="release-evidence/pairs/conditioning-${target}-c${concurrency}.json" \
+                --duration=3 \
+                --warmup=1 \
+                --trials=1 \
+                --concurrency="$concurrency" \
+                --revision="$revision"
+            done
+
+            # Use an odd sample count so the median is an observed matched pair,
+            # not an average straddling the release threshold.
+            for pair in 1 2 3 4 5 6 7; do
+              if (( (pair + concurrency) % 2 == 0 )); then
+                order=(baseline candidate)
+              else
+                order=(candidate baseline)
+              fi
+
+              for target in "${order[@]}"; do
+                if [ "$target" = baseline ]; then
+                  revision="$baseline_sha"
+                else
+                  revision="$candidate_sha"
+                fi
+
+                php candidate/.automation/scripts/ci/release-host-workload.php \
+                  --project="$target" \
+                  --output="release-evidence/pairs/${target}-c${concurrency}-p${pair}.json" \
+                  --duration=8 \
+                  --warmup=1 \
+                  --trials=1 \
+                  --concurrency="$concurrency" \
+                  --revision="$revision" \
+                  --pair="$pair"
+              done
+            done
+          done
+
+          jq -s '{
+            schema_version: .[0].schema_version,
+            workload: .[0].workload,
+            environment: .[0].environment,
+            project: .[0].project,
+            revision: .[0].revision,
+            duration_seconds: .[0].duration_seconds,
+            trials: 7,
+            warmup_seconds: .[0].warmup_seconds,
+            concurrencies: ([.[].concurrencies[]] | unique),
+            php_version: .[0].php_version,
+            runs: [.[].runs[]]
+          }' release-evidence/pairs/baseline-c*-p*.json > release-evidence/baseline-host.json
+
+          jq -s '{
+            schema_version: .[0].schema_version,
+            workload: .[0].workload,
+            environment: .[0].environment,
+            project: .[0].project,
+            revision: .[0].revision,
+            duration_seconds: .[0].duration_seconds,
+            trials: 7,
+            warmup_seconds: .[0].warmup_seconds,
+            concurrencies: ([.[].concurrencies[]] | unique),
+            php_version: .[0].php_version,
+            runs: [.[].runs[]]
+          }' release-evidence/pairs/candidate-c*-p*.json > release-evidence/candidate-host.json
+
+      - name: Enforce matched performance budgets
+        run: >-
+          php candidate/.automation/scripts/ci/compare-release-host-workload.php
+          --baseline=release-evidence/baseline-host.json
+          --candidate=release-evidence/candidate-host.json
+          --output=release-evidence/host-comparison.json
+          --max-regression=2
+          --baseline-revision="$(git -C baseline rev-parse HEAD)"
+          --candidate-revision="$(git -C candidate rev-parse HEAD)"
+
+      - name: Run sustained Runwire worker soak
+        run: |
+          php candidate/.automation/scripts/ci/release-runwire-soak.php \
+            --project=candidate \
+            --output=release-evidence/runwire-soak.json \
+            --requests=3000 \
+            --concurrency=4 \
+            --duration=300 \
+            --revision="$(git -C candidate rev-parse HEAD)"
+          jq -e '.passed and .release_duration_met' release-evidence/runwire-soak.json
+
+      - name: Upload release performance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dblayer-6-release-performance
+          path: release-evidence
+          retention-days: 61
+          if-no-files-found: error

@@ -1370,9 +1370,7 @@ it('does not write when logger target is a symlink', function (string $driver): 
     $linkLog = $baseDir . DIRECTORY_SEPARATOR . 'link.log';
 
     if ((!is_dir($baseDir)) && (!mkdir($baseDir, 0o700, true))) {
-        test()->markTestSkipped('Unable to create temporary directory for symlink logger test.');
-
-        return;
+        throw new RuntimeException('Unable to create temporary directory for symlink logger test.');
     }
 
     file_put_contents($realLog, '');
@@ -1396,9 +1394,8 @@ it('does not write when logger target is a symlink', function (string $driver): 
         if (is_dir($baseDir)) {
             rmdir($baseDir);
         }
-        test()->markTestSkipped('Symlink creation is not available in this environment.');
 
-        return;
+        throw new RuntimeException('Symlink creation is required for the logger security regression test.');
     }
 
     DB::enableLogger($linkLog);

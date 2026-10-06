@@ -99,3 +99,80 @@ it('discards a pooled wrapper released with an active transaction', function ():
 
     $second->release();
 });
+
+it('warms distinct PDO handles and retains them for worker reuse', function (): void {
+    $pool = new Pool([
+        'min_connections' => 2,
+        'max_connections' => 3,
+    ]);
+    $pool->addConfig('default', ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]));
+    $manager = new PoolManager($pool);
+
+    expect($pool->getStats()['total_connections'])->toBe(2)
+        ->and($manager->warmUp())->toBe(2);
+
+    $first = $manager->checkout();
+    $second = $manager->checkout();
+    $firstPdo = spl_object_id($first->connection()->getPdo());
+    $secondPdo = spl_object_id($second->connection()->getPdo());
+
+    expect($firstPdo)->not->toBe($secondPdo);
+
+    $first->release();
+    $second->release();
+
+    $reused = $manager->checkout();
+    $reusedPdo = spl_object_id($reused->connection()->getPdo());
+
+    expect([$firstPdo, $secondPdo])->toContain($reusedPdo)
+        ->and($pool->getStats()['total_connections'])->toBe(2);
+
+    $reused->release();
+});
+
+it('reconciles expired idle handles before reporting warm readiness', function (): void {
+    $pool = new Pool([
+        'min_connections' => 1,
+        'max_connections' => 1,
+        'idle_timeout' => 1,
+    ]);
+    $pool->addConfig('main', ConnectionConfig::fromArray([
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+    ]));
+    $manager = new PoolManager($pool);
+
+    expect($manager->warmUp('main'))->toBe(1);
+
+    $lease = $manager->checkout('main');
+    $oldPdo = $lease->connection()->getPdo();
+    $lease->release();
+
+    $idleProperty = new ReflectionProperty($pool, 'idle');
+    /** @var array<string,array<int,array{connection:\Infocyph\DBLayer\Connection\Connection,idle_since:float}>> $idle */
+    $idle = $idleProperty->getValue($pool);
+    foreach ($idle['main'] as &$data) {
+        $data['idle_since'] = microtime(true) - 2;
+    }
+    unset($data);
+    $idleProperty->setValue($pool, $idle);
+
+    expect($manager->warmUp('main'))->toBe(1);
+
+    $replacement = $manager->checkout('main');
+
+    expect($replacement->connection()->isConnected())->toBeTrue()
+        ->and($replacement->connection()->getPdo())->not->toBe($oldPdo);
+
+    $replacement->release();
+});
+
+it('bounds explicit pool warmup by configured capacity', function (): void {
+    $manager = dblayerRuntimeIsolationPoolManager(2);
+
+    expect(fn(): int => $manager->warmUp(target: 3))
+        ->toThrow(\Infocyph\DBLayer\Exceptions\ConnectionException::class, 'warmup target');
+});

@@ -18,9 +18,58 @@ use Throwable;
  */
 trait ConnectionStreaming
 {
-    use ConnectionMonitoring;
+    /**
+     * Active streaming cursor statements keyed by object id.
+     *
+     * @var array<int,PDOStatement>
+     */
+    private array $activeStatementCursors = [];
+
+    private int $activeStreamIterators = 0;
+
+    private bool $poolManaged = false;
 
     private int $postgresStreamCursorSequence = 0;
+
+    private int $runtimeReuseGeneration = 0;
+
+    /**
+     * Mark this connection as pool-owned so stream cursors participate in lease fencing.
+     *
+     * @internal
+     */
+    public function markPoolManaged(): void
+    {
+        $this->poolManaged = true;
+    }
+
+    /**
+     * Stream query rows lazily without buffering via fetchAll().
+     *
+     * @param array<int|string,mixed> $bindings
+     * @return Generator<mixed>
+     */
+    public function stream(string $sql, array $bindings = [], ?int $fetchMode = null): Generator
+    {
+        $reuseGeneration = $this->runtimeReuseGeneration;
+
+        if ($this->runwireRuntime === null && !$this->queryBudgetActive) {
+            return $this->streamFastGenerator(
+                $sql,
+                $bindings,
+                $fetchMode,
+                $this->poolManaged ? $reuseGeneration : null,
+            );
+        }
+
+        return $this->streamGenerator(
+            $sql,
+            $bindings,
+            $fetchMode,
+            $this->runwireBinding(),
+            $reuseGeneration,
+        );
+    }
 
     /**
      * Stream without a full client-side result buffer where the driver supports it.
@@ -43,14 +92,58 @@ trait ConnectionStreaming
             throw QueryException::invalidLimit($fetchSize);
         }
 
-        yield from match ($this->getDriverName()) {
-            'mysql', 'mariadb' => $this->mysqlUnbufferedStream($sql, $bindings, $fetchMode),
-            'pgsql' => $this->postgresUnbufferedStream($sql, $bindings, $fetchMode, $fetchSize),
-            'mssql', 'sqlite' => $this->stream($sql, $bindings, $fetchMode),
+        $runwireBinding = $this->runwireBinding();
+        $reuseGeneration = $this->runtimeReuseGeneration;
+
+        return match ($this->getDriverName()) {
+            'mysql', 'mariadb' => $this->mysqlUnbufferedStream(
+                $sql,
+                $bindings,
+                $fetchMode,
+                $runwireBinding,
+                $reuseGeneration,
+            ),
+            'pgsql' => $this->postgresUnbufferedStream(
+                $sql,
+                $bindings,
+                $fetchMode,
+                $fetchSize,
+                $runwireBinding,
+                $reuseGeneration,
+            ),
+            'mssql', 'sqlite' => $this->streamGenerator(
+                $sql,
+                $bindings,
+                $fetchMode,
+                $runwireBinding,
+                $reuseGeneration,
+            ),
             default => throw ConnectionException::invalidConfiguration(
                 "Driver [{$this->getDriverName()}] has no declared unbuffered streaming strategy.",
             ),
         };
+    }
+
+    private function assertStreamGeneration(int $reuseGeneration): void
+    {
+        if ($reuseGeneration !== $this->runtimeReuseGeneration) {
+            throw ConnectionException::invalidConfiguration(
+                'Deferred database iterator outlived its connection lease.',
+            );
+        }
+    }
+
+    private function closeActiveStatementCursors(): void
+    {
+        foreach ($this->activeStatementCursors as $statement) {
+            try {
+                $statement->closeCursor();
+            } catch (Throwable) {
+                // Pool release will discard the wrapper after an active iterator.
+            }
+        }
+
+        $this->activeStatementCursors = [];
     }
 
     private function closePostgresStreamCursor(
@@ -126,6 +219,50 @@ trait ConnectionStreaming
     }
 
     /**
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
+     */
+    private function fetchStreamRow(
+        PDOStatement $statement,
+        int $mode,
+        float $startedAt,
+        ?array $runwireBinding,
+    ): mixed {
+        if ($runwireBinding !== null) {
+            return $this->runWithRunwireBinding(
+                $runwireBinding,
+                function () use ($statement, $mode, $startedAt): mixed {
+                    $this->assertQueryCheckpoint($startedAt);
+                    $row = $statement->fetch($mode);
+                    $this->assertQueryCheckpoint($startedAt);
+
+                    return $row;
+                },
+            );
+        }
+
+        if ($this->queryBudgetActive) {
+            $this->assertQueryCheckpoint($startedAt);
+        }
+
+        $row = $statement->fetch($mode);
+
+        if ($this->queryBudgetActive) {
+            $this->assertQueryCheckpoint($startedAt);
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
      * @param array<int|string,mixed> $bindings
      * @return Generator<mixed>
      */
@@ -133,14 +270,26 @@ trait ConnectionStreaming
         string $sql,
         array $bindings,
         ?int $fetchMode,
+        ?array $runwireBinding,
+        int $reuseGeneration,
     ): Generator {
-        $pdo = $this->getReadPdo();
+        $this->assertStreamGeneration($reuseGeneration);
+        $pdo = $this->runWithRunwireBinding(
+            $runwireBinding,
+            fn(): PDO => $this->getReadPdo(),
+        );
         $attribute = Mysql::ATTR_USE_BUFFERED_QUERY;
         $wasBuffered = (bool) $pdo->getAttribute($attribute);
         $pdo->setAttribute($attribute, false);
 
         try {
-            yield from $this->stream($sql, $bindings, $fetchMode);
+            yield from $this->streamGenerator(
+                $sql,
+                $bindings,
+                $fetchMode,
+                $runwireBinding,
+                $reuseGeneration,
+            );
         } finally {
             $pdo->setAttribute($attribute, $wasBuffered);
         }
@@ -155,6 +304,31 @@ trait ConnectionStreaming
 
     /**
      * @param array<int|string,mixed> $bindings
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
+     */
+    private function openStreamStatement(string $sql, array $bindings, ?array $runwireBinding): PDOStatement
+    {
+        if ($runwireBinding === null) {
+            return $this->execute($sql, $bindings);
+        }
+
+        return $this->runWithRunwireBinding(
+            $runwireBinding,
+            fn(): PDOStatement => $this->execute($sql, $bindings),
+        );
+    }
+
+    /**
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
+     * @param array<int|string,mixed> $bindings
      * @return Generator<mixed>
      */
     private function postgresUnbufferedStream(
@@ -162,27 +336,55 @@ trait ConnectionStreaming
         array $bindings,
         ?int $fetchMode,
         int $fetchSize,
+        ?array $runwireBinding,
+        int $reuseGeneration,
     ): Generator {
         $cursor = $this->nextPostgresStreamCursor();
-        [$pdo, $ownsTransaction] = $this->declarePostgresStreamCursor($cursor, $sql, $bindings);
-
-        if (!$pdo instanceof PDO) {
-            return;
-        }
-
+        $startedAt = microtime(true);
+        $pdo = null;
+        $ownsTransaction = false;
         $failed = false;
+        $this->activeStreamIterators++;
 
         try {
-            while (true) {
-                $statement = $pdo->query("FETCH FORWARD {$fetchSize} FROM {$cursor}");
-                if (!$statement instanceof PDOStatement) {
-                    throw new PDOException('Unable to fetch from PostgreSQL server cursor.');
-                }
+            $this->assertStreamGeneration($reuseGeneration);
+            [$pdo, $ownsTransaction] = $this->runWithRunwireBinding(
+                $runwireBinding,
+                fn(): array => $this->declarePostgresStreamCursor($cursor, $sql, $bindings),
+            );
 
-                $rows = $this->fetchAllRows($statement, $fetchMode ?? $this->fetchMode);
-                $statement->closeCursor();
+            if (!$pdo instanceof PDO) {
+                return;
+            }
+
+            while (true) {
+                $this->assertStreamGeneration($reuseGeneration);
+                $rows = $this->runWithRunwireBinding(
+                    $runwireBinding,
+                    function () use ($pdo, $cursor, $fetchSize, $fetchMode, $startedAt): array {
+                        $this->assertQueryCheckpoint($startedAt);
+                        $statement = $pdo->query("FETCH FORWARD {$fetchSize} FROM {$cursor}");
+                        if (!$statement instanceof PDOStatement) {
+                            throw new PDOException('Unable to fetch from PostgreSQL server cursor.');
+                        }
+
+                        $rows = $this->fetchAllRows($statement, $fetchMode ?? $this->fetchMode);
+                        $statement->closeCursor();
+                        $this->assertQueryCheckpoint($startedAt);
+
+                        return $rows;
+                    },
+                );
 
                 foreach ($rows as $row) {
+                    $this->assertStreamGeneration($reuseGeneration);
+                    $this->runWithRunwireBinding(
+                        $runwireBinding,
+                        function () use ($startedAt): void {
+                            $this->assertQueryCheckpoint($startedAt);
+                        },
+                    );
+
                     yield $row;
                 }
 
@@ -195,7 +397,129 @@ trait ConnectionStreaming
 
             throw ConnectionException::queryFailed($sql, $exception->getMessage());
         } finally {
-            $this->closePostgresStreamCursor($pdo, $cursor, $ownsTransaction, $failed);
+            if ($pdo instanceof PDO) {
+                $this->closePostgresStreamCursor($pdo, $cursor, $ownsTransaction, $failed);
+            }
+
+            $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
+        }
+    }
+
+    private function releaseStreamStatement(?PDOStatement $statement, ?int $statementId): void
+    {
+        if ($statementId !== null) {
+            unset($this->activeStatementCursors[$statementId]);
+        }
+
+        if ($statement instanceof PDOStatement) {
+            $statement->closeCursor();
+        }
+
+        $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
+    }
+
+    /**
+     * @param array<int|string,mixed> $bindings
+     * @return Generator<mixed>
+     */
+    private function streamFastGenerator(
+        string $sql,
+        array $bindings,
+        ?int $fetchMode,
+        ?int $reuseGeneration,
+    ): Generator {
+        if ($reuseGeneration !== null && $reuseGeneration !== $this->runtimeReuseGeneration) {
+            throw ConnectionException::invalidConfiguration(
+                'Deferred database iterator outlived its connection lease.',
+            );
+        }
+
+        $startedAt = microtime(true);
+        $statement = $this->execute($sql, $bindings);
+        $statementId = spl_object_id($statement);
+        $this->activeStatementCursors[$statementId] = $statement;
+        $mode = $fetchMode ?? $this->fetchMode;
+        $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
+            ? $this->sqlServerBigIntColumns($statement)
+            : [];
+
+        try {
+            while (true) {
+                if ($this->queryBudgetActive) {
+                    $this->assertQueryCheckpoint($startedAt);
+                }
+
+                $row = $statement->fetch($mode);
+
+                if ($this->queryBudgetActive) {
+                    $this->assertQueryCheckpoint($startedAt);
+                }
+
+                if ($row === false) {
+                    break;
+                }
+
+                yield $sqlServerBigIntColumns !== []
+                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
+                    : $row;
+            }
+        } finally {
+            unset($this->activeStatementCursors[$statementId]);
+            $statement->closeCursor();
+        }
+    }
+
+    /**
+     * @param array<int|string,mixed> $bindings
+     * @param array{
+     *   runtime:\Infocyph\Runwire\RuntimeContext,
+     *   request:?\Infocyph\Runwire\RequestContext,
+     *   scope:?\Infocyph\Runwire\Coroutine\CoroutineScope
+     * }|null $runwireBinding
+     * @return Generator<mixed>
+     */
+    private function streamGenerator(
+        string $sql,
+        array $bindings,
+        ?int $fetchMode,
+        ?array $runwireBinding,
+        int $reuseGeneration,
+    ): Generator {
+        $startedAt = microtime(true);
+        $statement = null;
+        $statementId = null;
+        $this->activeStreamIterators++;
+
+        try {
+            $this->assertStreamGeneration($reuseGeneration);
+            $statement = $this->openStreamStatement($sql, $bindings, $runwireBinding);
+            $statementId = spl_object_id($statement);
+            $this->activeStatementCursors[$statementId] = $statement;
+            $mode = $fetchMode ?? $this->fetchMode;
+            $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
+                ? $this->sqlServerBigIntColumns($statement)
+                : [];
+
+            while (true) {
+                $row = $this->fetchStreamRow(
+                    $statement,
+                    $mode,
+                    $startedAt,
+                    $runwireBinding,
+                );
+
+                if ($row === false) {
+                    break;
+                }
+
+                yield $sqlServerBigIntColumns !== []
+                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
+                    : $row;
+
+                $this->assertStreamGeneration($reuseGeneration);
+            }
+        } finally {
+            $this->releaseStreamStatement($statement, $statementId);
         }
     }
 }

@@ -17,7 +17,7 @@ final class ConnectionConfig
         'read_strategy' => 'random', 'read_health_cooldown' => 30, 'read_latency_ttl' => 15,
         'read_probe_sample_size' => 0, 'least_latency_ttl' => 15, 'statement_cache_enabled' => false,
         'statement_cache_size' => 64, 'query_comment_enabled' => false, 'query_comment_max_length' => 160,
-        'query_comment_context' => [], 'sticky' => false, 'security' => [],
+        'query_comment_context' => [], 'sticky' => false, 'cache_scope' => null, 'security' => [],
     ];
 
     private const array DRIVER_ALIASES = [
@@ -400,6 +400,19 @@ final class ConnectionConfig
     }
 
     /** @param array<string,mixed> $config */
+    private function validateCacheScopes(array $config): void
+    {
+        foreach (['cache_scope', 'cache_dependency_scope'] as $scopeKey) {
+            $scope = $config[$scopeKey] ?? null;
+            if ($scope !== null && (!is_string($scope) || trim($scope) === '')) {
+                throw ConnectionException::invalidConfiguration(
+                    "Config key '{$scopeKey}' must be null or a non-empty string.",
+                );
+            }
+        }
+    }
+
+    /** @param array<string,mixed> $config */
     private function validateConfig(array $config): void
     {
         $driver = $config['driver'] ?? null;
@@ -418,6 +431,7 @@ final class ConnectionConfig
                 }
             }
         }
+        $this->validateCacheScopes($config);
     }
 
     /** @param array<string,mixed> $replica */

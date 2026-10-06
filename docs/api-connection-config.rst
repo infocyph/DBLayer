@@ -72,7 +72,9 @@ Driver Settings
 - PostgreSQL: ``host``, ``port``, credentials, ``charset``, ``schema``, and
   ``sslmode``.
 - Microsoft SQL Server: ``host``, ``port``, credentials, ``encrypt``,
-  ``trust_server_certificate``, ``application_intent``, and ``login_timeout``.
+  ``trust_server_certificate``, and ``application_intent``. The common
+  ``timeout`` key becomes ``LoginTimeout`` in the DSN; ``login_timeout`` is not
+  an effective setting. ``MultiSubnetFailover`` is not currently exposed.
 - SQLite: ``database`` only; network, credential, charset, schema, and TLS keys
   are rejected.
 

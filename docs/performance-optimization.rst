@@ -283,6 +283,9 @@ process/request lifecycle already bounds reuse differently.
 
 When pooling is selected:
 
+- ``min_connections`` creates lazy wrappers; call
+  ``PoolManager::warmUp()`` from host-controlled worker readiness only when
+  pre-opened primary handles are intentionally desired
 - each active ``ConnectionLease`` belongs to exactly one execution scope
 - release through the lease rather than a stale bare connection reference
 - let DBLayer run ``resetRuntimeStateForReuse()`` before idle reuse
@@ -292,6 +295,12 @@ When pooling is selected:
 Do not add application-level locks around ``PoolManager`` as a substitute for
 checkout ownership. Pool state is process-local and the lease token is the
 intended ownership primitive.
+
+For Runwire hosts, benchmark ordinary pooled mode and Runwire-bound mode
+separately. Runwire can make bounded retry sleeps and cancellation checkpoints
+cooperative, but it does not convert PDO into asynchronous I/O. Throughput
+claims must therefore come from the complete application workload rather than
+from runtime binding alone.
 
 Query Result Cache Performance
 ------------------------------

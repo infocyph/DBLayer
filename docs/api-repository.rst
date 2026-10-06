@@ -91,6 +91,13 @@ key identity.
 application-level SELECT-then-INSERT/UPDATE flows when true upsert semantics are
 required.
 
+For a tenant-scoped repository, ``upsert()`` has additional safety constraints:
+MySQL/MariaDB tenant-scoped upserts are rejected; explicit conflict-target
+drivers require the tenant column in ``uniqueBy``; and an explicit update list
+must not contain the tenant column. Tenant identity is also revalidated after
+casts and hooks. Use an explicitly unscoped repository for authorized
+cross-tenant administrative writes.
+
 Optimistic Conditional Writes
 -----------------------------
 

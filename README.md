@@ -18,12 +18,12 @@ multi-driver execution, and operational controls without becoming an ORM.
 - **Query Builder** - Fluent, Laravel-like API
 - **Repository Layer** - Reusable table policies, casts, hooks, tenancy, soft deletes, and optimistic locking
 - **TableRepository** - Static repository and QueryBuilder ergonomics with explicit infrastructure access
-- **Connection Manager** - Connection pooling + read replicas
+- **Connection Manager** - Tokenized connection pooling, explicit worker warmup, and read replicas
 - **Replica Strategies** - `random`, `round_robin`, `least_latency`, `weighted`
 - **Multi-Driver** - MySQL, MariaDB, PostgreSQL, Microsoft SQL Server, SQLite
 - **Security** - Multi-layer SQL injection protection
 - **Transactions** - Nested transactions with savepoints
-- **Caching** - Opt-in CacheLayer 3 query results with tags and commit-safe invalidation
+- **Caching** - Opt-in CacheLayer 4 query results with scoped identities, tags, and commit-safe invalidation
 - **Profiling** - Performance monitoring
 - **System Monitoring** - On-demand engine-native status, sessions, long queries, locks, table/index metrics, replication, and maintenance signals
 - **Events** - Lifecycle hooks
@@ -33,6 +33,7 @@ multi-driver execution, and operational controls without becoming an ORM.
 - **Schema & Migrations** - Portable type catalog plus explicit driver-specific types, generated/spatial columns, deterministic ledger, dry runs, leases, conditional/stepped execution, rollback/reset/refresh/fresh
 - **Seeding** - Explicit transactional seed trees with synchronous nested composition
 - **Relations** - Explicit bounded one, many, and many-to-many array projection without ORM behavior
+- **Optional Runwire integration** - Host-owned cancellation/deadlines, cooperative retry sleeps, and lazy-runtime propagation without taking over worker lifecycle
 
 Schema UUID/ULID helpers define storage only. Applications may generate
 portable UUIDv7/ULID values with `infocyph/uid`, or deliberately configure a
@@ -127,6 +128,19 @@ for MySQL/SQLite, `connect_timeout` for PostgreSQL, and `LoginTimeout` for SQL
 Server. PDO and native-client versions may still impose driver-specific timeout
 and persistent-connection semantics.
 
+### External Proxies and Database Listeners
+
+DBLayer can target PostgreSQL poolers (PgBouncer/Pgpool-II), MySQL/MariaDB
+proxies (ProxySQL/MaxScale), and SQL Server availability-group listeners through
+the normal driver and endpoint configuration. This is expected protocol
+compatibility; specific proxy modes and HA topologies require deployment tests.
+DBLayer's pool is local to each PHP worker, and cluster promotion remains owned
+by the database infrastructure. See the connection deployment guide
+for PgBouncer session/prepared-statement restrictions, ODBC pooling, the current
+`MultiSubnetFailover` limitation, and SQLite file/WAL behavior.
+The [examples guide](examples/README.md) includes named bootstrap profiles and
+runnable worker-pooling and SQLite replica-routing demonstrations.
+
 ### Query Controls
 
 ```php
@@ -146,6 +160,29 @@ DB::withQueryCancellation(
     fn () => DB::select('select 1')
 );
 ```
+
+### Persistent Workers and Optional Runwire
+
+Long-running workers should keep one `PoolManager` per worker generation and use
+tokenized leases. `min_connections` creates lazy wrappers; a host-controlled
+readiness phase can explicitly open distinct database handles:
+
+```php
+$manager = DB::poolManager([
+    'min_connections' => 2,
+    'max_connections' => 10,
+]);
+
+$ready = $manager->warmUp('main', target: 2);
+```
+
+When Runwire is installed, the host can lend its active runtime/request/scope to
+an exclusively owned connection with `Connection::withRunwire()`. DBLayer
+composes cancellation/deadlines and lazy iteration with those objects but never
+starts/stops the host worker or event loop. PDO remains synchronous.
+
+See the DBLayer 6.0 upgrade guide for changed tenancy, cache, transaction, lazy
+lease, and persistent-worker contracts.
 
 ### Telemetry
 
@@ -242,7 +279,7 @@ $active = $users->get(fn ($q) => $q->where('active', 1));
 
 ### Collections and Result Caching
 
-Array results remain the default. Opt into DBLayer 5 collection APIs or
+Array results remain the default. Opt into DBLayer collection APIs or
 bounded lazy transformations explicitly:
 
 ```php
@@ -251,7 +288,7 @@ $lazy = DB::table('users')->orderBy('id')->lazyCollection(chunkSize: 500);
 ```
 
 Query result caching is also explicit. Cache misses are resolved through
-CacheLayer 3 `remember()`; writes invalidate conservative table tags only after
+CacheLayer 4 `remember()`; writes invalidate conservative table tags only after
 the surrounding transaction commits.
 
 ```php
@@ -369,14 +406,15 @@ Hardening controls:
 
 - PHP 8.4+
 - ext-pdo
-- Composer installs `infocyph/DBLayer ^5.1`, `infocyph/cachelayer ^3.1`, and
-  `psr/log ^3.0.2`
+- DBLayer 6.0 requires `infocyph/arraykit ^5.3`, `infocyph/cachelayer ^4.0`,
+  and `psr/log ^3.0.2`
+- `infocyph/runwire` 2.1.x is optional for host-runtime integration; DBLayer's integration is tested against 2.1.1
 - ext-pdo_mysql (for MySQL and MariaDB)
 - ext-pdo_pgsql (for PostgreSQL)
 - ext-pdo_sqlsrv (for Microsoft SQL Server)
 - ext-pdo_sqlite (for SQLite)
 
-## Security
+## Responsible Disclosure
 
 Do not disclose suspected vulnerabilities in a public issue, discussion or pull request. Follow [SECURITY.md](SECURITY.md) and use [GitHub private vulnerability reporting](https://github.com/infocyph/DBLayer/security/advisories/new).
 

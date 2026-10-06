@@ -1,0 +1,39 @@
+name: "Documentation"
+
+on:
+  pull_request:
+    branches: [ "main", "master", "develop", "development" ]
+    paths:
+      - "docs/**"
+      - "README.md"
+      - ".github/workflows/docs.yml"
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - "docs/**"
+      - "README.md"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  sphinx:
+    name: Sphinx warnings-as-errors
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+
+      - name: Install documentation dependencies
+        run: python -m pip install --disable-pip-version-check -r docs/requirements.txt
+
+      - name: Build documentation
+        run: python -m sphinx -W --keep-going -b html docs .build/docs

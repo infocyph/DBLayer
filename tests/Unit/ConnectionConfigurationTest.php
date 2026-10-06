@@ -287,9 +287,8 @@ it('validates PostgreSQL DSN tokens before interpolation', function (
 ]);
 
 it('maps MySQL collation and TLS settings to constructor-only PDO attributes', function (): void {
-    if (!class_exists(Mysql::class)) {
-        test()->markTestSkipped('pdo_mysql is not installed.');
-    }
+    expect(class_exists(Mysql::class))
+        ->toBeTrue('pdo_mysql must be installed for the release test matrix.');
 
     $config = ConnectionConfig::fromArray([
         'driver' => 'mysql',

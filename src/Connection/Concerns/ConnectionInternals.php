@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection\Concerns;
 
+use Infocyph\CacheLayer\Cache\Adapter\ArrayCacheAdapter;
 use Infocyph\CacheLayer\Cache\Cache;
 use Infocyph\CacheLayer\Cache\CacheInterface;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Connection\PrivateQueryCacheLockProvider;
+use Infocyph\DBLayer\Connection\QueryRuntimePolicy;
 use Infocyph\DBLayer\Connection\ReadReplicaSessionPolicy;
 use Infocyph\DBLayer\Connection\SqlStatementInspector;
 use Infocyph\DBLayer\Events\Events;
@@ -24,9 +27,29 @@ use Throwable;
 trait ConnectionInternals
 {
     /**
+     * Whether the current query-result cache was created privately by DBLayer.
+     */
+    private bool $ownsQueryCache = false;
+
+    /**
      * Query-result cache owned by this connection instance.
      */
     private ?CacheInterface $queryCache = null;
+
+    /**
+     * Fail fast at a cache/stream/runtime checkpoint.
+     *
+     * @internal Used by DBLayer-owned higher-level execution paths.
+     */
+    public function assertQueryCheckpoint(float $startedAt): void
+    {
+        if (!$this->queryBudgetActive) {
+            return;
+        }
+
+        $this->assertNotCancelled();
+        $this->assertWithinQueryBudget($startedAt);
+    }
 
     /**
      * Disconnect write and read handles and reset request-scoped state.
@@ -48,6 +71,41 @@ trait ConnectionInternals
         $this->recordsModified = false;
         $this->transactionManager = null;
         $this->resetRequestRuntimeState();
+
+        if ($this->ownsQueryCache) {
+            $this->queryCache = null;
+            $this->ownsQueryCache = false;
+        }
+    }
+
+    /**
+     * Get read PDO connection (for read/write splitting).
+     */
+    public function getReadPdo(): PDO
+    {
+        if ($this->shouldUseWritePdoForRead()) {
+            return $this->getPdo();
+        }
+
+        if (!$this->config->hasReadConfig()) {
+            return $this->getPdo();
+        }
+
+        if ($this->readPdo === null) {
+            $this->connectRead();
+        }
+
+        return $this->readPdo ?? $this->getPdo();
+    }
+
+    /**
+     * Whether row/fetch checkpoints have any active query budget to enforce.
+     *
+     * @internal
+     */
+    public function hasActiveQueryBudget(): bool
+    {
+        return $this->queryBudgetActive;
     }
 
     /**
@@ -67,7 +125,16 @@ trait ConnectionInternals
      */
     public function queryCache(): CacheInterface
     {
-        return $this->queryCache ??= Cache::memory('dblayer');
+        if ($this->queryCache === null) {
+            $this->queryCache = new Cache(
+                new ArrayCacheAdapter('dblayer'),
+                new PrivateQueryCacheLockProvider(),
+                namespace: 'dblayer',
+            );
+            $this->ownsQueryCache = true;
+        }
+
+        return $this->queryCache;
     }
 
     /**
@@ -76,6 +143,7 @@ trait ConnectionInternals
     public function setQueryCache(?CacheInterface $cache): self
     {
         $this->queryCache = $cache;
+        $this->ownsQueryCache = false;
 
         return $this;
     }
@@ -148,13 +216,7 @@ trait ConnectionInternals
      */
     private function assertNotCancelled(): void
     {
-        if ($this->queryCancellationChecker === null) {
-            return;
-        }
-
-        if (($this->queryCancellationChecker)()) {
-            throw ConnectionException::queryCancelled();
-        }
+        QueryRuntimePolicy::assertNotCancelled($this->queryCancellationChecker);
     }
 
     /**
@@ -162,17 +224,10 @@ trait ConnectionInternals
      */
     private function assertWithinQueryBudget(float $startedAt): void
     {
-        $deadlineAt = $this->resolveEffectiveDeadlineAt($startedAt);
-
-        if ($deadlineAt === null) {
-            return;
-        }
-
-        if (microtime(true) <= $deadlineAt) {
-            return;
-        }
-
-        throw ConnectionException::queryTimeout(microtime(true) - $startedAt);
+        QueryRuntimePolicy::assertWithinDeadline(
+            $this->resolveEffectiveDeadlineAt($startedAt),
+            $startedAt,
+        );
     }
 
     /**
@@ -703,6 +758,13 @@ trait ConnectionInternals
         $cached = $this->statementCache[$bucket][$fingerprint] ?? null;
 
         if ($cached instanceof PDOStatement) {
+            if (
+                $this->activeStatementCursors !== []
+                && isset($this->activeStatementCursors[spl_object_id($cached)])
+            ) {
+                return $pdo->prepare($sql);
+            }
+
             $cached->closeCursor();
             $this->touchStatementCacheEntry($isWrite, $fingerprint);
 
@@ -752,6 +814,13 @@ trait ConnectionInternals
         } else {
             $this->stats['reads']++;
         }
+    }
+
+    private function refreshQueryBudgetActive(): void
+    {
+        $this->queryBudgetActive = $this->queryCancellationChecker !== null
+            || $this->queryDeadlineAt !== null
+            || $this->queryTimeoutMs !== null;
     }
 
     /**
@@ -858,6 +927,25 @@ trait ConnectionInternals
         );
 
         return $this->executePreparedStatement($statement, $bindings);
+    }
+
+    /**
+     * Sanitize native/session state before this connection is reused.
+     */
+    private function sanitizeRuntimeStateForReuse(): bool
+    {
+        if ($this->ownsQueryCache) {
+            $this->queryCache = null;
+            $this->ownsQueryCache = false;
+        }
+
+        try {
+            $this->syncServerSideStatementTimeouts();
+        } catch (Throwable) {
+            return false;
+        }
+
+        return true;
     }
 
     /**

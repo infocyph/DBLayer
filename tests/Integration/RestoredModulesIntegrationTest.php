@@ -50,9 +50,10 @@ it('uses cachelayer file adapter through DB facade', function (string $driver): 
     chmod($cacheDir, 0700);
 
     $perms = fileperms($cacheDir);
-    if ($perms !== false && (($perms & 0x0002) === 0x0002)) {
+    if ($perms === false || (($perms & 0x0002) === 0x0002)) {
         $removeDirectory($cacheDir);
-        test()->markTestSkipped('File permission world-writable checks are not supported in this environment.');
+
+        throw new RuntimeException('Cache directory permissions cannot satisfy the file-cache security test.');
     }
 
     $cache = Cache::file('dblayer', $cacheDir);
