@@ -66,8 +66,11 @@ trait QueryBuilderResults
             return $this->executor->selectCompiled($compiled);
         }
 
-        $cacheStartedAt = microtime(true);
-        $this->connection->assertQueryCheckpoint($cacheStartedAt);
+        $cacheStartedAt = null;
+        if ($this->connection->hasActiveQueryBudget()) {
+            $cacheStartedAt = microtime(true);
+            $this->connection->assertQueryCheckpoint($cacheStartedAt);
+        }
 
         $result = $this->connection->queryCache()->remember(
             $this->resultCacheKey($sql, $bindingFingerprint),
@@ -76,7 +79,9 @@ trait QueryBuilderResults
             $this->resultCacheTags(),
         );
 
-        $this->connection->assertQueryCheckpoint($cacheStartedAt);
+        if ($cacheStartedAt !== null) {
+            $this->connection->assertQueryCheckpoint($cacheStartedAt);
+        }
 
         return $this->normalizeCachedRows($result);
     }
