@@ -24,41 +24,50 @@ exclude failing code or edit vendor files.
 
 ## Implementation tracker
 
-Last synchronized: 2026-10-05. PR: #32. **Release blocked after rechecking
-`a33cbe7b955a10add97170592394f101e4dfefce`.** Exact-revision CI is green, but
-new adversarial probes reopen correctness and lifecycle gates. The open findings and reproducible evidence are consolidated below.
+Last synchronized: 2026-10-06. PR: #32. Current candidate:
+`c6105f45c16bb3e60e86c83620a51db2aff49549`.
+
+The implementation work from the `d93e3230` review is complete. R01-R06 are
+closed by production fixes plus focused regressions. Exact-head Security &
+Standards and downstream consumer smoke are green. The only remaining release
+acceptance item is R07: the exact-head release-performance job was interrupted
+by a GitHub runner shutdown while executing the comparison. The failed job has
+been re-run; release acceptance remains pending until that retry completes the
+matched comparison and sustained Runwire soak successfully.
 
 | Batch | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
-| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Reopened** | R01: scoped upsert modifies/reassigns foreign-tenant rows. R04-R05: cross-scope invalidation and native-commit cache policy need follow-up. Existing focused/schema tests still pass. |
-| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **Reopened** | R02-R03: live cursors survive lease release; iterator cancellation/binding coverage is incomplete. Existing focused/native-timeout tests still pass. |
-| C | D13 — PHPForge/tooling and dependency compatibility | **Complete** | Skip scanner/configuration are fixed and the full PHPForge QA/analyzer matrix is green. Production audit is clean. The PHPBench 1.7.0 → `doctrine/annotations` development-tool warning is explicitly accepted for this release and is not a DBLayer release blocker. |
-| D | Optional Runwire 2.1.1 integration | **Reopened** | Existing instance/capability integration passes; R03 iterator lifetimes and R06 warmup readiness require regressions/fixes. Proposed timeout/maintenance contracts below remain unimplemented or uncertified. |
-| E | Docs, performance/soak, downstream consumers and final CI | **Open** | QA/analysis/component benchmarks/consumer smokes pass on `a33cbe7`. R07: representative benchmark validation/comparison steps are skipped; the 300-iteration unit regression is not the required sustained host soak. Revalidate exact final revision after fixes. |
+| A | D01-D06 — policy, tenancy, cache isolation and durable mutation correctness | **Complete** | R01, R04 and R05 resolved. Tenant-scoped upsert rejects unsafe conflict contracts, shared dependency tags invalidate across visibility scopes, and cache-aware DBLayer writes reject unmanaged native-PDO transactions before mutation. |
+| B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **Complete** | R02-R03 resolved. Deferred/live streams are fenced from pool reuse, lazy/stream iteration preserves captured Runwire cancellation/deadline policy, and existing D08-D12 regressions remain green. |
+| C | D13 — PHPForge/tooling and dependency compatibility | **Complete** | Exact-head PHP 8.4/8.5 stable/lowest QA, analysis, benchmarks and clean install are green. The PHPBench → `doctrine/annotations` development-tool warning remains explicitly accepted and non-blocking. |
+| D | Optional Runwire 2.1.1 integration | **Complete** | Runwire binding, cancellation/deadline propagation, lazy/stream lifetime enforcement, pool warmup expiry reconciliation, worker-generation reuse/replacement and CacheLayer sharing are implemented and covered. |
+| E | Docs, representative performance/soak, downstream consumers and final CI | **Acceptance pending** | Exact-head Security & Standards and Foundation/ReqShield smoke are green. R07 matched-performance + sustained Runwire soak retry is the only remaining gate. |
 
 ### Batch A item tracker
 
 | ID | Status | Exit requirement |
 | --- | --- | --- |
 | D01 | Complete | Structured aggregate identifiers validated; injection regressions pass on every compiler path. |
-| D02 | Reopened | Payload conflicts are rejected, but scoped upsert can update/reassign another tenant's existing conflict row (R01). |
-| D03 | Reopened | Visibility keys are isolated; mutation dependency tags must invalidate shared data across visibility scopes (R04). |
-| D04 | Follow-up required | Native reads bypass cache and afterCommit rejects unmanaged ownership; a competing reader can refill before native commit (R05). Preserve/document the explicit caller-owned policy or provide enforceable integration. |
+| D02 | Complete | Tenant-scoped upsert rejects unsafe conflict targets, forbids tenant-column reassignment and rejects MySQL/MariaDB scoped upsert where unrelated unique-key conflicts cannot be constrained safely. |
+| D03 | Complete | Result visibility remains isolated while table dependency tags share a stable physical-data identity across cache visibility scopes. |
+| D04 | Complete | Native reads bypass result cache and cache-aware DBLayer writes inside externally owned native PDO transactions are rejected before mutation; callers retaining raw PDO ownership must own their cache policy. |
 | D05 | Complete | Schema invalidation uses the exact passed Connection/cache owner. |
 | D06 | Complete | Completed mutations record durable outcome before late budget failure and cannot leave stale cache/sticky state. |
-
-Tracker statuses are updated only from committed code and verification evidence; a code change alone is not marked complete until its required regression/QA evidence exists.
 
 ### Batch B item tracker
 
 | ID | Status | Exit requirement |
 | --- | --- | --- |
-| D07 | Reopened | Cache/nested cancellation regressions pass; row-level lazy cancellation and deferred stream binding remain incomplete (R03). |
+| D07 | Complete | Cache/nested cancellation, row-level lazy cancellation, deferred-stream binding and pre-PDO cancellation regressions pass. |
 | D08 | Complete | Active streaming statements are never reused from the prepared-statement cache; cleanup releases ownership. |
-| D09 | Reopened | Scoped callbacks reject Traversable escape, but a live cursor can survive explicit lease release and unsafe wrapper reuse (R02). |
+| D09 | Complete | Scoped callbacks reject Traversable escape; active/deferred streams fence their wrapper from unsafe pool reuse after lease release. |
 | D10 | Complete | Pool reset restores native timeout state; SQLite and live PostgreSQL regressions pass. |
 | D11 | Complete | LIKE escaping is single-pass and literal wildcard/backslash semantics are verified. |
 | D12 | Complete | DBLayer-owned private caches are discarded on reuse; caller-owned shared caches survive reset. |
+
+Tracker statuses are updated only from committed code and verification evidence.
+R07 remains open until the exact-head retry completes; no release/tag should be
+declared from the interrupted performance run.
 
 ## Changes already applied
 
@@ -123,138 +132,32 @@ findings.
 
 ## Open findings
 
-Priorities describe remediation order and release risk, not CVSS scores.
-Each finding includes its owner, observed behavior and required follow-up.
+The `d93e3230` correctness/lifecycle findings R01-R06 are resolved and covered
+by committed regressions. Only release acceptance R07 remains open.
 
 | ID | Priority | Remaining issue | Related audit item |
 | --- | --- | --- | --- |
-| R01 | High | Scoped upsert modifies or takes another tenant's row | D02 |
-| R02 | High for worker reuse | Active stream survives lease release and unsafe pool reuse | D09 |
-| R03 | Medium | Runwire binding/cancellation does not cover the full iterator lifetime | D07 |
-| R04 | Medium | Security-scoped tags miss shared-table mutations | D03 |
-| R05 | Medium | Native-transaction cache refill can stay stale after commit | D04 |
-| R06 | Medium | Warmup reports expired handles as ready | Worker-pool contract |
-| R07 | Release gate | Representative performance and sustained host soak remain uncertified | Batch E |
+| R07 | Release gate | Exact-head matched performance comparison and sustained Runwire host soak must complete successfully after the GitHub runner interruption | Batch E |
 
-### R01 — High: scoped upsert can modify or take another tenant's row
+### R07 — Release gate: exact-head performance/soak retry pending
 
-Owner: [Repository::upsert](../src/Query/Repository.php#L976).
-The new checks validate the incoming tenant attribute, but the SQL conflict
-update is not constrained by the repository's tenant WHERE predicate.
+The representative release workflow is now implemented and exercised against a
+matched baseline/candidate PostgreSQL workload with alternating run order,
+multiple matched pairs, successful-RPS comparison, p95 latency, RSS, query/error
+accounting and a hard 2% regression ceiling. The sustained Runwire soak records
+worker-generation replacement, cancellation, tenant changes, abandoned/deferred
+iterator fencing, process RSS, socket count, queue depth and deployment overlap.
 
-Reproduction: seed row id=7, tenant_id=2. Call tenant 1's repository with
-`upsert(['id'=>7,'value'=>'changed'], ['id'], ['value'])`: it accepts the call
-and changes tenant 2's value. Omit the update-column list and it also changes
-the row's tenant_id from 2 to 1. Both reproduced against real SQLite PDO.
+Earlier candidate measurements demonstrated the 2% throughput gate can pass and
+the soak instrumentation reached the intended lifecycle checks. The latest exact
+candidate `c6105f45c16bb3e60e86c83620a51db2aff49549` did not produce final
+acceptance evidence because GitHub sent the runner a shutdown signal during the
+comparison step. That workflow failure is infrastructure cancellation rather
+than a measured regression. The failed job has been re-run.
 
-Fix the conflict-update ownership boundary, not just the payload. The database
-must enforce the tenant condition atomically, or the scoped API must reject
-unsafe conflict targets/driver paths explicitly. A pre-read alone is insufficient
-under concurrency. Including tenant_id in a declared conflict target does not
-automatically make MySQL's unrelated unique-key conflicts safe. Test existing
-foreign-tenant rows, both update-list forms, bulk calls and real driver-specific
-conflict behavior, including MySQL/MariaDB and SQL Server. Never reassign the
-tenant column in a scoped conflict update.
-
-### R02 — High for worker reuse: an active stream survives pool release
-
-Owner: [Connection::resetRuntimeStateForReuse](../src/Connection/Connection.php#L927).
-The reset rejects transactions but does not reject or settle
-`activeStatementCursors`. Start a stream, consume row 1, release its explicit
-lease, then checkout another lease: SQLite returns the same Connection while
-the old generator can fetch row 2 and the new borrower executes a query.
-
-Callers should keep the lease for the iterator lifetime, as documented. The
-library nevertheless knows this cursor remains active and must prevent unsafe
-idle reuse. Refuse reuse/discard or explicitly close and fence live cursors;
-cover partial and abandoned streams and native unbuffered-driver behavior.
-This does not require claiming that arbitrary retained bare references can be
-fully fenced.
-
-### R03 — Medium: Runwire iterator lifetime is only partially enforced
-
-Owners: [lazyByIdGenerator](../src/Query/Concerns/QueryBuilderResults.php#L191)
-and [Connection::stream](../src/Connection/Connection.php#L1221).
-`lazyById(chunkSize:3)` captures the passed binding for database batches, but
-yielding buffered rows has no checkpoint. Cancel after row 1: row 2 is yielded.
-Direct `stream()` is itself a deferred generator and does not capture the
-binding at creation. Return it from `withRunwire()`, complete the request, then
-iterate: all three rows are read with the restored, unbound connection policy.
-
-Capture and validate the exact binding through supported iterator lifetimes,
-check before each row/batch/fetch as required by the plan, or reject unsupported
-deferred escape explicitly. Preserve nested policies and iterator/lease
-ownership; cover both ordinary generators and ArrayKit collections, cancellation
-inside a buffered batch and completion before first iteration. Review the
-PostgreSQL server-cursor FETCH loop too: it currently lacks query checkpoints.
-
-### R04 — Medium: security-scoped cache tags miss shared-table mutations
-
-Owner: [Connection::cacheTableTag](../src/Connection/Connection.php#L408).
-The table dependency tag includes the full result visibility fingerprint,
-including username/cache_scope. Two same-database, same-name connections share
-one cache but have scopes `reader` and `writer`. Warm the reader, mutate the
-same row through the writer: reader cache returns `old`, direct SELECT returns
-`new`. A write invalidates only the writer's visibility scope.
-
-Keep visibility isolation in result keys while giving physical/logical table
-dependencies a shared invalidation identity across roles/scopes that access
-the same data. Preserve isolation between independent databases/deployments
-and between actual schemas. Verify cross-role/RLS and explicitly qualified
-cross-schema mutations on PostgreSQL as well as shared-backend cache adapters.
-
-### R05 — Medium: pre-commit invalidation does not certify native transactions
-
-Owner: [invalidateQueryCacheTagsAfterCommit](../src/Connection/Connection.php#L726).
-With two connections sharing a cache, begin a native PDO transaction on A and
-perform a structured update. Immediate tag invalidation lets B repopulate the
-old committed row before A commits. After native commit the cached value stays
-`old` while direct SELECT returns `committed`.
-
-The upgrade guide correctly says native-transaction callers must own their
-commit/cache policy. Keep that limitation explicit: the early invalidation is
-not a substitute for a commit hook. Either provide explicit owner integration
-or reject unsupported cache-aware native writes until that policy is supplied.
-Tests must cover another reader filling during the transaction and commit/
-rollback; the existing single-connection rollback test cannot prove this gate.
-
-### R06 — Medium: warmup can report expired handles as ready
-
-Owner: [Pool::warmUp](../src/Connection/Pool.php#L372).
-The initial ready count checks only whether PDO is non-null and returns before
-the pool's expiry/health rules run. An already-expired idle handle still makes
-`warmUp(target:1)` return 1. The next checkout removes it and returns a new lazy
-wrapper with no open handle. The diagnostic ages the existing idle timestamp
-through Reflection to make expiry deterministic; it does not mock PDO.
-
-Reconcile eligible idle expiry/health and actual ready counts before claiming
-the warm target is reached. Never probe an active borrower. Verify cleanup and
-capacity changes during warmup, failed health/release, server disconnect and
-replenishment after expiry with real servers. Keep host startup/maintenance
-budgets and explicit per-endpoint allocation open until implemented/verified.
-
-### R07 — Release gate: representative performance and soak are not certified
-
-Owner: [release tracker](#implementation-tracker).
-The exact candidate's benchmark jobs pass, but both
-`ic:benchmark:validate` and `ic:benchmark:compare` steps are SKIPPED on PHP 8.4
-and 8.5 because representative result/baseline inputs are empty. PHPBench
-completion proves component coverage, not the plan's 5.1-versus-candidate
-sustained successful-RPM budget.
-
-The persistent-worker unit test passes 300 sequential SQLite iterations; the
-focused local suite, including that test, completes in about 0.15 seconds.
-It is a valuable lifecycle regression, not the planned sustained concurrent
-host soak with continuous process-tree RSS/socket/queue measurements,
-cancellation, tenant changes and deployment overlap. No matching production-
-equivalent baseline/candidate result artifacts or representative host soak
-evidence were found in the repository or configured CI gates inspected here.
-External results, if they exist, still need to be linked and checked against
-the candidate and the stated budgets.
-
-Retain the acceptance requirements, record reproducible results, and run the
-comparison only on an explicitly stable matched environment. Do not weaken
-the gates or equate green microbenchmarks with representative RPM acceptance.
+Release acceptance requires the retry to complete both the matched comparison
+and sustained Runwire soak successfully. Do not mark R07 complete or tag the
+release until that exact-head evidence is green.
 
 ## Runwire and worker-pool contracts
 
@@ -527,13 +430,12 @@ If urgent security fixes must ship independently, use a narrowly scoped 5.1.1
 patch on the old compatible dependency range, with its own regression and CI
 evidence. An additive Runwire-only change could fit 5.2 if no compatibility is
 dropped, but that is not the requested combined dependency-floor candidate.
-Release remains blocked until the reopened findings and required acceptance
-gates are closed with exact-final-revision evidence.
+Implementation is complete and the exact-head Security & Standards and downstream
+consumer gates are green. Release remains blocked only on R07: one clean
+exact-head completion of the representative performance comparison and sustained
+Runwire host soak after the GitHub runner interruption.
 
-Update the existing upgrade guide as fixes close, covering CacheLayer 4 installation/configuration,
-tenant payload conflicts, structured aggregate validation, cache identity
-version/cold transition, native transaction constraints, iterator ownership,
-late mutation outcomes and optional Runwire examples for both composition chains.
-Tag only after every required batch/gate is closed on the immutable final SHA.
-Keep open work/evidence in this plan; remove completed remediation history as
-batches close. No commit, merge, release or deployment is part of this audit.
+The upgrade guide already covers the DBLayer 6.0 dependency, tenancy, cache,
+native-transaction, iterator, worker-pool and optional Runwire contracts. Tag
+only after R07 is green on the immutable final SHA. PR #32 remains open and
+unmerged; no production deployment has been performed from this branch.
