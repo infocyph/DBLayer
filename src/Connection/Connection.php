@@ -84,6 +84,16 @@ final class Connection
     private readonly ReplicaSelector $replicaSelector;
 
     /**
+     * Memoized shared dependency identity for cache tags.
+     */
+    private ?string $cacheDependencyFingerprintMemo = null;
+
+    /**
+     * Memoized result-visibility identity for cache keys.
+     */
+    private ?string $cacheScopeFingerprintMemo = null;
+
+    /**
      * Query executor for this connection.
      */
     private ?Executor $executor = null;
@@ -373,10 +383,14 @@ final class Connection
      */
     public function cacheDependencyFingerprint(): string
     {
+        if ($this->cacheDependencyFingerprintMemo !== null) {
+            return $this->cacheDependencyFingerprintMemo;
+        }
+
         $schema = $this->config->get('schema');
         $dependencyScope = $this->config->get('cache_dependency_scope');
 
-        return substr(hash('sha256', implode("\0", [
+        return $this->cacheDependencyFingerprintMemo = substr(hash('sha256', implode("\0", [
             'v1',
             $this->name,
             $this->getDriverName(),
@@ -392,11 +406,15 @@ final class Connection
      */
     public function cacheScopeFingerprint(): string
     {
+        if ($this->cacheScopeFingerprintMemo !== null) {
+            return $this->cacheScopeFingerprintMemo;
+        }
+
         $schema = $this->config->get('schema');
         $username = $this->config->get('username');
         $explicitScope = $this->config->get('cache_scope');
 
-        return substr(hash('sha256', implode("\0", [
+        return $this->cacheScopeFingerprintMemo = substr(hash('sha256', implode("\0", [
             'v2',
             $this->name,
             $this->getDriverName(),
@@ -1150,6 +1168,8 @@ final class Connection
     public function setDatabaseName(string $database): self
     {
         $this->config = $this->config->with('database', $database);
+        $this->cacheDependencyFingerprintMemo = null;
+        $this->cacheScopeFingerprintMemo = null;
         $this->disconnect();
 
         return $this;
@@ -1210,6 +1230,8 @@ final class Connection
     public function setTablePrefix(string $prefix): self
     {
         $this->tablePrefix = $prefix;
+        $this->cacheDependencyFingerprintMemo = null;
+        $this->cacheScopeFingerprintMemo = null;
         $this->compiler->setTablePrefix($prefix);
 
         return $this;
