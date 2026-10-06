@@ -135,7 +135,7 @@ proxies (ProxySQL/MaxScale), and SQL Server availability-group listeners through
 the normal driver and endpoint configuration. This is expected protocol
 compatibility; specific proxy modes and HA topologies require deployment tests.
 DBLayer's pool is local to each PHP worker, and cluster promotion remains owned
-by the database infrastructure. See the [connection deployment guide](docs/connections.rst#external-proxies-and-database-listeners)
+by the database infrastructure. See the connection deployment guide
 for PgBouncer session/prepared-statement restrictions, ODBC pooling, the current
 `MultiSubnetFailover` limitation, and SQLite file/WAL behavior.
 The [examples guide](examples/README.md) includes named bootstrap profiles and
@@ -408,13 +408,13 @@ Hardening controls:
 - ext-pdo
 - DBLayer 6.0 requires `infocyph/arraykit ^5.3`, `infocyph/cachelayer ^4.0`,
   and `psr/log ^3.0.2`
-- `infocyph/runwire` is optional for host-runtime integration
+- `infocyph/runwire` 2.1.x is optional for host-runtime integration; DBLayer's integration is tested against 2.1.1
 - ext-pdo_mysql (for MySQL and MariaDB)
 - ext-pdo_pgsql (for PostgreSQL)
 - ext-pdo_sqlsrv (for Microsoft SQL Server)
 - ext-pdo_sqlite (for SQLite)
 
-## Security
+## Responsible Disclosure
 
 Do not disclose suspected vulnerabilities in a public issue, discussion or pull request. Follow [SECURITY.md](SECURITY.md) and use [GitHub private vulnerability reporting](https://github.com/infocyph/DBLayer/security/advisories/new).
 
