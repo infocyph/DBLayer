@@ -68,27 +68,55 @@ jobs:
       - name: Create release evidence directory
         run: mkdir -p release-evidence
 
-      - name: Measure baseline host workload
+      - name: Measure alternating matched host workload
         run: |
           baseline_sha="$(git -C baseline rev-parse HEAD)"
-          php candidate/.automation/scripts/ci/release-host-workload.php \
-            --project=baseline \
-            --output=release-evidence/baseline-host.json \
-            --duration=3 \
-            --trials=5 \
-            --concurrency=1,2,4 \
-            --revision="$baseline_sha"
-
-      - name: Measure candidate host workload
-        run: |
           candidate_sha="$(git -C candidate rev-parse HEAD)"
-          php candidate/.automation/scripts/ci/release-host-workload.php \
-            --project=candidate \
-            --output=release-evidence/candidate-host.json \
-            --duration=3 \
-            --trials=5 \
-            --concurrency=1,2,4 \
-            --revision="$candidate_sha"
+          mkdir -p release-evidence/pairs
+
+          for pair in 1 2 3 4 5 6; do
+            if (( pair % 2 == 1 )); then
+              order=(baseline candidate)
+            else
+              order=(candidate baseline)
+            fi
+
+            for target in "${order[@]}"; do
+              if [ "$target" = baseline ]; then
+                revision="$baseline_sha"
+              else
+                revision="$candidate_sha"
+              fi
+
+              php candidate/.automation/scripts/ci/release-host-workload.php \
+                --project="$target" \
+                --output="release-evidence/pairs/${target}-${pair}.json" \
+                --duration=4 \
+                --trials=1 \
+                --concurrency=1,2,4 \
+                --revision="$revision"
+            done
+          done
+
+          jq -s '{
+            project: .[0].project,
+            revision: .[0].revision,
+            duration_seconds: .[0].duration_seconds,
+            trials: length,
+            concurrencies: .[0].concurrencies,
+            php_version: .[0].php_version,
+            runs: [.[].runs[]]
+          }' release-evidence/pairs/baseline-*.json > release-evidence/baseline-host.json
+
+          jq -s '{
+            project: .[0].project,
+            revision: .[0].revision,
+            duration_seconds: .[0].duration_seconds,
+            trials: length,
+            concurrencies: .[0].concurrencies,
+            php_version: .[0].php_version,
+            runs: [.[].runs[]]
+          }' release-evidence/pairs/candidate-*.json > release-evidence/candidate-host.json
 
       - name: Enforce matched performance budgets
         run: >-
