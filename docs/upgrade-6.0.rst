@@ -32,6 +32,14 @@ upsert, update-or-create, bulk, and optimistic write paths. Administrative
 cross-tenant writes must use an explicitly unscoped repository after the
 application has performed its authorization check.
 
+Tenant-scoped ``upsert()`` also has driver-specific conflict safeguards:
+
+- MySQL/MariaDB tenant-scoped upserts are rejected because duplicate-key
+  resolution can target an unrelated unique key.
+- On drivers with explicit conflict targets, the tenant column must be present
+  in ``uniqueBy``.
+- An explicit upsert update-column list cannot contain the tenant column.
+
 Result Cache Identity
 ---------------------
 
