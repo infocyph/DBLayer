@@ -59,6 +59,10 @@ Pagination/Streaming
 - ``chunk()``, ``chunkById()``, ``lazyById()``
 - ``cursor()``, ``stream()``, ``unbufferedStream()``
 
+Streaming and lazy iterators remain bound to their connection for the full
+iterator lifetime. They must not escape ``PoolManager::using()``; pooled callers
+should retain an explicit ``ConnectionLease`` until iteration completes.
+
 ``cursorPaginate()`` retains existing ordering and appends the supplied unique
 column as its final tie-breaker. Returned ``next_cursor`` and
 ``previous_cursor`` tokens are opaque and query-bound. It supports at most eight
