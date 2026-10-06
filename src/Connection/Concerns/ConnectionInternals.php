@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection\Concerns;
 
+use Infocyph\CacheLayer\Cache\Adapter\ArrayCacheAdapter;
 use Infocyph\CacheLayer\Cache\Cache;
 use Infocyph\CacheLayer\Cache\CacheInterface;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Connection\PrivateQueryCacheLockProvider;
 use Infocyph\DBLayer\Connection\QueryRuntimePolicy;
 use Infocyph\DBLayer\Connection\ReadReplicaSessionPolicy;
 use Infocyph\DBLayer\Connection\SqlStatementInspector;
@@ -124,7 +126,11 @@ trait ConnectionInternals
     public function queryCache(): CacheInterface
     {
         if ($this->queryCache === null) {
-            $this->queryCache = Cache::memory('dblayer');
+            $this->queryCache = new Cache(
+                new ArrayCacheAdapter('dblayer'),
+                new PrivateQueryCacheLockProvider(),
+                namespace: 'dblayer',
+            );
             $this->ownsQueryCache = true;
         }
 

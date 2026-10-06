@@ -95,7 +95,7 @@ certification gate. Tag/release remains a maintainer action.
 
 ## Verification evidence and limits
 
-Current working-tree remediation, checked with PHP 8.5.4, real temporary
+The first remediation (`c8e583c`), checked with PHP 8.5.4, real temporary
 MySQL 9.7/PostgreSQL 18 services and SQLite:
 
 - `composer ic:process`: passes; generated changes were reviewed.
@@ -126,6 +126,32 @@ MySQL 9.7/PostgreSQL 18 services and SQLite:
 - PHP 8.4, lowest dependencies, MariaDB, SQL Server, physical replication,
   production clean install and current downstream consumers require the final
   hosted matrix. The local host still lacks `pdo_sqlsrv`.
+
+The first remediation commit, `c8e583ce77fdb564d7e08a936951642d84c862c3`,
+passed [hosted QA](https://github.com/infocyph/DBLayer/actions/runs/37430127904)
+and [both consumers](https://github.com/infocyph/DBLayer/actions/runs/37430127226).
+Its [performance run](https://github.com/infocyph/DBLayer/actions/runs/37430127232)
+correctly failed: concurrency 4 had **7.07%** paired median throughput regression
+against the unchanged 2% budget, while latency, memory and correctness passed.
+The hosted soak was skipped after that failure. A local seven-pair 5.1 diagnostic
+also failed at concurrency 4 (**3.93%**), so a blind retry is not acceptance.
+
+Stage profiling isolated the cost to cached reads. Mean cached-read CPU was
+**121.66 microseconds** for 5.1/CacheLayer 3.4, **145.09** for the diagnostic
+5.1/CacheLayer 4 dependency-only variant, and **142.89** for `c8e583c`.
+CacheLayer 4's filesystem trust checks explain the default file-lock cost for
+DBLayer's private ArrayCacheAdapter. The follow-up uses CacheLayer's existing
+adapter and lock interface with a bounded `PrivateQueryCacheLockProvider`;
+there is no shared storage to coordinate through filesystem locks in that
+private cache. This type owns instance-local lease identity/expiry/fork fencing
+and immediate generation-checked fallback for reentrant resolvers. It replaces
+no caller-supplied backend or provider and starts no worker/event loop.
+Ownership, stale/forged handles, bounds, expiry, invalid durations, reentrant
+invalidation and child-process isolation have regressions. Its cached-read
+profile is **76.95 microseconds CPU / 124.86 microseconds wall time**, compared
+with **142.89 / 228.28** before this follow-up. This isolated profile does not
+certify complete request throughput; the full matched comparison and final
+release guard/hosted release acceptance remain required for the follow-up.
 
 Earlier green hosted runs on committed base `0493ea56` are historical evidence:
 [QA](https://github.com/infocyph/DBLayer/actions/runs/37419888853),
@@ -178,6 +204,10 @@ Those recorded failures predate remediation and are not current expected results
   smoke runs explicitly do not satisfy release duration. Regressions:
   `tests/Unit/ReleaseHostResourcesTest.php` and
   `tests/Integration/ReleaseRunwireHarnessTest.php`.
+- **R07 performance:** private in-memory result caches use bounded local
+  coordination through CacheLayer's existing lock interface. Shared caches
+  retain their own providers. Regressions:
+  `tests/Unit/PrivateQueryCacheLockProviderTest.php`.
 
 ## Remaining release gate: R07 final certification
 

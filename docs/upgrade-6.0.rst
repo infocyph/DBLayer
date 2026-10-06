@@ -55,6 +55,10 @@ Result keys rotate together with dependency identities. Warm entries carrying
 the previous tag format are intentionally bypassed after upgrading, so writes
 using the new tags cannot leave those old entries visible to new readers.
 
+The connection's private in-memory result cache uses bounded instance-local
+coordination. An explicitly supplied shared CacheLayer backend retains its own
+lock provider and cross-process coordination.
+
 Native Transactions
 -------------------
 
