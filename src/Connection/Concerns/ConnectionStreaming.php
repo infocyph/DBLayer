@@ -428,6 +428,8 @@ trait ConnectionStreaming
         ?int $fetchMode,
     ): Generator {
         $statement = $this->execute($sql, $bindings);
+        $statementId = spl_object_id($statement);
+        $this->activeStatementCursors[$statementId] = $statement;
         $mode = $fetchMode ?? $this->fetchMode;
         $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
             ? $this->sqlServerBigIntColumns($statement)
@@ -440,6 +442,7 @@ trait ConnectionStreaming
                     : $row;
             }
         } finally {
+            unset($this->activeStatementCursors[$statementId]);
             $statement->closeCursor();
         }
     }
