@@ -476,6 +476,7 @@ final class Pool
     {
         $config = $this->configs[$name];
         $connection = new Connection($config, $name);
+        $connection->markPoolManaged();
 
         // Attach HealthCheck monitor tuned with pool config.
         $connection->attachHealthCheck(
