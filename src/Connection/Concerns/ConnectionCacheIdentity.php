@@ -14,6 +14,13 @@ trait ConnectionCacheIdentity
     private ?string $cacheScopeFingerprintMemo = null;
 
     /**
+     * Bounded memo for the common structured-table tag path.
+     *
+     * @var array<string,string>
+     */
+    private array $cacheTableTagMemo = [];
+
+    /**
      * Build the non-sensitive identity used only for shared data dependencies.
      *
      * Result visibility remains isolated by cacheScopeFingerprint(). Dependency
@@ -71,23 +78,34 @@ trait ConnectionCacheIdentity
      */
     public function cacheTableTag(string $table, ?string $suffix = null): string
     {
-        $table = strtolower(trim($table));
-        $schema = $this->config->get('schema');
-
-        if (!str_contains($table, '.') && is_string($schema) && $schema !== '') {
-            $table = strtolower($schema) . '.' . $table;
+        $memoizable = $suffix === null || $suffix === '';
+        if ($memoizable && isset($this->cacheTableTagMemo[$table])) {
+            return $this->cacheTableTagMemo[$table];
         }
 
-        $dependency = $suffix === null || $suffix === ''
-            ? $table
-            : $table . "\0" . $suffix;
+        $normalizedTable = strtolower(trim($table));
+        $schema = $this->config->get('schema');
 
-        return 'db.' . $this->cacheDependencyFingerprint() . '.table.' . hash('xxh3', $dependency);
+        if (!str_contains($normalizedTable, '.') && is_string($schema) && $schema !== '') {
+            $normalizedTable = strtolower($schema) . '.' . $normalizedTable;
+        }
+
+        $dependency = $memoizable
+            ? $normalizedTable
+            : $normalizedTable . "\0" . $suffix;
+        $tag = 'db.' . $this->cacheDependencyFingerprint() . '.table.' . hash('xxh3', $dependency);
+
+        if ($memoizable && count($this->cacheTableTagMemo) < 64) {
+            $this->cacheTableTagMemo[$table] = $tag;
+        }
+
+        return $tag;
     }
 
     private function resetCacheIdentityFingerprints(): void
     {
         $this->cacheDependencyFingerprintMemo = null;
         $this->cacheScopeFingerprintMemo = null;
+        $this->cacheTableTagMemo = [];
     }
 }
