@@ -116,6 +116,24 @@ DBLayer owns dialect/capability handling for the mutation. Higher layers should
 not duplicate an upsert abstraction unless they are adding domain policy rather
 than SQL mechanics.
 
+Tenant-Scoped Upsert Rules
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tenant-scoped repositories apply stricter conflict rules so an upsert cannot
+resolve against or mutate another tenant's row:
+
+- MySQL/MariaDB tenant-scoped ``upsert()`` is rejected because duplicate-key
+  resolution may select an unrelated unique key instead of the intended
+  tenant-aware conflict target.
+- On drivers with an explicit conflict target, ``uniqueBy`` must include the
+  configured tenant column.
+- An explicit upsert update-column list must not include the tenant column.
+- Each row remains subject to tenant payload validation after casts and hooks;
+  a scoped write cannot change its tenant identity.
+
+Administrative cross-tenant upserts must use an explicitly unscoped repository
+after the application has performed its authorization check.
+
 Optimistic Conditional Writes
 -----------------------------
 
