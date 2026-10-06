@@ -27,9 +27,21 @@ trait ConnectionStreaming
 
     private int $activeStreamIterators = 0;
 
+    private bool $poolManaged = false;
+
     private int $postgresStreamCursorSequence = 0;
 
     private int $runtimeReuseGeneration = 0;
+
+    /**
+     * Mark this connection as pool-owned so stream cursors participate in lease fencing.
+     *
+     * @internal
+     */
+    public function markPoolManaged(): void
+    {
+        $this->poolManaged = true;
+    }
 
     /**
      * Stream query rows lazily without buffering via fetchAll().
@@ -42,6 +54,10 @@ trait ConnectionStreaming
         $reuseGeneration = $this->runtimeReuseGeneration;
 
         if ($this->runwireRuntime === null && !$this->queryBudgetActive) {
+            if (!$this->poolManaged) {
+                return $this->streamDirectGenerator($sql, $bindings, $fetchMode);
+            }
+
             return $this->streamFastGenerator($sql, $bindings, $fetchMode, $reuseGeneration);
         }
 
@@ -400,6 +416,32 @@ trait ConnectionStreaming
         }
 
         $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
+    }
+
+    /**
+     * @param array<int|string,mixed> $bindings
+     * @return Generator<mixed>
+     */
+    private function streamDirectGenerator(
+        string $sql,
+        array $bindings,
+        ?int $fetchMode,
+    ): Generator {
+        $statement = $this->execute($sql, $bindings);
+        $mode = $fetchMode ?? $this->fetchMode;
+        $sqlServerBigIntColumns = $this->getDriverName() === 'mssql'
+            ? $this->sqlServerBigIntColumns($statement)
+            : [];
+
+        try {
+            while (($row = $statement->fetch($mode)) !== false) {
+                yield $sqlServerBigIntColumns !== []
+                    ? $this->normalizeSqlServerRow($row, $sqlServerBigIntColumns)
+                    : $row;
+            }
+        } finally {
+            $statement->closeCursor();
+        }
     }
 
     /**
