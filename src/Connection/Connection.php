@@ -132,6 +132,11 @@ final class Connection
     private bool $pretending = false;
 
     /**
+     * Whether any cooperative query cancellation/deadline/timeout budget is active.
+     */
+    private bool $queryBudgetActive = false;
+
+    /**
      * Optional cancellation checker called before query attempts.
      *
      * @var null|callable():bool
@@ -144,11 +149,6 @@ final class Connection
      * @var array<string,mixed>
      */
     private array $queryCommentContext;
-
-    /**
-     * Whether any cooperative query cancellation/deadline/timeout budget is active.
-     */
-    private bool $queryBudgetActive = false;
 
     /**
      * Optional absolute query deadline (microtime(true) timestamp).
