@@ -74,27 +74,30 @@ jobs:
           candidate_sha="$(git -C candidate rev-parse HEAD)"
           mkdir -p release-evidence/pairs
 
-          for pair in 1 2 3 4 5 6; do
-            if (( pair % 2 == 1 )); then
-              order=(baseline candidate)
-            else
-              order=(candidate baseline)
-            fi
-
-            for target in "${order[@]}"; do
-              if [ "$target" = baseline ]; then
-                revision="$baseline_sha"
+          for concurrency in 1 2 4; do
+            for pair in 1 2 3 4 5 6; do
+              if (( (pair + concurrency) % 2 == 0 )); then
+                order=(baseline candidate)
               else
-                revision="$candidate_sha"
+                order=(candidate baseline)
               fi
 
-              php candidate/.automation/scripts/ci/release-host-workload.php \
-                --project="$target" \
-                --output="release-evidence/pairs/${target}-${pair}.json" \
-                --duration=4 \
-                --trials=1 \
-                --concurrency=1,2,4 \
-                --revision="$revision"
+              for target in "${order[@]}"; do
+                if [ "$target" = baseline ]; then
+                  revision="$baseline_sha"
+                else
+                  revision="$candidate_sha"
+                fi
+
+                php candidate/.automation/scripts/ci/release-host-workload.php \
+                  --project="$target" \
+                  --output="release-evidence/pairs/${target}-c${concurrency}-p${pair}.json" \
+                  --duration=6 \
+                  --warmup=1 \
+                  --trials=1 \
+                  --concurrency="$concurrency" \
+                  --revision="$revision"
+              done
             done
           done
 
@@ -103,7 +106,8 @@ jobs:
             revision: .[0].revision,
             duration_seconds: .[0].duration_seconds,
             trials: length,
-            concurrencies: .[0].concurrencies,
+            warmup_seconds: .[0].warmup_seconds,
+            concurrencies: ([.[].concurrencies[]] | unique),
             php_version: .[0].php_version,
             runs: [.[].runs[]]
           }' release-evidence/pairs/baseline-*.json > release-evidence/baseline-host.json
@@ -113,7 +117,8 @@ jobs:
             revision: .[0].revision,
             duration_seconds: .[0].duration_seconds,
             trials: length,
-            concurrencies: .[0].concurrencies,
+            warmup_seconds: .[0].warmup_seconds,
+            concurrencies: ([.[].concurrencies[]] | unique),
             php_version: .[0].php_version,
             runs: [.[].runs[]]
           }' release-evidence/pairs/candidate-*.json > release-evidence/candidate-host.json
