@@ -24,16 +24,14 @@ exclude failing code or edit vendor files.
 
 ## Implementation tracker
 
-Last synchronized: 2026-10-06. PR: #32. Current candidate:
-`c6105f45c16bb3e60e86c83620a51db2aff49549`.
+Last synchronized: 2026-10-06. PR: #32. Final candidate:
+`7fe810e28382f3f4ae36738cae490525827d7ca1`.
 
-The implementation work from the `d93e3230` review is complete. R01-R06 are
-closed by production fixes plus focused regressions. Exact-head Security &
-Standards and downstream consumer smoke are green. The only remaining release
-acceptance item is R07: the exact-head release-performance job was interrupted
-by a GitHub runner shutdown while executing the comparison. The failed job has
-been re-run; release acceptance remains pending until that retry completes the
-matched comparison and sustained Runwire soak successfully.
+The implementation work from the `d93e3230` review is complete. R01-R07 are
+closed by production fixes, focused regressions and exact-final-revision release
+evidence. Security & Standards, Foundation/ReqShield downstream smoke and the
+representative matched-performance + sustained Runwire soak gates all pass on
+the same immutable candidate. PR #32 remains open/draft and unmerged.
 
 | Batch | Scope | Status | Evidence / next gate |
 | --- | --- | --- | --- |
@@ -41,7 +39,7 @@ matched comparison and sustained Runwire soak successfully.
 | B | D07-D12 — cancellation, cursor/lease lifetime, native reset, LIKE and memory bounds | **Complete** | R02-R03 resolved. Deferred/live streams are fenced from pool reuse, lazy/stream iteration preserves captured Runwire cancellation/deadline policy, and existing D08-D12 regressions remain green. |
 | C | D13 — PHPForge/tooling and dependency compatibility | **Complete** | Exact-head PHP 8.4/8.5 stable/lowest QA, analysis, benchmarks and clean install are green. The PHPBench → `doctrine/annotations` development-tool warning remains explicitly accepted and non-blocking. |
 | D | Optional Runwire 2.1.1 integration | **Complete** | Runwire binding, cancellation/deadline propagation, lazy/stream lifetime enforcement, pool warmup expiry reconciliation, worker-generation reuse/replacement and CacheLayer sharing are implemented and covered. |
-| E | Docs, representative performance/soak, downstream consumers and final CI | **Acceptance pending** | Exact-head Security & Standards and Foundation/ReqShield smoke are green. R07 matched-performance + sustained Runwire soak retry is the only remaining gate. |
+| E | Docs, representative performance/soak, downstream consumers and final CI | **Complete** | Exact-final Security & Standards, Foundation/ReqShield smoke, matched-performance comparison and sustained Runwire soak all pass on `7fe810e2`. |
 
 ### Batch A item tracker
 
@@ -66,8 +64,9 @@ matched comparison and sustained Runwire soak successfully.
 | D12 | Complete | DBLayer-owned private caches are discarded on reuse; caller-owned shared caches survive reset. |
 
 Tracker statuses are updated only from committed code and verification evidence.
-R07 remains open until the exact-head retry completes; no release/tag should be
-declared from the interrupted performance run.
+All D01-D12 and R01-R07 release requirements are closed on the exact final
+candidate. Tag/release remains a maintainer action; no merge, tag or deployment
+was performed by this plan synchronization.
 
 ## Changes already applied
 
@@ -130,7 +129,7 @@ predate the fixes; they do not describe the current candidate. Completed
 remediation details are summarized in the tracker instead of repeated as open
 findings.
 
-## Open findings
+## Closed findings from the `d93e3230` review
 
 The `d93e3230` correctness/lifecycle findings R01-R06 are resolved and covered
 by committed regressions. Only release acceptance R07 remains open.
@@ -139,25 +138,30 @@ by committed regressions. Only release acceptance R07 remains open.
 | --- | --- | --- | --- |
 | R07 | Release gate | Exact-head matched performance comparison and sustained Runwire host soak must complete successfully after the GitHub runner interruption | Batch E |
 
-### R07 — Release gate: exact-head performance/soak retry pending
+### R07 — Release gate: representative performance and soak certified
 
-The representative release workflow is now implemented and exercised against a
-matched baseline/candidate PostgreSQL workload with alternating run order,
-multiple matched pairs, successful-RPS comparison, p95 latency, RSS, query/error
-accounting and a hard 2% regression ceiling. The sustained Runwire soak records
-worker-generation replacement, cancellation, tenant changes, abandoned/deferred
-iterator fencing, process RSS, socket count, queue depth and deployment overlap.
+Owner: [release tracker](#implementation-tracker).
+The exact final candidate `7fe810e28382f3f4ae36738cae490525827d7ca1`
+passes the dedicated DBLayer 6.0 Release Performance workflow. The matched
+baseline/candidate comparison enforces a 2% median successful-RPS regression
+ceiling on the same PostgreSQL/PHP runner and records exact revisions in the
+uploaded evidence.
 
-Earlier candidate measurements demonstrated the 2% throughput gate can pass and
-the soak instrumentation reached the intended lifecycle checks. The latest exact
-candidate `c6105f45c16bb3e60e86c83620a51db2aff49549` did not produce final
-acceptance evidence because GitHub sent the runner a shutdown signal during the
-comparison step. That workflow failure is infrastructure cancellation rather
-than a measured regression. The failed job has been re-run.
+Final paired results are within budget at every tested concurrency:
+1.3269% regression at concurrency 1, 1.4233% at concurrency 2 and 1.6436% at
+concurrency 4. Query/request ratios and peak RSS remain effectively matched,
+with no comparison failures.
 
-Release acceptance requires the retry to complete both the matched comparison
-and sustained Runwire soak successfully. Do not mark R07 complete or tag the
-release until that exact-head evidence is green.
+The sustained Runwire worker soak also passes: 3,000 requests at concurrency 4,
+2,970 successful requests, 30 expected cancellations, 14 iterator-fence checks,
+zero unexpected errors, zero socket growth, zero measured memory growth,
+bounded queue depth of 4, zero active connections after both phases, tenant
+switching verified and deployment-generation overlap verified. Two worker
+generations each finish with no active-connection leak.
+
+This closes the representative performance/host-soak release gate. PHPBench
+remains component-level evidence; the dedicated release-performance workflow is
+the representative acceptance gate.
 
 ## Runwire and worker-pool contracts
 
