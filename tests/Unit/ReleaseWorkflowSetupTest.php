@@ -51,7 +51,7 @@ it('prepares a historical baseline without changing its production dependency co
         ->and($prepared['config'])->toBe($manifest['config']);
 });
 
-it('injects a downstream candidate while respecting released dependency constraints', function (string $job, string $step): void {
+it('injects the ReqShield candidate while respecting released dependency constraints', function (): void {
     $manifest = [
         'require' => ['infocyph/cachelayer' => '^4.0'],
         'require-dev' => ['infocyph/dblayer' => '^6.0'],
@@ -59,7 +59,7 @@ it('injects a downstream candidate while respecting released dependency constrai
         'repositories' => [['type' => 'composer', 'url' => 'https://packages.example.test']],
         'minimum-stability' => 'stable',
     ];
-    $prepared = dblayerRunWorkflowManifestSetup('downstream-smoke.yml', $job, $step, $manifest);
+    $prepared = dblayerRunWorkflowManifestSetup('downstream-smoke.yml', 'reqshield', 'Inject DBLayer candidate', $manifest);
     /** @var array{require:array<string,string>,'require-dev':array<string,string>,conflict:array<string,string>,repositories:list<array{type:string,url:string,options?:array{versions:array<string,string>}}>,'minimum-stability':string} $prepared */
     $repository = $prepared['repositories'][0];
     $version = $repository['options']['versions']['infocyph/dblayer'];
@@ -73,7 +73,4 @@ it('injects a downstream candidate while respecting released dependency constrai
         ->and(version_compare($version, '6.0.0', '>='))->toBeTrue()
         ->and(version_compare($version, '7.0.0', '<'))->toBeTrue()
         ->and(end($prepared['repositories']))->toBe($manifest['repositories'][0]);
-})->with([
-    ['reqshield', 'Inject DBLayer candidate'],
-    ['foundation', 'Inject DBLayer 6.0 and CacheLayer 4 candidates'],
-]);
+});

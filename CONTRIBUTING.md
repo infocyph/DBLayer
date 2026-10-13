@@ -151,9 +151,9 @@ without its historical development tooling. Candidate analysis uses the current
 PHPForge configuration. The original baseline manifest and both runtime package
 lists are uploaded alongside the matched measurements and Runwire soak evidence.
 
-Downstream smoke tests select the candidate through a Composer path repository
-with compatible CI-only version metadata, preserving each consumer's declared
-DBLayer dependency constraints.
+The ReqShield downstream smoke test selects the candidate through a Composer
+path repository with compatible CI-only version metadata, preserving ReqShield's
+declared DBLayer dependency constraints.
 
 Add or update benchmark coverage when existing benchmarks do not represent the changed execution path.
 
