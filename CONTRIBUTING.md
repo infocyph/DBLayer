@@ -72,6 +72,10 @@ Automated processing may modify source files and `composer.json`. Review all res
 
 ## Validation
 
+The complete suite requires configured MySQL and PostgreSQL test services and
+their PDO extensions. See [Testing](README.md#testing) for the environment
+variables; additional native drivers expand the matrix automatically.
+
 Run the complete project validation suite before opening a pull request:
 
 ```bash
@@ -141,6 +145,15 @@ composer ic:bench:chart
 ```
 
 Performance claims must include reproducible before-and-after results from comparable environments. Avoid conclusions based on a single unstable run.
+
+The release-performance workflow installs the baseline's production dependencies
+without its historical development tooling. Candidate analysis uses the current
+PHPForge configuration. The original baseline manifest and both runtime package
+lists are uploaded alongside the matched measurements and Runwire soak evidence.
+
+The ReqShield downstream smoke test selects the candidate through a Composer
+path repository with compatible CI-only version metadata, preserving ReqShield's
+declared DBLayer dependency constraints.
 
 Add or update benchmark coverage when existing benchmarks do not represent the changed execution path.
 

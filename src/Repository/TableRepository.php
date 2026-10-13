@@ -7,19 +7,24 @@ namespace Infocyph\DBLayer\Repository;
 use BadMethodCallException;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\DB;
+use Infocyph\DBLayer\Exceptions\RecordNotFoundException;
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Query\Repository as QueryRepository;
 use InvalidArgumentException;
+use JsonSerializable;
 use LogicException;
 
 /**
  * Repository-oriented static API for one database table.
  *
- * This remains intentionally non-ORM: rows are arrays/DTOs, there is no
- * identity map, dirty tracking, unit-of-work, or implicit lazy relationship
- * loading.
+ * Static queries return arrays/DTOs. Bound instances expose attributes and
+ * persist explicit changes through the same repository policies.
+ *
+ * @phpstan-consistent-constructor
+ * @method static int|bool delete()
+ * @method static int|bool update(array<string,mixed> $values)
  */
-abstract class TableRepository
+abstract class TableRepository implements JsonSerializable
 {
     protected static ?string $connection = null;
 
@@ -49,6 +54,33 @@ abstract class TableRepository
     /** @var array<class-string,RepositoryDefinition> */
     private static array $definitionCache = [];
 
+    public bool $exists = false;
+
+    /** @var array<string,mixed> */
+    private array $attributes = [];
+
+    /** @var array<string,mixed>|null */
+    private ?array $original = null;
+
+    /** @var array<string,string> */
+    private array $originalValues = [];
+
+    /** @param array<string,mixed> $attributes */
+    public function __construct(array $attributes = [])
+    {
+        $this->fill($attributes);
+    }
+
+    /** @param array<int|string,mixed> $arguments */
+    public function __call(string $method, array $arguments): mixed
+    {
+        return match ($method) {
+            'delete' => $this->deleteRecord(),
+            'update' => $this->updateRecord($arguments),
+            default => throw new BadMethodCallException(sprintf('Instance method %s::%s() does not exist.', static::class, $method)),
+        };
+    }
+
     /** @param array<int,mixed> $arguments */
     public static function __callStatic(string $method, array $arguments): mixed
     {
@@ -62,6 +94,21 @@ abstract class TableRepository
             static::class,
             $method,
         ));
+    }
+
+    public function __get(string $name): mixed
+    {
+        return $this->attributes[$name] ?? null;
+    }
+
+    public function __isset(string $name): bool
+    {
+        return isset($this->attributes[$name]);
+    }
+
+    public function __set(string $name, mixed $value): void
+    {
+        $this->attributes[RepositorySupport::column($name)] = $value;
     }
 
     public static function builder(?string $connection = null): QueryBuilder
@@ -111,6 +158,25 @@ abstract class TableRepository
     public static function flushDefinition(): void
     {
         unset(self::$definitionCache[static::class]);
+    }
+
+    /** Convert a supplied identifier using the configured connection and scopes. */
+    public static function fromBoundValue(mixed $value): static
+    {
+        if ($value instanceof static) {
+            return $value;
+        }
+        if (!is_int($value) && !is_string($value)) {
+            throw new InvalidArgumentException('Repository binding requires an integer or string identifier.');
+        }
+        $row = static::query()->find($value)
+            ?? throw RecordNotFoundException::forRepository(static::class);
+        $model = new static();
+        $model->attributes = $row;
+        $model->syncOriginal();
+        $model->exists = true;
+
+        return $model;
     }
 
     public static function pruner(?string $connection = null): RepositoryPruner
@@ -181,6 +247,86 @@ abstract class TableRepository
     public static function transaction(callable $callback, int $attempts = 1, ?string $connection = null): mixed
     {
         return DB::transaction($callback, $attempts, static::resolveConnectionName($connection));
+    }
+
+    /** @param array<string,mixed> $attributes */
+    public function fill(array $attributes): static
+    {
+        foreach ($attributes as $name => $value) {
+            $this->__set($name, $value);
+        }
+
+        return $this;
+    }
+
+    /** @return array<string,mixed> */
+    public function getDirty(): array
+    {
+        return array_filter(
+            $this->attributes,
+            fn(mixed $value, string $name): bool => $this->original === null
+                || !array_key_exists($name, $this->original)
+                || (isset($this->originalValues[$name])
+                    ? serialize($value) !== $this->originalValues[$name]
+                    : $value !== $this->original[$name]),
+            ARRAY_FILTER_USE_BOTH,
+        );
+    }
+
+    public function getKey(): mixed
+    {
+        return $this->attributes[static::primaryKeyName()] ?? null;
+    }
+
+    /** @return array<string,mixed> */
+    public function jsonSerialize(): array
+    {
+        return $this->toArray();
+    }
+
+    public function refresh(): static
+    {
+        $row = static::query()->find($this->originalKey())
+            ?? throw RecordNotFoundException::forRepository(static::class);
+        $this->attributes = $row;
+        $this->syncOriginal();
+        $this->exists = true;
+
+        return $this;
+    }
+
+    /** Persist only explicit changes, using the existing write policies and hooks. */
+    public function save(): bool
+    {
+        $repository = static::repository();
+        if ($this->original === null) {
+            $this->attributes = $repository->create($this->attributes);
+            $this->syncOriginal();
+            $this->exists = true;
+
+            return true;
+        }
+        if (!$this->exists) {
+            return false;
+        }
+        $dirty = $this->getDirty();
+        if ($dirty === []) {
+            return true;
+        }
+        $id = $this->originalKey();
+        if ($repository->updateById($id, $dirty) === 0 && $repository->find($id) === null) {
+            return false;
+        }
+        $this->attributes = $repository->find($this->getKey()) ?? $this->attributes;
+        $this->syncOriginal();
+
+        return true;
+    }
+
+    /** @return array<string,mixed> */
+    public function toArray(): array
+    {
+        return $this->attributes;
     }
 
     /** @return array<string,string|callable(mixed):mixed|\Infocyph\DBLayer\Repository\Casts\AttributeCast> */
@@ -254,5 +400,51 @@ abstract class TableRepository
         $column = trim($column);
 
         return $column === '' ? $fallback : $column;
+    }
+
+    private function deleteRecord(): bool
+    {
+        if (!$this->exists) {
+            return false;
+        }
+        if (static::repository()->deleteById($this->originalKey()) === 0) {
+            return false;
+        }
+        $this->attributes = static::query()->withTrashed()->find($this->originalKey()) ?? $this->attributes;
+        $this->syncOriginal();
+        $this->exists = false;
+
+        return true;
+    }
+
+    private function originalKey(): mixed
+    {
+        return $this->original[static::primaryKeyName()]
+            ?? throw new LogicException('This repository instance has no persisted primary key.');
+    }
+
+    private function syncOriginal(): void
+    {
+        $this->original = $this->attributes;
+        $this->originalValues = [];
+        foreach ($this->attributes as $name => $value) {
+            if (is_array($value) || is_object($value)) {
+                $this->originalValues[$name] = serialize($value);
+            }
+        }
+    }
+
+    /** @param array<int|string,mixed> $arguments */
+    private function updateRecord(array $arguments): bool
+    {
+        if (count($arguments) !== 1) {
+            throw new InvalidArgumentException('Instance update() requires one attribute array.');
+        }
+        $attributes = RepositorySupport::row($arguments['values'] ?? $arguments[0] ?? null);
+        if ($attributes === null) {
+            throw new InvalidArgumentException('Instance update() requires an attribute array with string keys.');
+        }
+
+        return $this->fill($attributes)->save();
     }
 }

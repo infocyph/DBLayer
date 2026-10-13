@@ -254,11 +254,15 @@ trait RepositoryInternals
 
     private function castNamedValue(mixed $value, string $type, bool $forWrite): mixed
     {
+        if ($value === null && in_array(strtolower($type), ['int', 'integer', 'float', 'double', 'real', 'bool', 'boolean', 'string'], true)) {
+            return null;
+        }
+
         return match (strtolower($type)) {
-            'int', 'integer' => $value === null ? null : $this->castToInt($value),
-            'float', 'double', 'real' => $value === null ? null : $this->castToFloat($value),
-            'bool', 'boolean' => $value === null ? null : $this->castToBool($value),
-            'string' => $value === null ? null : $this->castToString($value),
+            'int', 'integer' => $this->castToInt($value),
+            'float', 'double', 'real' => $this->castToFloat($value),
+            'bool', 'boolean' => $this->castToBool($value),
+            'string' => $this->castToString($value),
             'json', 'array' => $this->castJsonValue($value, $forWrite),
             'datetime' => $forWrite ? $this->normalizeDateTimeForWrite($value) : $value,
             'immutable_datetime', 'datetime_immutable' => $forWrite

@@ -8,7 +8,8 @@ Introduction
 repository-first architecture.
 
 It is useful when your app wants a class-centric API such as
-``User::find(1)`` and ``User::query()->...`` without adopting ORM behavior.
+``User::find(1)`` and ``User::query()->...``. Optional ``fromBoundValue()``
+instances support parameter binding, loaded attributes, and explicit persistence.
 
 Class: ``Infocyph\DBLayer\Repository\TableRepository``
 
@@ -189,16 +190,18 @@ Raw SQL Through Repository
    User::sqlStatement('update users set active = ? where id = ?', [0, 10]);
    $rows = User::sqlSelect('select id, email from users where active = ?', [1]);
 
-Non-ORM Boundary
-----------------
+Repository Boundary
+-------------------
 
-``TableRepository`` is intentionally not ORM:
+``TableRepository`` keeps persistence explicit:
 
 - no relationship properties or implicit relation loading
 - no unit-of-work
-- no dirty-state tracking
 
-It is a static delegation layer over DBLayer components. Use
+Static queries remain a delegation layer over DBLayer components.
+``fromBoundValue()`` explicitly loads an instance with local change tracking;
+``save()`` and ``delete()`` reuse repository writes. See ``api-table-repository``
+for binding, custom primary keys, and the instance API. Use
 ``DB::relations()`` separately when rows already selected by a repository need
 explicit bounded relation projection.
 

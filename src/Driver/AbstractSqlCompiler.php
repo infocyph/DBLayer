@@ -89,11 +89,9 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
     protected function compileFrom(QueryPayload $payload): string
     {
         if ($payload->sourceQuery !== null) {
-            if ($payload->tableAlias === null) {
-                throw new LogicException('A derived FROM source requires an alias.');
-            }
+            $alias = $payload->tableAlias ?? throw new LogicException('A derived FROM source requires an alias.');
 
-            return 'FROM (' . $this->compileChildPayload($payload->sourceQuery) . ') AS ' . $this->wrapIdentifier($payload->tableAlias);
+            return 'FROM (' . $this->compileChildPayload($payload->sourceQuery) . ') AS ' . $this->wrapIdentifier($alias);
         }
         if ($payload->table === null || $payload->table === '') {
             return '';
@@ -362,10 +360,10 @@ abstract class AbstractSqlCompiler implements QueryCompilerInterface
             $clauses[] = 'PARTITION BY ' . implode(', ', array_map($this->wrapColumnIdentifier(...), $window->partitionBy));
         }
         if ($window->orderBy !== []) {
-            $orders = [];
-            foreach ($window->orderBy as $order) {
-                $orders[] = sprintf('%s %s', $this->wrapColumnIdentifier($order['column']), strtoupper($order['direction']));
-            }
+            $orders = array_map(
+                fn(array $order): string => sprintf('%s %s', $this->wrapColumnIdentifier($order['column']), strtoupper($order['direction'])),
+                $window->orderBy,
+            );
             $clauses[] = 'ORDER BY ' . implode(', ', $orders);
         }
 

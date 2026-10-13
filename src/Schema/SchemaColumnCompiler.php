@@ -53,7 +53,9 @@ final readonly class SchemaColumnCompiler
 
     private function booleanDefault(bool $value): string
     {
-        return $this->dialect->isPostgreSql() ? ($value ? 'TRUE' : 'FALSE') : ($value ? '1' : '0');
+        $literals = $this->dialect->isPostgreSql() ? ['FALSE', 'TRUE'] : ['0', '1'];
+
+        return $literals[(int) $value];
     }
 
     private function choiceConstraint(ColumnDefinition $column): string
@@ -121,10 +123,15 @@ final readonly class SchemaColumnCompiler
         if ($this->dialect->isSqlite()) {
             return 'INTEGER';
         }
+        $types = ['bigInteger' => 'BIGINT', 'smallInteger' => 'SMALLINT'];
+        if ($this->dialect->isMySqlFamily()) {
+            $types += ['mediumInteger' => 'MEDIUMINT', 'tinyInteger' => 'TINYINT'];
+        }
+        if ($this->dialect->isSqlServer()) {
+            $types += ['tinyInteger' => 'TINYINT'];
+        }
 
-        return match ($column->type) {
-            'bigInteger' => 'BIGINT', 'mediumInteger' => $this->dialect->isMySqlFamily() ? 'MEDIUMINT' : 'INTEGER', 'smallInteger' => 'SMALLINT', 'tinyInteger' => ($this->dialect->isMySqlFamily() || $this->dialect->isSqlServer()) ? 'TINYINT' : 'SMALLINT', default => 'INTEGER',
-        };
+        return $types[$column->type] ?? ['tinyInteger' => 'SMALLINT'][$column->type] ?? 'INTEGER';
     }
 
     private function isSqliteAutoIncrement(ColumnDefinition $column): bool
@@ -141,29 +148,24 @@ final readonly class SchemaColumnCompiler
 
     private function jsonType(ColumnDefinition $column): string
     {
-        if ($this->dialect->isSqlite()) {
-            return 'TEXT';
-        }
-        if ($this->dialect->isSqlServer()) {
-            return 'NVARCHAR(MAX)';
-        }
-
-        return $column->type === 'jsonb' && $this->dialect->isPostgreSql() ? 'JSONB' : 'JSON';
+        return match (true) {
+            $this->dialect->isSqlite() => 'TEXT',
+            $this->dialect->isSqlServer() => 'NVARCHAR(MAX)',
+            $this->dialect->isPostgreSql() => ['json' => 'JSON', 'jsonb' => 'JSONB'][$column->type],
+            default => 'JSON',
+        };
     }
 
     private function networkType(ColumnDefinition $column): string
     {
-        if ($this->dialect->isPostgreSql()) {
-            return $column->type === 'ipAddress' ? 'INET' : 'MACADDR';
-        }
-        if ($this->dialect->isSqlite()) {
-            return 'TEXT';
-        }
-        if ($this->dialect->isSqlServer()) {
-            return $column->type === 'ipAddress' ? 'NVARCHAR(45)' : 'NVARCHAR(17)';
-        }
+        $types = match (true) {
+            $this->dialect->isPostgreSql() => ['INET', 'MACADDR'],
+            $this->dialect->isSqlite() => ['TEXT', 'TEXT'],
+            $this->dialect->isSqlServer() => ['NVARCHAR(45)', 'NVARCHAR(17)'],
+            default => ['VARCHAR(45)', 'VARCHAR(17)'],
+        };
 
-        return $column->type === 'ipAddress' ? 'VARCHAR(45)' : 'VARCHAR(17)';
+        return $types[(int) ($column->type !== 'ipAddress')];
     }
 
     private function numericType(ColumnDefinition $column): string
@@ -231,15 +233,19 @@ final readonly class SchemaColumnCompiler
         if ($this->dialect->isSqlite()) {
             return 'TEXT';
         }
-        if ($this->dialect->isSqlServer()) {
-            return match ($column->type) {
-                'char' => sprintf('NCHAR(%d)', $column->length ?? throw SchemaException::invalid('Character length is required.')), 'string' => sprintf('NVARCHAR(%d)', $column->length ?? throw SchemaException::invalid('String length is required.')), default => 'NVARCHAR(MAX)',
-            };
-        }
-
-        return match ($column->type) {
-            'char' => sprintf('CHAR(%d)', $column->length ?? throw SchemaException::invalid('Character length is required.')), 'longText' => $this->dialect->isMySqlFamily() ? 'LONGTEXT' : 'TEXT', 'mediumText' => $this->dialect->isMySqlFamily() ? 'MEDIUMTEXT' : 'TEXT', 'string' => sprintf('VARCHAR(%d)', $column->length ?? throw SchemaException::invalid('String length is required.')), 'tinyText' => $this->dialect->isMySqlFamily() ? 'TINYTEXT' : 'TEXT', default => 'TEXT',
+        $types = match (true) {
+            $this->dialect->isSqlServer() => ['char' => 'NCHAR', 'string' => 'NVARCHAR'],
+            default => ['char' => 'CHAR', 'string' => 'VARCHAR'],
         };
+        if (isset($types[$column->type])) {
+            return sprintf('%s(%d)', $types[$column->type], $column->length ?? throw SchemaException::invalid(['char' => 'Character length is required.', 'string' => 'String length is required.'][$column->type]));
+        }
+        if ($this->dialect->isSqlServer()) {
+            return 'NVARCHAR(MAX)';
+        }
+        $textTypes = ['longText' => 'LONGTEXT', 'mediumText' => 'MEDIUMTEXT', 'tinyText' => 'TINYTEXT'];
+
+        return $this->dialect->isMySqlFamily() ? ($textTypes[$column->type] ?? 'TEXT') : 'TEXT';
     }
 
     private function temporalColumnType(ColumnDefinition $column): string

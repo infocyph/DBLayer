@@ -370,3 +370,47 @@ it('keeps relation projections correct when base columns are narrowed', function
     expect($parent['name'])->toBe('One')
         ->and(array_column($parent['children'], 'name'))->toBe(['A']);
 });
+
+
+it('keeps static reads free of bound instance state and respects scopes during binding', function (): void {
+    expect(RepositoryEvolutionUser::find(1))->toBeArray()
+        ->and(RepositoryEvolutionUser::definition())->toBe(RepositoryEvolutionUser::definition());
+    expect(RepositoryEvolutionUser::fromBoundValue(1)->active)->toBeTrue();
+    expect(fn() => RepositoryEvolutionUser::fromBoundValue(2))
+        ->toThrow(\Infocyph\DBLayer\Exceptions\RecordNotFoundException::class);
+});
+
+it('persists instance changes through defaults custom timestamps and static write hooks', function (): void {
+    $post = new RepositoryEvolutionPost(['title' => 'Created by instance']);
+    expect($post->save())->toBeTrue()->and($post->status)->toBe('draft')
+        ->and($post->created_on)->toBeString()->and($post->getDirty())->toBe([]);
+    DB::table('repository_evolution_posts')->where('post_key', '=', $post->getKey())
+        ->update(['updated_on' => '2000-01-01 00:00:00']);
+    $post->refresh();
+    expect($post->update(values: ['title' => 'Edited']))->toBeTrue()
+        ->and($post->updated_on)->not->toBe('2000-01-01 00:00:00')
+        ->and($post->getDirty())->toBe([]);
+});
+
+it('tracks mutable cast values without including unchanged read-only columns in writes', function (): void {
+    DB::statement('create table bound_json_rows (id integer primary key, payload text, label text)');
+    DB::table('bound_json_rows')->insert(['id' => 1, 'payload' => '{"count":1}', 'label' => 'Read only']);
+    $repository = new class extends TableRepository
+    {
+        protected static string $table = 'bound_json_rows';
+
+        protected static array $updatable = ['payload'];
+
+        protected static function casts(): array
+        {
+            return ['payload' => 'object'];
+        }
+    };
+    $bound = $repository::fromBoundValue(1);
+    $bound->payload->count = 2;
+    expect(array_keys($bound->getDirty()))->toBe(['payload'])
+        ->and($bound->save())->toBeTrue()->and($bound->getDirty())->toBe([])
+        ->and($bound->payload->count)->toBe(2);
+    expect(json_decode(DB::table('bound_json_rows')->value('payload'), true, flags: JSON_THROW_ON_ERROR))
+        ->toBe(['count' => 2]);
+});

@@ -116,7 +116,7 @@ final readonly class RepositoryRelationAggregator
         $related = $definition->related
             ?? throw new InvalidArgumentException('Direct relation requires a related repository.');
         $relatedKey = RepositorySupport::column($definition->relatedKey);
-        $values = $this->values($parents, $definition->parentKey);
+        $values = RepositorySupport::uniqueValues(array_column($parents, $definition->parentKey));
         if ($values === []) {
             return [];
         }
@@ -138,11 +138,8 @@ final readonly class RepositoryRelationAggregator
             });
             $this->applyConstraints($query, $definition, $constraint);
 
-            foreach ($query->raw()->select($relatedKey, $aggregateExpression)->groupBy($relatedKey)->get() as $candidateRow) {
-                $row = RepositorySupport::row($candidateRow);
-                if ($row !== null) {
-                    $aggregates[RepositorySupport::key($row[$relatedKey] ?? null)] = $row['aggregate'] ?? null;
-                }
+            foreach (RepositorySupport::rows($query->raw()->select($relatedKey, $aggregateExpression)->groupBy($relatedKey)->get()) as $row) {
+                $aggregates[RepositorySupport::key($row[$relatedKey] ?? null)] = $row['aggregate'] ?? null;
             }
         }
 
@@ -182,11 +179,7 @@ final readonly class RepositoryRelationAggregator
             $this->applyConstraints($query, $definition, $constraint);
             $columns = $function === 'count' ? [$relatedKey] : [$relatedKey, RepositorySupport::column($column)];
 
-            foreach ($query->get($columns) as $candidateRow) {
-                $row = RepositorySupport::row($candidateRow);
-                if ($row === null) {
-                    continue;
-                }
+            foreach (RepositorySupport::rows($query->get($columns)) as $row) {
                 $identity = 'morph:' . RepositorySupport::key($type) . ':' . RepositorySupport::key($row[$relatedKey] ?? null);
                 $result[$identity] = $function === 'count' ? 1 : $this->singleValueAggregate($function, $row[$column] ?? null);
             }
@@ -388,7 +381,7 @@ final readonly class RepositoryRelationAggregator
         $related = $definition->related
             ?? throw new InvalidArgumentException('Many-to-many relation requires a related repository.');
         $relatedKey = RepositorySupport::column($definition->relatedKey);
-        $relatedIds = $this->values($pivotRows, $pivotRelatedKey);
+        $relatedIds = RepositorySupport::uniqueValues(array_column($pivotRows, $pivotRelatedKey));
         $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
         $values = [];
 
@@ -399,11 +392,8 @@ final readonly class RepositoryRelationAggregator
             $this->applyConstraints($query, $definition, $constraint);
             $columns = $function === 'count' ? [$relatedKey] : [$relatedKey, RepositorySupport::column($column)];
 
-            foreach ($query->get($columns) as $candidateRow) {
-                $row = RepositorySupport::row($candidateRow);
-                if ($row !== null) {
-                    $values[RepositorySupport::key($row[$relatedKey] ?? null)] = $function === 'count' ? 1 : ($row[$column] ?? null);
-                }
+            foreach (RepositorySupport::rows($query->get($columns)) as $row) {
+                $values[RepositorySupport::key($row[$relatedKey] ?? null)] = $function === 'count' ? 1 : ($row[$column] ?? null);
             }
         }
 
@@ -422,7 +412,7 @@ final readonly class RepositoryRelationAggregator
             ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot parent key.'));
         $relatedKey = RepositorySupport::column($definition->pivotRelatedKey
             ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.'));
-        $parentValues = $this->values($parents, $definition->parentKey);
+        $parentValues = RepositorySupport::uniqueValues(array_column($parents, $definition->parentKey));
         $batchSize = $this->parentConnection->safeBatchSize(requested: $this->batchSize);
         $rows = [];
 
@@ -430,12 +420,7 @@ final readonly class RepositoryRelationAggregator
             $query = $this->parentConnection->table($pivotTable)->select([$parentKey, $relatedKey])->whereIn($parentKey, $chunk);
             $this->applyPivotMorphConstraint($query, $definition);
 
-            foreach ($query->get() as $candidateRow) {
-                $row = RepositorySupport::row($candidateRow);
-                if ($row !== null) {
-                    $rows[] = $row;
-                }
-            }
+            array_push($rows, ...RepositorySupport::rows($query->get()));
         }
 
         return $rows;
@@ -482,21 +467,5 @@ final readonly class RepositoryRelationAggregator
             'min', 'max' => $value,
             default => $value,
         };
-    }
-
-    /**
-     * @param list<array<string,mixed>> $rows
-     * @return list<mixed>
-     */
-    private function values(array $rows, string $column): array
-    {
-        $values = [];
-        foreach ($rows as $row) {
-            if (array_key_exists($column, $row) && $row[$column] !== null) {
-                $values[] = $row[$column];
-            }
-        }
-
-        return RepositorySupport::uniqueValues($values);
     }
 }

@@ -33,20 +33,33 @@ final class ReleaseHostResources
             }
             $rss += $residentRss;
             $sockets += self::socketCount($current);
-            $childrenFile = '/proc/' . $current . '/task/' . $current . '/children';
-            if (!is_readable($childrenFile)) {
-                continue;
-            }
-            $children = file_get_contents($childrenFile);
-            foreach (preg_split('/\s+/', trim((string) $children), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $child) {
-                $childPid = (int) $child;
-                if ($childPid > 0 && !in_array($childPid, $pids, true)) {
+            foreach (self::childPids($current) as $childPid) {
+                if (!in_array($childPid, $pids, true)) {
                     $pids[] = $childPid;
                 }
             }
         }
 
         return ['rss_bytes' => $rss, 'sockets' => $sockets, 'pids' => $pids];
+    }
+
+    /** @return list<int> */
+    private static function childPids(int $pid): array
+    {
+        $file = '/proc/' . $pid . '/task/' . $pid . '/children';
+        if (!is_readable($file)) {
+            return [];
+        }
+        $children = file_get_contents($file);
+        $pids = [];
+        foreach (preg_split('/\s+/', trim((string) $children), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $child) {
+            $childPid = (int) $child;
+            if ($childPid > 0) {
+                $pids[] = $childPid;
+            }
+        }
+
+        return $pids;
     }
 
     /**

@@ -34,6 +34,32 @@ final class RepositorySupport
         };
     }
 
+    /**
+     * @param string|array<int|string,string|callable(\Infocyph\DBLayer\Query\QueryBuilder):void> $relations
+     * @return list<array{0:string,1:(callable(\Infocyph\DBLayer\Query\QueryBuilder):void)|null}>
+     */
+    public static function relationConstraints(string|array $relations): array
+    {
+        $entries = is_string($relations) ? [$relations] : $relations;
+        $normalized = [];
+        foreach ($entries as $name => $constraint) {
+            if (is_int($name)) {
+                if (!is_string($constraint)) {
+                    throw new InvalidArgumentException('Numeric relation entries must contain relation names.');
+                }
+                $normalized[] = [$constraint, null];
+
+                continue;
+            }
+            if (!is_callable($constraint)) {
+                throw new InvalidArgumentException(sprintf('Relation constraint for [%s] must be callable.', $name));
+            }
+            $normalized[] = [$name, $constraint];
+        }
+
+        return $normalized;
+    }
+
     /** @return array<string,mixed>|null */
     public static function row(mixed $value): ?array
     {
@@ -49,6 +75,23 @@ final class RepositorySupport
 
         /** @var array<string,mixed> $value */
         return $value;
+    }
+
+    /**
+     * @param iterable<mixed> $values
+     * @return list<array<string,mixed>>
+     */
+    public static function rows(iterable $values): array
+    {
+        $rows = [];
+        foreach ($values as $value) {
+            $row = self::row($value);
+            if ($row !== null) {
+                $rows[] = $row;
+            }
+        }
+
+        return $rows;
     }
 
     /**

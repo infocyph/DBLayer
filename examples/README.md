@@ -123,3 +123,18 @@ profile requires configured read-only routing and does not expose
 See the [deployment guide](../docs/connections.rst#external-proxies-and-database-listeners)
 for configuration limits and expected compatibility rather than blanket
 certification of every proxy mode or HA topology.
+
+## Optional repository binding
+
+```sh
+php examples/model_binding.php
+```
+
+This independent SQLite example declares a custom `$primaryKey`, loads a bound
+repository instance, edits and saves it explicitly, applies soft deletion, and
+handles a missing-row exception. With InterMix 11.2 installed it also forwards a
+request input through `enableAutoBind()`; otherwise direct binding runs normally.
+The host's real container and named connection can use the same flow without
+creating workers or event loops. Static queries still return rows/DTOs. See
+[TableRepository](../docs/api-table-repository.rst) for the instance API and write
+allowlists.

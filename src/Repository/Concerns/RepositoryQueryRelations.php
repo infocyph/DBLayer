@@ -60,30 +60,7 @@ trait RepositoryQueryRelations
     public function with(string|array ...$relations): self
     {
         foreach ($relations as $relation) {
-            if (is_string($relation)) {
-                $this->registerRelation($relation, null);
-
-                continue;
-            }
-
-            foreach ($relation as $name => $constraint) {
-                if (is_int($name)) {
-                    if (!is_string($constraint)) {
-                        throw new InvalidArgumentException('Numeric relation entries must contain relation names.');
-                    }
-
-                    $this->registerRelation($constraint, null);
-
-                    continue;
-                }
-
-                if (!is_callable($constraint)) {
-                    throw new InvalidArgumentException(sprintf(
-                        'Relation constraint for [%s] must be callable.',
-                        $name,
-                    ));
-                }
-
+            foreach (RepositorySupport::relationConstraints($relation) as [$name, $constraint]) {
                 $this->registerRelation($name, $constraint);
             }
         }

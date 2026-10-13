@@ -23,7 +23,7 @@ If you are new to the project, follow this order:
 2. ``quickstart`` for a working end-to-end flow.
 3. ``choosing-api`` to choose DB vs QueryBuilder vs Repository.
 4. ``configuration`` and ``connections`` to move from local to production use.
-5. ``table-repository`` for repository-oriented class workflows without ORM.
+5. ``table-repository`` for static repositories and optional bound instances.
 6. ``examples-cookbook`` for ready-to-use snippets across all layers.
 7. ``query-builder`` and ``repository`` for day-to-day application code.
 8. ``relation-loading`` for bounded, explicit relationship projection.

@@ -419,16 +419,15 @@ final class ConnectionConfig
         if (!is_string($driver) || $driver === '') {
             throw ConnectionException::invalidConfiguration('Database driver must be a non-empty string.');
         }
-        if (in_array($driver, ['mysql', 'mariadb', 'pgsql', 'mssql', 'sqlite'], true)) {
-            if (!isset($config['database']) || !is_string($config['database']) || $config['database'] === '') {
-                throw ConnectionException::invalidConfiguration(sprintf("Config key 'database' is required for driver '%s'.", $driver));
-            }
-        }
-        if (in_array($driver, ['mysql', 'mariadb', 'pgsql', 'mssql'], true)) {
-            foreach (['host', 'username'] as $key) {
-                if (!isset($config[$key]) || !is_string($config[$key]) || $config[$key] === '') {
-                    throw ConnectionException::invalidConfiguration(sprintf("Config key '%s' is required for driver '%s'.", $key, $driver));
-                }
+        $required = match ($driver) {
+            'mysql', 'mariadb', 'pgsql', 'mssql' => ['database', 'host', 'username'],
+            'sqlite' => ['database'],
+            default => [],
+        };
+        foreach ($required as $key) {
+            $value = $config[$key] ?? null;
+            if (!is_string($value) || $value === '') {
+                throw ConnectionException::invalidConfiguration(sprintf("Config key '%s' is required for driver '%s'.", $key, $driver));
             }
         }
         $this->validateCacheScopes($config);

@@ -164,3 +164,96 @@ it('throws a clear exception when table is not configured', function (): void {
     expect(static fn(): RepositoryQuery => BrokenTableRepository::query())
         ->toThrow(InvalidArgumentException::class, 'must define a non-empty static $table value');
 });
+
+it('binds inherited model instances with scoped data and a custom primary key', function (string $driver): void {
+    setupTableRepositoryFixture($driver);
+    $row = \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryBoundUser::create([
+        'email' => 'bound@example.test', 'name' => 'Bound', 'active' => 1,
+    ]);
+    $model = \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryBoundUser::fromBoundValue((string) $row['id']);
+    expect($model->name)->toBe('Bound')->and($model->active)->toBe(1)
+        ->and($model->exists)->toBeTrue()->and($model->getKey())->toBe($row['id'])
+        ->and($model->getDirty())->toBe([])->and($model->toArray())->toBe($row)
+        ->and(json_decode(json_encode($model, JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR))->toBe($row)
+        ->and(isset($model->email))->toBeTrue()->and(isset($model->deleted_at))->toBeFalse()
+        ->and(\Infocyph\DBLayer\Tests\Fixtures\TableRepositoryBoundUser::fromBoundValue($model))->toBe($model);
+    $custom = \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryEmailUser::fromBoundValue('bound@example.test');
+    expect($custom)->toBeInstanceOf(\Infocyph\DBLayer\Tests\Fixtures\TableRepositoryEmailUser::class)
+        ->and($custom->getKey())->toBe('bound@example.test')->and($custom->name)->toBe('Bound');
+    $custom->name = 'Custom';
+    expect($custom->save())->toBeTrue()->and(TableRepositoryUser::find($row['id'])['name'])->toBe('Custom');
+})->with('dblayer_drivers');
+
+it('keeps instance updates explicit and preserves static mutations and write policy', function (string $driver): void {
+    setupTableRepositoryFixture($driver);
+    $model = new \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryBoundUser([
+        'email' => 'save@example.test', 'name' => 'Original', 'active' => 1,
+    ]);
+    expect($model->exists)->toBeFalse()->and($model->save())->toBeTrue()->and($model->exists)->toBeTrue();
+    $id = $model->getKey();
+    $model->name = 'Edited';
+    expect(TableRepositoryUser::find($id)['name'])->toBe('Original')
+        ->and($model->getDirty())->toBe(['name' => 'Edited'])
+        ->and($model->save())->toBeTrue()->and($model->getDirty())->toBe([])
+        ->and(TableRepositoryUser::find($id)['name'])->toBe('Edited');
+    expect($model->update(['active' => 0]))->toBeTrue();
+    $model->refresh();
+    expect($model->active)->toBe(0)
+        ->and(\Infocyph\DBLayer\Tests\Fixtures\TableRepositoryBoundUser::where('id', '=', $id)->update(['name' => 'Static']))->toBe(1)
+        ->and($model->refresh()->name)->toBe('Static');
+    $model->email = 'forbidden@example.test';
+    expect(fn() => $model->save())->toThrow(\Infocyph\DBLayer\Exceptions\UnwritableAttributeException::class)
+        ->and(TableRepositoryUser::find($id)['email'])->toBe('save@example.test');
+    $model->refresh();
+    expect($model->delete())->toBeTrue()->and($model->exists)->toBeFalse()
+        ->and($model->delete())->toBeFalse()->and($model->save())->toBeFalse()
+        ->and(TableRepositoryUser::find($id))->toBeNull()
+        ->and(TableRepositoryUser::withTrashed()->find($id)['deleted_at'])->not->toBeNull();
+})->with('dblayer_drivers');
+
+it('rejects invisible and missing model bindings without exposing supplied identifiers', function (string $driver): void {
+    setupTableRepositoryFixture($driver);
+    DB::table('users', 'table_repository_conn')->insert([
+        ['tenant_id' => 20, 'email' => 'hidden@example.test', 'name' => 'Hidden', 'active' => 1, 'deleted_at' => null],
+        ['tenant_id' => 10, 'email' => 'trashed-bind@example.test', 'name' => 'Trashed', 'active' => 1, 'deleted_at' => '2026-01-01 00:00:00'],
+    ]);
+    foreach ([1, 2, '999999'] as $value) {
+        expect(fn() => \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryBoundUser::fromBoundValue($value))
+            ->toThrow(\Infocyph\DBLayer\Exceptions\RecordNotFoundException::class);
+    }
+    expect(fn() => \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryEmailUser::fromBoundValue("private' OR 1=1 --"))
+        ->toThrow(\Infocyph\DBLayer\Exceptions\RecordNotFoundException::class);
+    expect(fn() => \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryEmailUser::fromBoundValue('hidden@example.test'))
+        ->toThrow(\Infocyph\DBLayer\Exceptions\RecordNotFoundException::class);
+})->with('dblayer_drivers');
+
+it('rejects invalid bound identifiers without coercing their type', function (mixed $value): void {
+    expect(fn() => \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryBoundUser::fromBoundValue($value))
+        ->toThrow(InvalidArgumentException::class);
+})->with([null, true, 1.5, [[]], [new stdClass()]]);
+
+it('keeps bound rows independent and detects missing rows before syncing failed writes', function (): void {
+    setupTableRepositoryFixture('sqlite');
+    $row = \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryBoundUser::create([
+        'email' => 'fresh@example.test', 'name' => 'Fresh', 'active' => 1,
+    ]);
+    $first = \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryBoundUser::fromBoundValue($row['id']);
+    $second = \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryBoundUser::fromBoundValue($row['id']);
+    $first->name = 'Private edit';
+    expect($second->name)->toBe('Fresh')->and($first)->not->toBe($second);
+    TableRepositoryUser::forceDeleteById($row['id']);
+    expect($first->save())->toBeFalse()->and($first->getDirty())->toBe(['name' => 'Private edit']);
+    expect(fn() => $second->refresh())->toThrow(\Infocyph\DBLayer\Exceptions\RecordNotFoundException::class);
+});
+
+
+it('does not construct bound objects during ordinary static queries', function (): void {
+    setupTableRepositoryFixture('sqlite');
+    $class = \Infocyph\DBLayer\Tests\Fixtures\TableRepositoryBoundUser::class;
+    $class::$constructions = 0;
+    $row = $class::create(['email' => 'static@example.test', 'name' => 'Static', 'active' => 1]);
+    expect($class::find($row['id']))->toBeArray()->and($class::count())->toBe(1)
+        ->and($class::$constructions)->toBe(0);
+    $class::fromBoundValue($row['id']);
+    expect($class::$constructions)->toBe(1);
+});

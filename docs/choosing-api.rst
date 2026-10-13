@@ -11,6 +11,7 @@ DBLayer exposes complementary layers rather than one mandatory entrypoint:
 - ``QueryBuilder``: per-query SQL composition.
 - ``Repository``: reusable table-level rules and behavior.
 - ``ConnectionRepository``: instance-first repository base for scoped runtimes.
+- ``TableRepository``: static table queries and optional bound row instances.
 
 ``SchemaManager``, ``MigrationRunner``, ``SeedRunner``, and ``RelationLoader``
 remain explicit opt-in modules alongside these layers.
@@ -65,6 +66,9 @@ Quick Decision Matrix
    * - Build a repository directly from an owned connection
      - ``ConnectionRepository``
      - Derives DBLayer's executor/result processor without static facade state.
+   * - Bind an identifier to a loaded table object with explicit writes
+     - ``TableRepository::fromBoundValue()``
+     - Uses configured repository scopes and supports a custom primary key.
    * - Raw SQL execution with bindings
      - ``Connection`` or ``DB`` raw helpers
      - Raw SQL remains first-class in either ownership model.
@@ -87,6 +91,12 @@ Mental Model
 
 Practical Scenarios
 -------------------
+
+For optional bound attributes and ``save()`` / ``delete()``, see
+:doc:`api-table-repository`. Static ``TableRepository`` queries continue to
+return rows or explicitly mapped DTOs without constructing bound instances.
+Binding resolves the repository's named connection; use ``ConnectionRepository``
+when callers need to supply the exact execution-owned connection instead.
 
 1. Conventional facade application
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

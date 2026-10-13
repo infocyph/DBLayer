@@ -57,13 +57,36 @@ jobs:
           coverage: none
           tools: composer:v2
 
-      - name: Install baseline dependencies
+      - name: Create release evidence directory
+        run: mkdir -p release-evidence
+
+      - name: Prepare baseline production manifest
         working-directory: baseline
-        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+        run: |
+          cp composer.json ../release-evidence/baseline-composer.json
+          php <<'PHP'
+          <?php
+          $path = 'composer.json';
+          $composer = json_decode(file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+          // Historical development tooling is not part of the measured runtime.
+          unset($composer['require-dev'], $composer['autoload-dev']);
+          file_put_contents(
+              $path,
+              json_encode($composer, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL,
+          );
+          PHP
+
+      - name: Install baseline production dependencies
+        working-directory: baseline
+        run: |
+          composer update --no-dev --no-plugins --no-scripts --no-interaction --prefer-dist --no-progress --prefer-stable
+          composer show --no-dev --format=json > ../release-evidence/baseline-packages.json
 
       - name: Install candidate dependencies
         working-directory: candidate
-        run: composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+        run: |
+          composer update --no-interaction --prefer-dist --no-progress --prefer-stable
+          composer show --no-dev --format=json > ../release-evidence/candidate-packages.json
 
       - name: Analyze release evidence tooling
         working-directory: candidate
@@ -71,9 +94,6 @@ jobs:
           php vendor/bin/phpstan analyse
           --configuration=vendor/infocyph/phpforge/resources/phpstan.neon.dist
           .automation/scripts/ci --no-progress
-
-      - name: Create release evidence directory
-        run: mkdir -p release-evidence
 
       - name: Measure alternating matched host workload
         run: |

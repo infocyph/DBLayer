@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
+use Infocyph\DBLayer\Connection\ConnectionLease;
 use Infocyph\DBLayer\Connection\Pool;
 use Infocyph\DBLayer\Connection\PoolManager;
 use Infocyph\DBLayer\Exceptions\ConnectionException;
@@ -291,7 +292,8 @@ final class ReleaseRunwireSoak
             $counts['completed_requests'] += $this->concurrency;
             if ($counts['completed_requests'] % 200 === 0) {
                 $fenced = $this->verifyIteratorFence($manager, $runtime, $offset + $counts['completed_requests']);
-                $counts[$fenced ? 'iterator_fences' : 'unexpected_errors']++;
+                $metric = ['unexpected_errors', 'iterator_fences'][(int) $fenced];
+                $counts[$metric]++;
             }
         }
 
@@ -366,39 +368,7 @@ final class ReleaseRunwireSoak
 
             $result = $lease->connection()->withRunwire(
                 $runtime,
-                function () use ($lease, $scope, $sequence): mixed {
-                    $scope->yieldNow();
-                    $id = ($sequence % 256) + 1;
-                    $tenantId = ($id % 8) + 1;
-                    $row = $lease->connection()
-                        ->table('release_soak_items')
-                        ->where('id', '=', $id)
-                        ->where('tenant_id', '=', $tenantId)
-                        ->cacheFor(10)
-                        ->cacheKey('release.soak.' . $tenantId . '.' . $sequence)
-                        ->first();
-
-                    if (($row['id'] ?? null) !== $id || ($row['tenant_id'] ?? null) !== $tenantId) {
-                        throw new RuntimeException('Runwire soak tenant row mismatch.');
-                    }
-
-                    if ($sequence % 113 === 0) {
-                        $affected = $lease->connection()
-                            ->table('release_soak_items')
-                            ->where('id', '=', $id)
-                            ->where('tenant_id', '=', $tenantId)
-                            ->update(['value' => 'row-' . $id . '-request-' . $sequence]);
-
-                        if ($affected !== 1) {
-                            throw new RuntimeException('Runwire soak tenant write mismatch.');
-                        }
-                    }
-
-                    return $lease->connection()->scalar(
-                        'select count(*) from release_soak_items where id between ? and ?',
-                        [1, 256],
-                    );
-                },
+                fn(): mixed => $this->executeTenantRequest($lease, $scope, $sequence),
                 $request,
                 $scope,
             );
@@ -411,6 +381,39 @@ final class ReleaseRunwireSoak
 
             $lease->release();
         }
+    }
+
+    private function executeTenantRequest(
+        ConnectionLease $lease,
+        CoroutineScope $scope,
+        int $sequence,
+    ): mixed {
+        $scope->yieldNow();
+        $id = ($sequence % 256) + 1;
+        $tenantId = ($id % 8) + 1;
+        $row = $lease->connection()->table('release_soak_items')
+            ->where('id', '=', $id)
+            ->where('tenant_id', '=', $tenantId)
+            ->cacheFor(10)
+            ->cacheKey('release.soak.' . $tenantId . '.' . $sequence)
+            ->first();
+
+        if (($row['id'] ?? null) !== $id || ($row['tenant_id'] ?? null) !== $tenantId) {
+            throw new RuntimeException('Runwire soak tenant row mismatch.');
+        }
+
+        if ($sequence % 113 === 0) {
+            $affected = $lease->connection()->table('release_soak_items')
+                ->where('id', '=', $id)
+                ->where('tenant_id', '=', $tenantId)
+                ->update(['value' => 'row-' . $id . '-request-' . $sequence]);
+
+            if ($affected !== 1) {
+                throw new RuntimeException('Runwire soak tenant write mismatch.');
+            }
+        }
+
+        return $lease->connection()->scalar('select count(*) from release_soak_items where id between ? and ?', [1, 256]);
     }
 
     private function verifyIteratorFence(

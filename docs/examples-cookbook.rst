@@ -343,3 +343,12 @@ Related Pages
 - ``relation-loading``
 - ``schema-migrations``
 - ``transactions``
+
+Bound Repository Parameters
+---------------------------
+
+``examples/model_binding.php`` is a runnable example of a custom primary key,
+loaded attributes, explicit saves/deletes, and optional InterMix 11.2
+``enableAutoBind()``. Binding uses the repository's configured named connection
+and scopes. Hosts retain request/task scope ownership and map missing-record
+exceptions to their normal response. See ``api-table-repository``.

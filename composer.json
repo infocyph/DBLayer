@@ -29,21 +29,22 @@
     "require": {
         "php": "^8.4",
         "ext-pdo": "*",
-        "infocyph/arraykit": "^5.3",
+        "infocyph/arraykit": "^5.3.1",
         "infocyph/cachelayer": "^4.0",
         "psr/log": "^3.0.2"
     },
     "require-dev": {
+        "infocyph/intermix": "^11.2",
         "infocyph/phpforge": "dev-main@dev",
-        "infocyph/runwire": "2.1.1",
-        "tomasvotruba/cognitive-complexity": "1.2.0"
+        "infocyph/runwire": "2.1.1"
     },
     "suggest": {
         "ext-pdo_mysql": "For MySQL or MariaDB database support",
         "ext-pdo_pgsql": "For PostgreSQL database support",
         "ext-pdo_sqlite": "For SQLite database support",
         "ext-pdo_sqlsrv": "For Microsoft SQL Server database support",
-        "infocyph/runwire": "Optional host-runtime cancellation, deadline, coroutine backoff, and lazy-iteration integration for DBLayer 6.0."
+        "infocyph/intermix": "Optional parameter-to-model binding through enableAutoBind() (11.2 or later).",
+        "infocyph/runwire": "Optional host-runtime cancellation, deadline, coroutine backoff, and lazy-iteration integration through a passed host context."
     },
     "minimum-stability": "stable",
     "prefer-stable": true,

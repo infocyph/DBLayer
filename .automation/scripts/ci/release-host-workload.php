@@ -422,18 +422,16 @@ final class ReleaseHostWorkload
             'peak_rss_bytes' => $counts['peak_rss_bytes'],
             'peak_php_heap_bytes' => $counts['peak_php_heap_bytes'],
             'pid' => $counts['pid'],
-            'cpu_user_seconds' => $this->workerCpuMetric($decoded, 'cpu_user_seconds'),
-            'cpu_system_seconds' => $this->workerCpuMetric($decoded, 'cpu_system_seconds'),
+            'cpu_user_seconds' => $this->nonNegativeNumber($decoded['cpu_user_seconds'] ?? null, 'Missing worker CPU metric: cpu_user_seconds.'),
+            'cpu_system_seconds' => $this->nonNegativeNumber($decoded['cpu_system_seconds'] ?? null, 'Missing worker CPU metric: cpu_system_seconds.'),
             'latency_ms' => $this->validateLatencies($latencies),
         ];
     }
 
-    /** @param array<array-key,mixed> $record */
-    private function workerCpuMetric(array $record, string $field): float
+    private function nonNegativeNumber(mixed $value, string $error): float
     {
-        $value = $record[$field] ?? null;
         if ((!is_float($value) && !is_int($value)) || !is_finite((float) $value) || $value < 0.0) {
-            throw new RuntimeException("Missing worker CPU metric: {$field}.");
+            throw new RuntimeException($error);
         }
 
         return (float) $value;
@@ -443,15 +441,7 @@ final class ReleaseHostWorkload
      * @return list<float> */
     private function validateLatencies(array $values): array
     {
-        $latencies = [];
-        foreach ($values as $value) {
-            if ((!is_int($value) && !is_float($value)) || !is_finite((float) $value) || $value < 0) {
-                throw new RuntimeException('Invalid worker latency sample.');
-            }
-            $latencies[] = (float) $value;
-        }
-
-        return $latencies;
+        return array_map(fn(mixed $value): float => $this->nonNegativeNumber($value, 'Invalid worker latency sample.'), $values);
     }
 
     /** @return WorkerResult */
