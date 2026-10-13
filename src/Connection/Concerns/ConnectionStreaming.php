@@ -201,13 +201,7 @@ trait ConnectionStreaming
 
                     $this->executePreparedStatement($statement, $bindings)->closeCursor();
                 } catch (Throwable $exception) {
-                    if ($ownsTransaction) {
-                        try {
-                            $pdo->rollBack();
-                        } catch (Throwable) {
-                            // Preserve the declaration failure that triggered cleanup.
-                        }
-                    }
+                    $this->rollbackCursorDeclaration($pdo, $ownsTransaction);
 
                     throw $exception;
                 }
@@ -416,6 +410,19 @@ trait ConnectionStreaming
         }
 
         $this->activeStreamIterators = max(0, $this->activeStreamIterators - 1);
+    }
+
+    private function rollbackCursorDeclaration(PDO $pdo, bool $ownsTransaction): void
+    {
+        if (!$ownsTransaction) {
+            return;
+        }
+
+        try {
+            $pdo->rollBack();
+        } catch (Throwable) {
+            // Preserve the declaration failure that triggered cleanup.
+        }
     }
 
     /**

@@ -226,7 +226,7 @@ final readonly class RepositoryThroughRelationAggregator
             ?? throw new InvalidArgumentException('Through aggregate requires an intermediate parent key.'));
         $throughKey = RepositorySupport::column($definition->throughKey
             ?? throw new InvalidArgumentException('Through aggregate requires an intermediate local key.'));
-        $parentValues = $this->values($parents, $definition->parentKey);
+        $parentValues = RepositorySupport::uniqueValues(array_column($parents, $definition->parentKey));
         if ($parentValues === []) {
             return [[], []];
         }
@@ -255,22 +255,6 @@ final readonly class RepositoryThroughRelationAggregator
             }
         }
 
-        return [$parentByThrough, $this->values($rows, $throughKey)];
-    }
-
-    /**
-     * @param list<array<string,mixed>> $rows
-     * @return list<int|float|string|bool>
-     */
-    private function values(array $rows, string $column): array
-    {
-        $values = [];
-        foreach ($rows as $row) {
-            if (array_key_exists($column, $row) && $row[$column] !== null) {
-                $values[] = $row[$column];
-            }
-        }
-
-        return RepositorySupport::uniqueValues($values);
+        return [$parentByThrough, RepositorySupport::uniqueValues(array_column($rows, $throughKey))];
     }
 }

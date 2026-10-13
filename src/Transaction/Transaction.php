@@ -103,30 +103,24 @@ final class Transaction
         $attempt = 0;
         beginning: $attempt++;
 
+        $begun = false;
+
         try {
             $this->begin();
-        } catch (Throwable $e) {
-            if ($attempt < $attempts && $this->causedByRetryableTransactionError($e)) {
-                $this->stats['deadlocks']++;
-                $this->backoff($attempt);
-                goto beginning;
-            }
-
-            throw TransactionException::failed($e);
-        }
-
-        try {
+            $begun = true;
             $result = $callback($this->connection);
             $this->commit();
 
             return $result;
         } catch (Throwable $e) {
-            if (!$this->inTransaction()) {
+            if (!$this->inTransaction() && $begun) {
                 throw $e;
             }
 
             try {
-                $this->rollBack();
+                if ($begun) {
+                    $this->rollBack();
+                }
             } catch (Throwable $rollbackFailure) {
                 $this->connection->disconnect();
 

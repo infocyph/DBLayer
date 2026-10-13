@@ -6,6 +6,7 @@ namespace Infocyph\DBLayer\Repository\Concerns;
 
 use Infocyph\DBLayer\Query\QueryBuilder;
 use Infocyph\DBLayer\Repository\RepositoryRelationAggregator;
+use Infocyph\DBLayer\Repository\RepositorySupport;
 use InvalidArgumentException;
 
 trait RepositoryQueryAggregates
@@ -189,29 +190,8 @@ trait RepositoryQueryAggregates
         array $relations,
     ): void {
         foreach ($relations as $relation) {
-            if (is_string($relation)) {
-                $this->registerAggregate($relation, $function, $column, null, null, $exists);
-
-                continue;
-            }
-
-            foreach ($relation as $expression => $constraint) {
-                if (is_int($expression)) {
-                    if (!is_string($constraint)) {
-                        throw new InvalidArgumentException('Numeric relation aggregate entries must contain relation names.');
-                    }
-                    $this->registerAggregate($constraint, $function, $column, null, null, $exists);
-
-                    continue;
-                }
-
-                if (!is_callable($constraint)) {
-                    throw new InvalidArgumentException(sprintf(
-                        'Relation aggregate constraint for [%s] must be callable.',
-                        $expression,
-                    ));
-                }
-                $this->registerAggregate($expression, $function, $column, null, $constraint, $exists);
+            foreach (RepositorySupport::relationConstraints($relation) as [$name, $constraint]) {
+                $this->registerAggregate($name, $function, $column, null, $constraint, $exists);
             }
         }
     }

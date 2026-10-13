@@ -113,7 +113,7 @@ final class RepositoryOneOfManyOrder
         }
 
         if (is_bool($left) && is_bool($right)) {
-            return ($left ? 1 : 0) <=> ($right ? 1 : 0);
+            return $left <=> $right;
         }
 
         if (is_scalar($left) && is_scalar($right)) {

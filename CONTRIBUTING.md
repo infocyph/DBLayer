@@ -72,6 +72,10 @@ Automated processing may modify source files and `composer.json`. Review all res
 
 ## Validation
 
+The complete suite requires configured MySQL and PostgreSQL test services and
+their PDO extensions. See [Testing](README.md#testing) for the environment
+variables; additional native drivers expand the matrix automatically.
+
 Run the complete project validation suite before opening a pull request:
 
 ```bash

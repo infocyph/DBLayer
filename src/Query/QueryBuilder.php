@@ -611,9 +611,7 @@ class QueryBuilder
             $this->validateColumnIdentifier($group, false);
         }
 
-        foreach ($groups as $group) {
-            $this->groups[] = $group;
-        }
+        array_push($this->groups, ...$groups);
 
         return $this;
     }
@@ -818,9 +816,7 @@ class QueryBuilder
 
         $this->joins[] = $join;
 
-        if ($join->getBindings() !== []) {
-            $this->appendBindingBucket('join', $join->getBindings());
-        }
+        $this->appendBindingBucket('join', $join->getBindings());
 
         return $this;
     }
@@ -844,9 +840,7 @@ class QueryBuilder
         $callback($join);
         $this->joins[] = $join;
 
-        if ($join->getBindings() !== []) {
-            $this->appendBindingBucket('join', $join->getBindings());
-        }
+        $this->appendBindingBucket('join', $join->getBindings());
 
         return $this;
     }
@@ -890,9 +884,7 @@ class QueryBuilder
                 'operator' => $operator,
                 'second' => $second,
             ];
-            if ($bindings !== []) {
-                $this->appendBindingBucket('join', $bindings);
-            }
+            $this->appendBindingBucket('join', $bindings);
 
             return $this;
         } else {
@@ -909,9 +901,7 @@ class QueryBuilder
             'second' => $second,
         ];
 
-        if ($bindings !== []) {
-            $this->appendBindingBucket('join', $bindings);
-        }
+        $this->appendBindingBucket('join', $bindings);
 
         return $this;
     }

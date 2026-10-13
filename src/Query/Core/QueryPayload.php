@@ -292,6 +292,28 @@ final readonly class QueryPayload
     }
 
     /**
+     * @param array<array-key,mixed> $value
+     * @return array{name:string,query:string|QueryPayload,recursive:bool}
+     */
+    private static function normalizeCte(array $value): array
+    {
+        $name = $value['name'] ?? null;
+        $query = $value['query'] ?? null;
+        if (!is_string($name) || (!is_string($query) && !$query instanceof self)) {
+            throw new LogicException('QueryPayload CTEs require a name and structured or raw query.');
+        }
+        if (trim($name) === '' || (is_string($query) && trim($query) === '')) {
+            throw new LogicException('QueryPayload CTE names and raw queries must not be empty.');
+        }
+        $recursive = $value['recursive'] ?? false;
+        if (!is_bool($recursive)) {
+            throw new LogicException('QueryPayload CTE recursive flag must be boolean.');
+        }
+
+        return ['name' => $name, 'query' => $query, 'recursive' => $recursive];
+    }
+
+    /**
      * @param array<int|string,mixed> $values
      * @return list<array{name:string,query:string|QueryPayload,recursive:bool}>
      */
@@ -305,24 +327,7 @@ final readonly class QueryPayload
                 throw new LogicException('QueryPayload CTEs must be arrays.');
             }
 
-            $name = $value['name'] ?? null;
-            $query = $value['query'] ?? null;
-            if (!is_string($name) || (!is_string($query) && !$query instanceof self)) {
-                throw new LogicException('QueryPayload CTEs require a name and structured or raw query.');
-            }
-            if (trim($name) === '' || (is_string($query) && trim($query) === '')) {
-                throw new LogicException('QueryPayload CTE names and raw queries must not be empty.');
-            }
-            $recursive = $value['recursive'] ?? false;
-            if (!is_bool($recursive)) {
-                throw new LogicException('QueryPayload CTE recursive flag must be boolean.');
-            }
-
-            $normalized[] = [
-                'name' => $name,
-                'query' => $query,
-                'recursive' => $recursive,
-            ];
+            $normalized[] = self::normalizeCte($value);
         }
 
         return $normalized;

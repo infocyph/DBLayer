@@ -520,6 +520,14 @@ it('runs the complete table repository example', function (): void {
         );
 });
 
+it('runs the inherited model-binding example with explicit persistence', function (): void {
+    $process = new Process([PHP_BINARY, __DIR__ . '/../../examples/model_binding.php']);
+    $process->mustRun();
+    $summary = json_decode($process->getOutput(), true, flags: JSON_THROW_ON_ERROR);
+    expect($summary['bound'])->toMatchArray(['user_key' => 'user-42', 'name' => 'Alice Updated', 'active' => true])
+        ->and($summary['deleted'])->toBeTrue()->and($summary['missing'])->toBeTrue();
+});
+
 it('keeps examples and integration coverage in sync', function (): void {
     $exampleFiles = glob(__DIR__ . '/../../examples/*.php') ?: [];
     $exampleNames = array_map(
@@ -544,6 +552,7 @@ it('keeps examples and integration coverage in sync', function (): void {
         'filtering.php' => ['ExamplesParityIntegrationTest.php'],
         'helpers_and_security.php' => ['ExamplesParityIntegrationTest.php'],
         'locking.php' => ['LockingIntegrationTest.php'],
+        'model_binding.php' => ['ExamplesParityIntegrationTest.php', 'TableRepositoryBindingIntegrationTest.php'],
         'multi_connections.php' => [
             'ExamplesParityIntegrationTest.php',
             'PrefixAndNamedConnectionIntegrationTest.php',

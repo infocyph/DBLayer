@@ -154,7 +154,7 @@ final readonly class RepositoryRelationLoader
                 $query->apply($constraint);
             }
 
-            array_push($rows, ...$this->normalizeRows($query->get($columns)->toArray()));
+            array_push($rows, ...RepositorySupport::rows($query->get($columns)->toArray()));
         }
 
         return $rows;
@@ -202,7 +202,7 @@ final readonly class RepositoryRelationLoader
         ?callable $constraint,
     ): array {
         return $this->fetchByValues(
-            $this->values($parents, $definition->parentKey),
+            RepositorySupport::uniqueValues(array_column($parents, $definition->parentKey)),
             $definition,
             $constraint,
         );
@@ -288,7 +288,7 @@ final readonly class RepositoryRelationLoader
         $pivotRelatedKey = RepositorySupport::column($definition->pivotRelatedKey
             ?? throw new InvalidArgumentException('Many-to-many relation requires a pivot related key.'));
 
-        $parentValues = $this->values($parents, $definition->parentKey);
+        $parentValues = RepositorySupport::uniqueValues(array_column($parents, $definition->parentKey));
         $pivotRows = [];
         $batchSize = max(1, $this->parentConnection->safeBatchSize(requested: $this->batchSize));
         $pivotColumns = $this->pivotProjection($definition, $pivotParentKey, $pivotRelatedKey);
@@ -307,11 +307,11 @@ final readonly class RepositoryRelationLoader
                 $query->where($typeColumn, '=', $morphAlias);
             }
 
-            array_push($pivotRows, ...$this->normalizeRows($query->get()));
+            array_push($pivotRows, ...RepositorySupport::rows($query->get()));
         }
 
         $relatedRows = $this->fetchByValues(
-            $this->values($pivotRows, $pivotRelatedKey),
+            RepositorySupport::uniqueValues(array_column($pivotRows, $pivotRelatedKey)),
             $definition,
             $constraint,
         );
@@ -321,29 +321,20 @@ final readonly class RepositoryRelationLoader
             $relatedByKey[RepositorySupport::key($row[$definition->relatedKey] ?? null)] = $row;
         }
 
-        $pivotsByParent = [];
+        $matchesByParent = [];
         foreach ($pivotRows as $pivot) {
-            $pivotsByParent[RepositorySupport::key($pivot[$pivotParentKey] ?? null)][] = $pivot;
-        }
-
-        foreach ($parents as &$parent) {
-            $matches = [];
-            $parentKey = RepositorySupport::key($parent[$definition->parentKey] ?? null);
-
-            foreach ($pivotsByParent[$parentKey] ?? [] as $pivot) {
-                $relatedKey = RepositorySupport::key($pivot[$pivotRelatedKey] ?? null);
-                if (!isset($relatedByKey[$relatedKey])) {
-                    continue;
-                }
-
-                $row = $relatedByKey[$relatedKey];
-                if ($definition->pivotColumns !== []) {
-                    $row[$definition->pivotAccessor] = $this->pivotAttributes($pivot, $definition->pivotColumns);
-                }
-                $matches[] = $row;
+            $relatedKey = RepositorySupport::key($pivot[$pivotRelatedKey] ?? null);
+            if (!isset($relatedByKey[$relatedKey])) {
+                continue;
             }
-
-            $parent[$as] = $matches;
+            $row = $relatedByKey[$relatedKey];
+            if ($definition->pivotColumns !== []) {
+                $row[$definition->pivotAccessor] = $this->pivotAttributes($pivot, $definition->pivotColumns);
+            }
+            $matchesByParent[RepositorySupport::key($pivot[$pivotParentKey] ?? null)][] = $row;
+        }
+        foreach ($parents as &$parent) {
+            $parent[$as] = $matchesByParent[RepositorySupport::key($parent[$definition->parentKey] ?? null)] ?? [];
         }
         unset($parent);
 
@@ -378,24 +369,6 @@ final readonly class RepositoryRelationLoader
         unset($parent);
 
         return $parents;
-    }
-
-    /**
-     * @param array<array-key,mixed> $values
-     * @return list<array<string,mixed>>
-     */
-    private function normalizeRows(array $values): array
-    {
-        $rows = [];
-
-        foreach ($values as $value) {
-            $row = RepositorySupport::row($value);
-            if ($row !== null) {
-                $rows[] = $row;
-            }
-        }
-
-        return $rows;
     }
 
     /**
@@ -459,22 +432,5 @@ final readonly class RepositoryRelationLoader
         }
 
         return array_keys($columns);
-    }
-
-    /**
-     * @param list<array<string,mixed>> $rows
-     * @return list<int|float|string|bool>
-     */
-    private function values(array $rows, string $column): array
-    {
-        $values = [];
-
-        foreach ($rows as $row) {
-            if (array_key_exists($column, $row) && $row[$column] !== null) {
-                $values[] = $row[$column];
-            }
-        }
-
-        return RepositorySupport::uniqueValues($values);
     }
 }

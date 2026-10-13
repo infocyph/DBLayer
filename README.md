@@ -10,7 +10,7 @@
 
 A high-performance, secure database layer for PHP 8.4+. DBLayer combines a
 QueryBuilder, reusable repository policies, explicit static table ergonomics,
-multi-driver execution, and operational controls without becoming an ORM.
+multi-driver execution, and operational controls without requiring a full ORM.
 
 ## Features
 
@@ -314,7 +314,7 @@ unsupported bindings, and unsafe raw shapes bypass shared query caching.
 
 If the same table rules appear in multiple call sites, move that logic into a repository-oriented class.
 
-### TableRepository (Repository-Oriented, Non-ORM)
+### TableRepository (Static Queries and Optional Binding)
 
 ```php
 use Infocyph\DBLayer\Repository\TableRepository;
@@ -343,6 +343,23 @@ $stats = DB::stats('main');                        // Infrastructure stays expli
 $reportRows = User::query('reporting')->get();     // Per-call connection override
 ```
 
+With InterMix 11.2's `enableAutoBind()`, a supplied identifier can resolve to a
+`User` parameter through the inherited `fromBoundValue()` method. Direct binding
+also works without InterMix:
+
+```php
+$user = User::fromBoundValue(1);
+$user->name = 'Updated'; // memory only
+$user->save();          // existing repository write policy
+$user->delete();        // existing soft-delete policy
+```
+
+Override `protected static string $primaryKey = 'user_key';` for a custom key.
+Missing or scoped-out rows throw `RecordNotFoundException`; the host maps that
+to its HTTP response. Normal static queries build no bound instance or change
+snapshot. See [the binding API](docs/api-table-repository.rst) and
+[the runnable example](examples/model_binding.php).
+
 ### Transactions
 
 ```php
@@ -367,6 +384,7 @@ try {
 ## Testing
 
 ```bash
+composer ic:ci
 composer ic:tests
 composer ic:test:code
 composer ic:test:static
@@ -376,7 +394,10 @@ composer ic:release:guard
 
 Test execution is driver-aware:
 
-- SQLite-only environments run the base test set.
+- SQLite runs the base unit and driver-matrix cases. The complete suite also
+  includes mandatory MySQL and PostgreSQL integration tests; configure reachable
+  services and install their PDO extensions before running `composer ic:ci` or
+  `composer ic:release:guard`.
 - MySQL, MariaDB, PostgreSQL, and SQL Server are enabled automatically when
   their `DBLAYER_MYSQL_*`, `DBLAYER_MARIADB_*`, `DBLAYER_PGSQL_*`, or
   `DBLAYER_MSSQL_*` environment variables and matching PDO extensions are available.
@@ -384,6 +405,19 @@ Test execution is driver-aware:
   and `IC_MSSQL_DSN`) are recognized as CI fallbacks.
 
 So total test count increases when more drivers are available.
+
+Use databases dedicated to testing. For example, after creating `dblayer_test`
+and granting the test user access on both servers:
+
+```bash
+export DBLAYER_MYSQL_HOST=127.0.0.1 DBLAYER_MYSQL_PORT=3306
+export DBLAYER_MYSQL_DATABASE=dblayer_test DBLAYER_MYSQL_USERNAME=dblayer
+export DBLAYER_MYSQL_PASSWORD=your_test_password
+export DBLAYER_PGSQL_HOST=127.0.0.1 DBLAYER_PGSQL_PORT=5432
+export DBLAYER_PGSQL_DATABASE=dblayer_test DBLAYER_PGSQL_USERNAME=dblayer
+export DBLAYER_PGSQL_PASSWORD=your_test_password
+composer ic:ci
+```
 
 ## Security
 
@@ -406,9 +440,10 @@ Hardening controls:
 
 - PHP 8.4+
 - ext-pdo
-- DBLayer 6.0 requires `infocyph/arraykit ^5.3`, `infocyph/cachelayer ^4.0`,
+- `infocyph/arraykit ^5.3.1`, `infocyph/cachelayer ^4.0`,
   and `psr/log ^3.0.2`
 - `infocyph/runwire` 2.1.x is optional for host-runtime integration; DBLayer's integration is tested against 2.1.1
+- `infocyph/intermix` 11.2+ is optional for automatic repository parameter binding
 - ext-pdo_mysql (for MySQL and MariaDB)
 - ext-pdo_pgsql (for PostgreSQL)
 - ext-pdo_sqlsrv (for Microsoft SQL Server)

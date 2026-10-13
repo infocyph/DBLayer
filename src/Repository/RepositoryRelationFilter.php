@@ -326,7 +326,6 @@ final readonly class RepositoryRelationFilter
         ));
         $batchSize = $related::connection()->safeBatchSize(requested: $this->batchSize);
         $matches = [];
-        $seen = [];
 
         foreach (array_chunk($ids, $batchSize) as $chunk) {
             $query = $related::query()->apply(
@@ -337,26 +336,20 @@ final readonly class RepositoryRelationFilter
             $query->apply($constraint);
 
             foreach ($query->raw()->select($primaryKey)->cursor() as $row) {
-                if (!is_array($row) || !array_key_exists($primaryKey, $row)) {
+                if (!is_array($row)) {
                     continue;
                 }
 
-                $parent = $parentById[RepositorySupport::key($row[$primaryKey])] ?? null;
+                $parent = $parentById[RepositorySupport::key($row[$primaryKey] ?? null)] ?? null;
                 if ($parent === null) {
                     continue;
                 }
 
-                $identity = RepositorySupport::key($parent);
-                if (isset($seen[$identity])) {
-                    continue;
-                }
-
-                $seen[$identity] = true;
-                $matches[] = $parent;
+                $matches[RepositorySupport::key($parent)] = $parent;
             }
         }
 
-        return $matches;
+        return array_values($matches);
     }
 
     /**

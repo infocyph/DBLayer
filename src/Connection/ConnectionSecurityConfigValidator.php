@@ -19,6 +19,7 @@ final class ConnectionSecurityConfigValidator
         self::validateSecurityEnabled($security);
         self::validateSecurityNumericLimits($security);
         self::validateSecurityScalarTypes($security);
+        self::validateCursorSigningKey($security['cursor_signing_key'] ?? null);
         self::validateRawSqlPolicy($security);
         self::validateSecurityTlsPolicy($security);
     }
@@ -32,6 +33,19 @@ final class ConnectionSecurityConfigValidator
         } finally {
             restore_error_handler();
         }
+    }
+
+    private static function validateCursorSigningKey(mixed $cursorSigningKey): void
+    {
+        if (
+            $cursorSigningKey !== null
+            && (!is_string($cursorSigningKey) || strlen($cursorSigningKey) < 32)
+        ) {
+            throw ConnectionException::invalidConfiguration(
+                "Security config key 'cursor_signing_key' must be null or a string of at least 32 bytes.",
+            );
+        }
+
     }
 
     /**
@@ -142,26 +156,14 @@ final class ConnectionSecurityConfigValidator
             throw ConnectionException::invalidConfiguration("Security config key 'rate_limit_callback' must be callable or null.");
         }
 
-        if (array_key_exists('strict_identifiers', $security) && !is_bool($security['strict_identifiers'])) {
-            throw ConnectionException::invalidConfiguration("Security config key 'strict_identifiers' must be a boolean.");
-        }
-
-        $cursorSigningKey = $security['cursor_signing_key'] ?? null;
-        if (
-            $cursorSigningKey !== null
-            && (!is_string($cursorSigningKey) || strlen($cursorSigningKey) < 32)
-        ) {
-            throw ConnectionException::invalidConfiguration(
-                "Security config key 'cursor_signing_key' must be null or a string of at least 32 bytes.",
-            );
+        foreach (['strict_identifiers', 'allow_insecure'] as $key) {
+            if (array_key_exists($key, $security) && !is_bool($security[$key])) {
+                throw ConnectionException::invalidConfiguration(sprintf("Security config key '%s' must be a boolean.", $key));
+            }
         }
 
         if (isset($security['require_tls']) && !is_bool($security['require_tls'])) {
             throw ConnectionException::invalidConfiguration("Security config key 'require_tls' must be a boolean or null.");
-        }
-
-        if (array_key_exists('allow_insecure', $security) && !is_bool($security['allow_insecure'])) {
-            throw ConnectionException::invalidConfiguration("Security config key 'allow_insecure' must be a boolean.");
         }
     }
 

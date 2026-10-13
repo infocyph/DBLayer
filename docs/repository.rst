@@ -238,8 +238,10 @@ repository semantics, use ``TableRepository``:
        static fn ($q) => $q->where('active', '=', 1),
    );
 
-This preserves repository semantics and does not introduce ORM identity maps,
-dirty tracking, or a unit of work.
+This preserves repository semantics without identity maps or a unit of work.
+``TableRepository::fromBoundValue()`` additionally supports optional bound
+instances with local attribute tracking and explicit writes; see
+``api-table-repository``.
 
 Mapping
 -------

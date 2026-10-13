@@ -205,33 +205,30 @@ final class Telemetry
             [$fingerprint, $connection, $sql] = self::resolveShapeIdentity($query);
             $key = $connection . "\0" . $fingerprint;
             $success = ($query['success'] ?? false) === true;
+            $outcome = ['failure_count', 'success_count'][(int) $success];
             $rowsAffected = $query['rows_affected'] ?? null;
 
-            if (!isset($groups[$key])) {
-                $groups[$key] = [
-                    'fingerprint' => $fingerprint,
-                    'statement' => self::queryString($query, 'statement', self::statementFromSql($sql)),
-                    'connection' => $connection,
-                    'sql' => $sql,
-                    'calls' => 0,
-                    'success_count' => 0,
-                    'failure_count' => 0,
-                    'total_time_ms' => 0.0,
-                    'min_time_ms' => $duration,
-                    'max_time_ms' => $duration,
-                    'rows_affected_total' => 0,
-                    'rows_affected_samples' => 0,
-                    '_durations' => [],
-                ];
-            } elseif (
-                $groups[$key]['sql'] === self::REDACTED_VALUE
-                && $sql !== self::REDACTED_VALUE
-            ) {
+            $groups[$key] ??= [
+                'fingerprint' => $fingerprint,
+                'statement' => self::queryString($query, 'statement', self::statementFromSql($sql)),
+                'connection' => $connection,
+                'sql' => $sql,
+                'calls' => 0,
+                'success_count' => 0,
+                'failure_count' => 0,
+                'total_time_ms' => 0.0,
+                'min_time_ms' => $duration,
+                'max_time_ms' => $duration,
+                'rows_affected_total' => 0,
+                'rows_affected_samples' => 0,
+                '_durations' => [],
+            ];
+            if ($groups[$key]['sql'] === self::REDACTED_VALUE) {
                 $groups[$key]['sql'] = $sql;
             }
 
             $groups[$key]['calls']++;
-            $groups[$key][$success ? 'success_count' : 'failure_count']++;
+            $groups[$key][$outcome]++;
             $groups[$key]['total_time_ms'] += $duration;
             $groups[$key]['min_time_ms'] = min($groups[$key]['min_time_ms'], $duration);
             $groups[$key]['max_time_ms'] = max($groups[$key]['max_time_ms'], $duration);
@@ -473,93 +470,9 @@ final class Telemetry
      */
     private static function ensureHooked(): void
     {
-        self::$listeners['db.query.executed'] ??= static function (QueryExecuted $event): void {
-            if (!self::$enabled) {
-                return;
-            }
-
-            self::$sequence++;
-            self::appendQuery([
-                'span_id' => 'q-' . self::$sequence,
-                'sql' => $event->sql,
-                'statement' => self::statementFromSql($event->sql),
-                'fingerprint' => self::queryFingerprint($event->sql),
-                'bindings_count' => \count($event->bindings),
-                'duration_ms' => $event->time,
-                'success' => true,
-                'rows_affected' => $event->rowsAffected,
-                'connection' => $event->connection->getName(),
-                'driver' => $event->connection->getDriverName(),
-                'timestamp' => microtime(true),
-            ]);
-        };
-
-        self::$listeners['db.query.failed'] ??= static function (QueryFailed $event): void {
-            if (!self::$enabled) {
-                return;
-            }
-
-            self::$sequence++;
-            self::appendQuery([
-                'span_id' => 'q-' . self::$sequence,
-                'sql' => self::REDACTED_VALUE,
-                'bindings_count' => \count($event->bindings),
-                'bindings_redacted' => true,
-                'duration_ms' => $event->time,
-                'success' => false,
-                'rows_affected' => null,
-                'connection' => $event->connection->getName(),
-                'driver' => $event->connection->getDriverName(),
-                'timestamp' => microtime(true),
-                'error' => self::REDACTED_VALUE,
-                'statement' => self::statementFromSql($event->sql),
-                'fingerprint' => self::queryFingerprint($event->sql),
-                'attempts' => $event->attempts,
-                'exception' => $event->exceptionClass,
-            ]);
-        };
-
-        self::$listeners['db.transaction.beginning'] ??= static function (TransactionBeginning $event): void {
-            if (!self::$enabled) {
-                return;
-            }
-
-            self::appendTransaction([
-                'event' => 'begin',
-                'connection' => $event->connection->getName(),
-                'driver' => $event->connection->getDriverName(),
-                'duration_ms' => 0.0,
-                'timestamp' => $event->time,
-            ]);
-        };
-
-        self::$listeners['db.transaction.committed'] ??= static function (TransactionCommitted $event): void {
-            if (!self::$enabled) {
-                return;
-            }
-
-            self::appendTransaction([
-                'event' => 'commit',
-                'connection' => $event->connection->getName(),
-                'driver' => $event->connection->getDriverName(),
-                'duration_ms' => $event->duration,
-                'timestamp' => microtime(true),
-            ]);
-        };
-
-        self::$listeners['db.transaction.rolled_back'] ??= static function (TransactionRolledBack $event): void {
-            if (!self::$enabled) {
-                return;
-            }
-
-            self::appendTransaction([
-                'event' => 'rollback',
-                'connection' => $event->connection->getName(),
-                'driver' => $event->connection->getDriverName(),
-                'duration_ms' => $event->duration,
-                'timestamp' => microtime(true),
-            ]);
-        };
+        if (self::$listeners === []) {
+            self::initializeListeners();
+        }
 
         foreach (self::$listeners as $event => $listener) {
             if (!in_array($listener, Events::getListeners($event), true)) {
@@ -617,6 +530,100 @@ final class Telemetry
     private static function hexHash(string $input, int $length): string
     {
         return substr(hash('sha256', $input), 0, $length);
+    }
+
+    private static function initializeListeners(): void
+    {
+        self::$listeners = [
+            'db.query.executed' => static function (QueryExecuted $event): void {
+                if (!self::$enabled) {
+                    return;
+                }
+
+                self::$sequence++;
+                self::appendQuery([
+                    'span_id' => 'q-' . self::$sequence,
+                    'sql' => $event->sql,
+                    'statement' => self::statementFromSql($event->sql),
+                    'fingerprint' => self::queryFingerprint($event->sql),
+                    'bindings_count' => \count($event->bindings),
+                    'duration_ms' => $event->time,
+                    'success' => true,
+                    'rows_affected' => $event->rowsAffected,
+                    'connection' => $event->connection->getName(),
+                    'driver' => $event->connection->getDriverName(),
+                    'timestamp' => microtime(true),
+                ]);
+            },
+
+            'db.query.failed' => static function (QueryFailed $event): void {
+                if (!self::$enabled) {
+                    return;
+                }
+
+                self::$sequence++;
+                self::appendQuery([
+                    'span_id' => 'q-' . self::$sequence,
+                    'sql' => self::REDACTED_VALUE,
+                    'bindings_count' => \count($event->bindings),
+                    'bindings_redacted' => true,
+                    'duration_ms' => $event->time,
+                    'success' => false,
+                    'rows_affected' => null,
+                    'connection' => $event->connection->getName(),
+                    'driver' => $event->connection->getDriverName(),
+                    'timestamp' => microtime(true),
+                    'error' => self::REDACTED_VALUE,
+                    'statement' => self::statementFromSql($event->sql),
+                    'fingerprint' => self::queryFingerprint($event->sql),
+                    'attempts' => $event->attempts,
+                    'exception' => $event->exceptionClass,
+                ]);
+            },
+
+            'db.transaction.beginning' => static function (TransactionBeginning $event): void {
+                if (!self::$enabled) {
+                    return;
+                }
+
+                self::appendTransaction([
+                    'event' => 'begin',
+                    'connection' => $event->connection->getName(),
+                    'driver' => $event->connection->getDriverName(),
+                    'duration_ms' => 0.0,
+                    'timestamp' => $event->time,
+                ]);
+            },
+
+            'db.transaction.committed' => static function (TransactionCommitted $event): void {
+                if (!self::$enabled) {
+                    return;
+                }
+
+                self::appendTransaction([
+                    'event' => 'commit',
+                    'connection' => $event->connection->getName(),
+                    'driver' => $event->connection->getDriverName(),
+                    'duration_ms' => $event->duration,
+                    'timestamp' => microtime(true),
+                ]);
+            },
+
+            'db.transaction.rolled_back' => static function (TransactionRolledBack $event): void {
+                if (!self::$enabled) {
+                    return;
+                }
+
+                self::appendTransaction([
+                    'event' => 'rollback',
+                    'connection' => $event->connection->getName(),
+                    'driver' => $event->connection->getDriverName(),
+                    'duration_ms' => $event->duration,
+                    'timestamp' => microtime(true),
+                ]);
+            },
+
+        ];
     }
 
     /** @return list<array<string,mixed>> */

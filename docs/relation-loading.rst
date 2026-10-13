@@ -1,9 +1,9 @@
 Explicit Relation Loading
 =========================
 
-DBLayer remains a non-ORM library. ``RelationLoader`` adds bounded,
-application-invoked relation projection without lazy properties, identity
-maps, dirty tracking, or hidden queries.
+``RelationLoader`` provides bounded, application-invoked relation projection
+over arrays. Loading relations does not create bound repository instances or
+change snapshots, and does not use lazy properties or hidden queries.
 
 One and Many
 ------------

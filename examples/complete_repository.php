@@ -75,7 +75,8 @@ final class RepositoryEvents
  * A complete table-oriented repository definition.
  *
  * Rows remain arrays: this class declares policy, casts, relations, and query
- * defaults without introducing Active Record state or implicit lazy loading.
+ * defaults. Optional bound instances are shown in model_binding.php; relation
+ * loading remains explicit.
  */
 final class PostRepository extends TableRepository
 {

@@ -4,9 +4,10 @@ Known Limitations
 Scope Boundaries
 ----------------
 
-- DBLayer is not an ORM. It does not provide Active Record entities, lazy
-  relationship properties, identity maps, dirty tracking, or entity lifecycle
-  abstractions. Its relation loader is explicit and array-based.
+- DBLayer provides static repositories and optional bound repository instances
+  with explicit ``save()`` / ``delete()``. It does not provide lazy relationship
+  properties, identity maps, a unit of work, or a full ORM entity lifecycle.
+  Its relation loader is explicit and array-based.
 - SQLite cannot add/drop foreign keys or add primary keys to existing tables
   through native ``ALTER TABLE``. DBLayer fails explicitly instead of silently
   rebuilding a table.

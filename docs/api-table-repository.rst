@@ -3,9 +3,10 @@ API: TableRepository
 
 Class: ``Infocyph\DBLayer\Repository\TableRepository``
 
-``TableRepository`` provides static repository ergonomics without introducing
-Active Record state. Rows remain arrays or explicitly mapped DTOs and repository
-behavior stays table/query oriented.
+``TableRepository`` provides static repository queries and optional bound
+instances. Static queries return arrays or explicitly mapped DTOs. Calling
+``fromBoundValue()`` loads one repository subclass instance; explicit instance
+writes reuse the existing repository mutation policies.
 
 Static dispatch is intentionally limited to:
 
@@ -14,6 +15,83 @@ Static dispatch is intentionally limited to:
 
 Infrastructure does not fall through to the ``DB`` facade. Use ``DB`` or the
 explicit ``connection()``, ``transaction()``, and raw SQL helpers instead.
+
+Bound Repository Instances
+--------------------------
+
+InterMix 11.2 or later discovers the inherited public static
+``fromBoundValue(mixed $value): static`` when ``enableAutoBind()`` is enabled.
+DBLayer does not require InterMix at runtime. Frameworks and intermediary
+libraries can forward values through their existing container, or call the
+converter directly.
+
+.. code-block:: php
+
+   final class User extends TableRepository
+   {
+       protected static string $table = 'users';
+       protected static ?string $connection = 'main';
+       protected static string $primaryKey = 'user_key';
+       protected static array $creatable = ['user_key', 'name'];
+       protected static array $updatable = ['name'];
+   }
+
+   $user = User::fromBoundValue('user-42');
+   echo $user->name;
+   $user->name = 'Updated';                 // memory only
+   $user->save();                           // scoped repository update
+   $user->update(values: ['name' => 'Again']);
+   $user->refresh();                        // reload through repository scopes
+   $user->delete();                         // existing soft-delete policy applies
+
+The converter accepts integer or string identifiers, including zero, and
+preserves an already compatible instance. It uses the subclass's primary key,
+named connection, global scopes, tenancy, soft-delete visibility, and read casts.
+A missing or invisible row throws
+``Infocyph\DBLayer\Exceptions\RecordNotFoundException``. The host framework
+owns mapping that exception to an HTTP 404. Database failures retain their normal
+exceptions; invalid identifier text for a numeric database column can produce a
+driver conversion error.
+
+Each identifier conversion creates a fresh instance. Bound rows and change snapshots are
+never stored in the static definition cache. Declare converted constructor
+services with InterMix's scoped lifetime when they consume request inputs:
+
+.. code-block:: php
+
+   use Infocyph\InterMix\DI\ContainerBuilder;
+
+   $runtime = (new ContainerBuilder())->enableAutoBind()->input('user')->build();
+   $result = $runtime->withinScope(
+       'request',
+       fn ($scope) => $scope->invoke(fn (User $user) => $user->toArray()),
+       ['user' => 'user-42'],
+   );
+
+``toArray()`` and PHP ``JsonSerializable`` expose the loaded attributes.
+``getKey()`` returns the configured primary-key value; ``getDirty()`` reports
+local changes. ``exists`` indicates whether this instance represents a persisted
+row. An empty ``new User()`` does not query the database; its first ``save()``
+creates a row using repository defaults and create policy.
+
+Writes enforce ``$creatable`` / ``$updatable``, casts, tenant constraints,
+timestamps, and hooks through the existing repository. Empty allowlists retain
+the existing unrestricted-write behavior; declare them for externally supplied
+attributes. Failed writes retain local changes. ``save()`` returns false if a
+changed row is no longer visible; ``delete()`` returns false when no row was
+deleted. A deleted instance does not silently insert another row on ``save()``.
+Reload after transaction rollback when reusing an instance.
+
+The existing static query path constructs no bound instance or change snapshot.
+Bound instances snapshot their loaded attributes locally; compound cast values
+are fingerprinted to detect in-place changes. Successful instance writes reload
+the visible row to reflect database values and casts, so they can add a read
+query compared with a direct repository mutation.
+There is no identity map, unit of work, implicit persistence, or lazy relation
+loading. Custom subclass constructors used for binding must accept construction
+without required arguments; keep the optional attribute-array constructor
+contract when overriding it. See ``examples/model_binding.php`` for a runnable
+custom-key and optional InterMix example.
 
 Repository-Aware Query Boundary
 -------------------------------
@@ -550,20 +628,11 @@ Infrastructure stays explicit:
    $caps = User::connection()->getCapabilities();
    $rows = User::sqlSelect('select 1');
 
-Non-ORM Scope
--------------
+Repository Scope
+----------------
 
-``TableRepository`` intentionally does not provide:
-
-- entity/model instances
-- identity maps or unit-of-work state
-- dirty tracking
-- ``save()`` / implicit persistence
-- lazy relationship properties
-- automatic/default eager relation loading
-- instance accessors/mutators tied to mutable model state
-- API-resource / HTTP serialization concerns
-
-Rows remain arrays or explicitly mapped DTOs. Relations are deterministic eager
-projections, repository mutations remain explicit, and presentation concerns stay
-outside the database layer.
+Optional bound instances provide explicit attribute edits and persistence.
+DBLayer does not provide identity maps, a unit of work, lazy relationship
+properties, automatic eager loading, or HTTP resource objects. Static results
+and explicit relation projections remain arrays or mapped DTOs. The host owns
+request scopes, workers, event loops, and HTTP exception handling.
