@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace Infocyph\DBLayer\Connection\Concerns;
 
+use Fiber;
+use Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext;
+
 use Infocyph\CacheLayer\Integration\Runwire\RunwireIntegration as CacheRunwireIntegration;
 use Infocyph\DBLayer\Connection\RunwireBindingPolicy;
+use Infocyph\DBLayer\Exceptions\ConnectionException;
 use Infocyph\Runwire\Coroutine\CoroutineScope;
 use Infocyph\Runwire\RequestContext;
 use Infocyph\Runwire\Runtime\Enum\RuntimeCapability;
@@ -13,6 +17,12 @@ use Infocyph\Runwire\RuntimeContext;
 
 trait ConnectionRunwire
 {
+    /** @var Fiber<mixed, mixed, mixed, mixed>|null */
+    private ?Fiber $runwireCarrier = null;
+
+    /** @var null|callable():?RunwireExecutionContext */
+    private $runwireContextProvider;
+
     /**
      * Host-owned Runwire request currently borrowed by this connection.
      */
@@ -64,8 +74,15 @@ trait ConnectionRunwire
      */
     public function runwireBinding(): ?array
     {
+        $this->assertRunwireCarrier();
         if ($this->runwireRuntime === null) {
-            return null;
+            $context = $this->runwireContextProvider === null ? null : ($this->runwireContextProvider)();
+
+            return $context === null ? null : [
+                'runtime' => $context->runtime,
+                'request' => $context->request,
+                'scope' => $context->scope,
+            ];
         }
 
         return [
@@ -104,6 +121,17 @@ trait ConnectionRunwire
     }
 
     /**
+     * Borrow the caller's current context at each native operation boundary.
+     * The provider must resolve task-local state, not retain a request.
+     *
+     * @param null|callable():?RunwireExecutionContext $provider
+     */
+    public function setRunwireContextProvider(?callable $provider): void
+    {
+        $this->runwireContextProvider = $provider;
+    }
+
+    /**
      * Execute work while borrowing host-owned Runwire execution context.
      *
      * DBLayer never starts, globally binds, stops, or releases the host runtime.
@@ -118,6 +146,7 @@ trait ConnectionRunwire
         ?RequestContext $request = null,
         ?CoroutineScope $scope = null,
     ): mixed {
+        $this->assertRunwireCarrier();
         RunwireBindingPolicy::assertAllowed(
             $runtime,
             $request,
@@ -127,12 +156,14 @@ trait ConnectionRunwire
             $this->runwireScope,
         );
 
+        $previousCarrier = $this->runwireCarrier;
         $previousRuntime = $this->runwireRuntime;
         $previousRequest = $this->runwireRequest;
         $previousScope = $this->runwireScope;
         $effectiveRequest = $request ?? $previousRequest;
         $effectiveScope = $scope ?? $previousScope;
 
+        $this->runwireCarrier = Fiber::getCurrent();
         $this->runwireRuntime = $runtime;
         $this->runwireRequest = $effectiveRequest;
         $this->runwireScope = $effectiveScope;
@@ -141,7 +172,11 @@ trait ConnectionRunwire
             || ($effectiveRequest?->cancelled() ?? false)
             || ($effectiveScope?->cancellation()->isCancelled() ?? false);
         $remainingSeconds = RunwireBindingPolicy::remainingSeconds($effectiveRequest, $effectiveScope);
-        $operation = static fn(): mixed => $callback();
+        $operation = function () use ($callback): mixed {
+            $this->assertQueryCheckpoint(microtime(true));
+
+            return $callback();
+        };
         $withCancellation = fn(): mixed => $this->withQueryCancellation($checker, $operation);
         $withBudget = $remainingSeconds === null
             ? $withCancellation
@@ -155,9 +190,17 @@ trait ConnectionRunwire
                 $withBudget,
             );
         } finally {
+            $this->runwireCarrier = $previousCarrier;
             $this->runwireRuntime = $previousRuntime;
             $this->runwireRequest = $previousRequest;
             $this->runwireScope = $previousScope;
+        }
+    }
+
+    private function assertRunwireCarrier(): void
+    {
+        if ($this->runwireRuntime !== null && $this->runwireCarrier !== Fiber::getCurrent()) {
+            throw ConnectionException::invalidConfiguration('DBLayer connection is already borrowed by another execution carrier.');
         }
     }
 
@@ -172,5 +215,17 @@ trait ConnectionRunwire
         }
 
         return $callback();
+    }
+
+    /** @return array{runtime:RuntimeContext,request:?RequestContext,scope:?CoroutineScope}|null */
+    private function runwireOperationBinding(): ?array
+    {
+        if ($this->runwireRuntime !== null) {
+            $this->assertRunwireCarrier();
+
+            return null;
+        }
+
+        return $this->runwireContextProvider === null ? null : $this->runwireBinding();
     }
 }

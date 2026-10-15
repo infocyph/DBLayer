@@ -181,6 +181,22 @@ an exclusively owned connection with `Connection::withRunwire()`. DBLayer
 composes cancellation/deadlines and lazy iteration with those objects but never
 starts/stops the host worker or event loop. PDO remains synchronous.
 
+Frameworks can also install a task-local context provider for ordinary connection,
+query-builder, cached-read, transaction and lazy-stream operations:
+
+```php
+$connection->setRunwireContextProvider([
+    \Infocyph\CacheLayer\Integration\Runwire\RunwireIntegration::class,
+    'current',
+]);
+```
+
+The provider returns the current native `RunwireExecutionContext` or `null` for
+normal execution. Resolve the context on demand; do not capture one request in
+an application-owned connection. Explicit `withRunwire()` bindings take precedence.
+Pool sanitation removes the provider, so the owner must configure each new lease.
+Raw PDO operations remain the caller's responsibility.
+
 See the DBLayer 6.0 upgrade guide for changed tenancy, cache, transaction, lazy
 lease, and persistent-worker contracts.
 

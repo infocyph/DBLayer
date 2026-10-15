@@ -360,3 +360,118 @@ it('replaces worker-local pooled PDO handles across host generations', function 
 
     $secondLease->release();
 });
+
+it('resolves a passed provider for native raw compiled transactional and lazy operations', function (): void {
+    $connection = dblayerRunwireConnection();
+    $context = null;
+    $connection->setRunwireContextProvider(static function () use (&$context): ?\Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext {
+        return $context;
+    });
+    expect($connection->scalar('select 1'))->toBe(1);
+    $runtime = RuntimeContext::standalone();
+    $request = RequestContext::create($runtime);
+    $context = new \Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext($runtime, $request);
+    try {
+        expect($connection->table('items')->count())->toBe(3)
+            ->and($connection->transaction(static fn(Connection $db): mixed => $db->scalar('select 2')))->toBe(2);
+        $rows = $connection->stream('select * from items');
+        $unbuffered = $connection->unbufferedStream('select * from items');
+        $request->cancel(CancellationReason::HOST_CANCELLED);
+        expect(fn() => $connection->scalar('select 1'))->toThrow(ConnectionException::class)
+            ->and(fn() => $connection->table('items')->get())->toThrow(\Infocyph\DBLayer\Exceptions\QueryException::class)
+            ->and(fn() => $connection->transaction(static fn(): bool => true))->toThrow(ConnectionException::class)
+            ->and(fn() => iterator_to_array($rows))->toThrow(ConnectionException::class)
+            ->and(fn() => iterator_to_array($unbuffered))->toThrow(ConnectionException::class);
+        $context = null;
+        expect($connection->scalar('select 3'))->toBe(3)
+            ->and($connection->runwireBinding())->toBeNull()
+            ->and(CacheRunwireIntegration::runtime())->toBeNull();
+    } finally {
+        $request->complete();
+    }
+});
+
+it('checks provider cancellation on a cached hit and removes providers on pool reset', function (): void {
+    $connection = dblayerRunwireConnection();
+    $runtime = RuntimeContext::standalone();
+    $request = RequestContext::create($runtime);
+    $connection->setQueryCache(new \Infocyph\CacheLayer\Cache\Cache(new \Infocyph\CacheLayer\Cache\Adapter\ArrayCacheAdapter()));
+    $context = new \Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext($runtime, $request);
+    $connection->setRunwireContextProvider(static fn() => $context);
+    try {
+        expect($connection->table('items')->cacheFor(60)->get())->toHaveCount(3);
+        $connection->resetStats();
+        expect($connection->table('items')->cacheFor(60)->get())->toHaveCount(3)
+            ->and($connection->getStats()['queries'])->toBe(0);
+        $request->cancel(CancellationReason::HOST_CANCELLED);
+        expect(fn() => $connection->table('items')->cacheFor(60)->get())->toThrow(ConnectionException::class);
+        expect($connection->resetRuntimeStateForReuse())->toBeTrue()
+            ->and($connection->runwireBinding())->toBeNull()
+            ->and($connection->scalar('select 1'))->toBe(1);
+    } finally {
+        $request->complete();
+    }
+});
+
+it('keeps the provider identity and rejects cancellation after native query entry', function (): void {
+    $connection = dblayerRunwireConnection();
+    $connection->resetStats();
+    $runtime = RuntimeContext::standalone();
+    $request = RequestContext::create($runtime);
+    $context = new \Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext($runtime, $request);
+    $connection->setRunwireContextProvider(static fn() => $context);
+    $observed = null;
+    $listener = static function () use ($connection, $request, &$observed): void {
+        $observed = $connection->runwireBinding();
+        $request->cancel(CancellationReason::HOST_CANCELLED);
+    };
+    \Infocyph\DBLayer\Events\Events::listen('db.query.executing', $listener);
+    try {
+        expect(fn() => $connection->scalar('select 1'))->toThrow(ConnectionException::class)
+            ->and($observed['runtime'] ?? null)->toBe($runtime)
+            ->and($observed['request'] ?? null)->toBe($request)
+            ->and($connection->getStats()['queries'])->toBe(0);
+        $connection->setRunwireContextProvider(null);
+        expect($connection->runwireBinding())->toBeNull();
+    } finally {
+        \Infocyph\DBLayer\Events\Events::forget('db.query.executing', $listener);
+        $request->complete();
+    }
+});
+
+it('rejects an overlapping carrier instead of borrowing another requests provider binding', function (): void {
+    $connection = dblayerRunwireConnection();
+    $runtime = RuntimeContext::standalone();
+    $one = RequestContext::create($runtime);
+    $two = RequestContext::create($runtime);
+    $contexts = new WeakMap();
+    $connection->setRunwireContextProvider(static function () use ($contexts): ?\Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext {
+        $fiber = Fiber::getCurrent();
+
+        return $fiber === null ? null : ($contexts[$fiber] ?? null);
+    });
+    $first = new Fiber(static fn() => $connection->scalar('select 1'));
+    $second = new Fiber(static fn() => $connection->scalar('select 2'));
+    $contexts[$first] = new \Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext($runtime, $one);
+    $contexts[$second] = new \Infocyph\CacheLayer\Integration\Runwire\RunwireExecutionContext($runtime, $two);
+    $listener = static function () use ($first): void {
+        if (Fiber::getCurrent() === $first) {
+            Fiber::suspend();
+        }
+    };
+    \Infocyph\DBLayer\Events\Events::listen('db.query.executing', $listener);
+    try {
+        $first->start();
+        expect(fn() => $second->start())->toThrow(ConnectionException::class, 'another execution carrier');
+        $first->resume();
+        expect($first->getReturn())->toBe(1);
+        $retry = new Fiber(static fn() => $connection->scalar('select 2'));
+        $contexts[$retry] = $contexts[$second];
+        $retry->start();
+        expect($retry->getReturn())->toBe(2)->and($connection->runwireBinding())->toBeNull();
+    } finally {
+        \Infocyph\DBLayer\Events\Events::forget('db.query.executing', $listener);
+        $one->complete();
+        $two->complete();
+    }
+});
