@@ -349,6 +349,13 @@ final class Connection
      */
     public function begin(): void
     {
+        $binding = $this->runwireOperationBinding();
+        if ($binding !== null) {
+            $this->runWithRunwireBinding($binding, fn() => $this->begin());
+
+            return;
+        }
+
         $this->getTransactionManager()->begin($this);
     }
 
@@ -415,6 +422,13 @@ final class Connection
      */
     public function commitTransaction(): void
     {
+        $binding = $this->runwireOperationBinding();
+        if ($binding !== null) {
+            $this->runWithRunwireBinding($binding, fn() => $this->commitTransaction());
+
+            return;
+        }
+
         $this->getTransactionManager()->commit($this);
     }
 
@@ -826,6 +840,11 @@ final class Connection
      */
     public function readOnlyTransaction(callable $callback, int $attempts = 1): mixed
     {
+        $binding = $this->runwireOperationBinding();
+        if ($binding !== null) {
+            return $this->runWithRunwireBinding($binding, fn(): mixed => $this->readOnlyTransaction($callback, $attempts));
+        }
+
         return $this->transaction(
             function (self $connection) use ($callback): mixed {
                 $connection->applyReadOnlyTransactionMode();
@@ -947,6 +966,11 @@ final class Connection
      */
     public function runCompiled(CompiledQuery $query): DriverResult
     {
+        $binding = $this->runwireOperationBinding();
+        if ($binding !== null) {
+            return $this->runWithRunwireBinding($binding, fn(): DriverResult => $this->runCompiled($query));
+        }
+
         $type = $query->type;
 
         if ($type === QueryType::SELECT) {
@@ -1047,6 +1071,11 @@ final class Connection
      */
     public function select(string $sql, array $bindings = []): array
     {
+        $binding = $this->runwireOperationBinding();
+        if ($binding !== null) {
+            return $this->runWithRunwireBinding($binding, fn(): array => $this->select($sql, $bindings));
+        }
+
         $this->assertExpectedQueryType($sql, QueryType::SELECT);
         $statement = $this->executeKnownType($sql, $bindings, QueryType::SELECT);
 
@@ -1064,6 +1093,11 @@ final class Connection
      */
     public function selectResultSets(string $sql, array $bindings = []): array
     {
+        $binding = $this->runwireOperationBinding();
+        if ($binding !== null) {
+            return $this->runWithRunwireBinding($binding, fn(): array => $this->selectResultSets($sql, $bindings));
+        }
+
         $statement = $this->execute($sql, $bindings);
         $results = [];
         $fetchMode = $this->fetchMode;
@@ -1229,6 +1263,11 @@ final class Connection
      */
     public function transaction(callable $callback, int $attempts = 1): mixed
     {
+        $binding = $this->runwireOperationBinding();
+        if ($binding !== null) {
+            return $this->runWithRunwireBinding($binding, fn(): mixed => $this->transaction($callback, $attempts));
+        }
+
         return $this->getTransactionManager()->execute(
             $this,
             static fn(self $connection): mixed => $callback($connection),
@@ -1268,6 +1307,11 @@ final class Connection
      */
     public function unprepared(string $sql): bool
     {
+        $binding = $this->runwireOperationBinding();
+        if ($binding !== null) {
+            return $this->runWithRunwireBinding($binding, fn(): bool => $this->unprepared($sql));
+        }
+
         $securityConfig = $this->config->securityConfig();
 
         if ($this->securityChecks) {
@@ -1509,6 +1553,11 @@ final class Connection
         bool $isWrite,
         SqlOrigin $origin = SqlOrigin::RAW,
     ): PDOStatement {
+        $binding = $this->runwireOperationBinding();
+        if ($binding !== null) {
+            return $this->runWithRunwireBinding($binding, fn(): PDOStatement => $this->executeTypedStatement($sql, $bindings, $isWrite, $origin));
+        }
+
         $finalSql = $this->prepareSqlForExecution($sql, $bindings, $origin);
 
         return $this->executeWithRetry(
@@ -1663,6 +1712,7 @@ final class Connection
         $this->queryTimeoutMs = null;
         $this->queryDeadlineAt = null;
         $this->queryCancellationChecker = null;
+        $this->runwireContextProvider = null;
         $this->queryBudgetActive = false;
         $this->queryRetryPolicy = null;
         $this->queryRecorder = null;
@@ -1670,71 +1720,5 @@ final class Connection
         $this->queryEventsEnabled = true;
         $this->queryCommentContext = $this->config->getQueryCommentContext();
         $this->fetchMode = PDO::FETCH_ASSOC;
-    }
-
-    private function resolveRowsAffectedFromExecutionResult(mixed $result, bool $isWrite): ?int
-    {
-        if (!$isWrite) {
-            return null;
-        }
-
-        if ($result instanceof PDOStatement) {
-            return max(0, $result->rowCount());
-        }
-
-        if (is_int($result)) {
-            return max(0, $result);
-        }
-
-        return null;
-    }
-
-    /**
-     * @template TResult
-     * @param array<int|string,mixed> $bindings
-     * @param callable(PDO):TResult $operation
-     * @return array{0:TResult,1:int|null}
-     */
-    private function runRetryableOperation(
-        string $sql,
-        array $bindings,
-        bool $isWrite,
-        callable $operation,
-        float $start,
-        int &$attemptsUsed,
-    ): array {
-        if ($this->queryBudgetActive) {
-            $this->assertNotCancelled();
-            $this->assertWithinQueryBudget($start);
-        }
-
-        $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
-        $attempt = 0;
-
-        while (true) {
-            $attempt++;
-            $attemptsUsed = $attempt;
-
-            $this->assertNotCancelled();
-            $this->assertWithinQueryBudget($start);
-
-            try {
-                $result = $operation($pdo);
-
-                $this->markExecutionSuccess($start, $isWrite, $sql, $bindings);
-                $rowsAffected = $this->resolveRowsAffectedFromExecutionResult($result, $isWrite);
-
-                return [$result, $rowsAffected];
-            } catch (PDOException $e) {
-                $pdo = $this->recoverFromExecutionFailure(
-                    $e,
-                    $attempt,
-                    $sql,
-                    $bindings,
-                    $pdo,
-                    $isWrite,
-                );
-            }
-        }
     }
 }

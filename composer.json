@@ -30,7 +30,7 @@
         "php": "^8.4",
         "ext-pdo": "*",
         "infocyph/arraykit": "^5.3.1",
-        "infocyph/cachelayer": "^4.0",
+        "infocyph/cachelayer": "^4.0.1",
         "psr/log": "^3.0.2"
     },
     "require-dev": {

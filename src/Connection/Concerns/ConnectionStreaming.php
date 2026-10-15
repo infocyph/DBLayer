@@ -53,7 +53,8 @@ trait ConnectionStreaming
     {
         $reuseGeneration = $this->runtimeReuseGeneration;
 
-        if ($this->runwireRuntime === null && !$this->queryBudgetActive) {
+        $runwireBinding = $this->runwireBinding();
+        if ($runwireBinding === null && !$this->queryBudgetActive) {
             return $this->streamFastGenerator(
                 $sql,
                 $bindings,
@@ -66,7 +67,7 @@ trait ConnectionStreaming
             $sql,
             $bindings,
             $fetchMode,
-            $this->runwireBinding(),
+            $runwireBinding,
             $reuseGeneration,
         );
     }

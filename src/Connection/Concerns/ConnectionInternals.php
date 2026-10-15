@@ -43,6 +43,13 @@ trait ConnectionInternals
      */
     public function assertQueryCheckpoint(float $startedAt): void
     {
+        $binding = $this->runwireOperationBinding();
+        if ($binding !== null) {
+            $this->runWithRunwireBinding($binding, fn() => $this->assertQueryCheckpoint($startedAt));
+
+            return;
+        }
+
         if (!$this->queryBudgetActive) {
             return;
         }
@@ -105,7 +112,7 @@ trait ConnectionInternals
      */
     public function hasActiveQueryBudget(): bool
     {
-        return $this->queryBudgetActive;
+        return $this->queryBudgetActive || $this->runwireContextProvider !== null;
     }
 
     /**
@@ -888,6 +895,23 @@ trait ConnectionInternals
         return is_numeric($value) ? (int) $value : 0;
     }
 
+    private function resolveRowsAffectedFromExecutionResult(mixed $result, bool $isWrite): ?int
+    {
+        if (!$isWrite) {
+            return null;
+        }
+
+        if ($result instanceof PDOStatement) {
+            return max(0, $result->rowCount());
+        }
+
+        if (is_int($result)) {
+            return max(0, $result);
+        }
+
+        return null;
+    }
+
     /**
      * Resolve effective write connection config with optional write overrides.
      */
@@ -904,6 +928,55 @@ trait ConnectionInternals
         unset($merged['read'], $merged['write']);
 
         return ConnectionConfig::fromArray($merged);
+    }
+
+    /**
+     * @template TResult
+     * @param array<int|string,mixed> $bindings
+     * @param callable(PDO):TResult $operation
+     * @return array{0:TResult,1:int|null}
+     */
+    private function runRetryableOperation(
+        string $sql,
+        array $bindings,
+        bool $isWrite,
+        callable $operation,
+        float $start,
+        int &$attemptsUsed,
+    ): array {
+        if ($this->queryBudgetActive) {
+            $this->assertNotCancelled();
+            $this->assertWithinQueryBudget($start);
+        }
+
+        $pdo = $isWrite ? $this->getPdo() : $this->getReadPdo();
+        $attempt = 0;
+
+        while (true) {
+            $attempt++;
+            $attemptsUsed = $attempt;
+
+            $this->assertNotCancelled();
+            $this->assertWithinQueryBudget($start);
+
+            try {
+                $result = $operation($pdo);
+
+                $this->markExecutionSuccess($start, $isWrite, $sql, $bindings);
+                $rowsAffected = $this->resolveRowsAffectedFromExecutionResult($result, $isWrite);
+
+                return [$result, $rowsAffected];
+            } catch (PDOException $e) {
+                $pdo = $this->recoverFromExecutionFailure(
+                    $e,
+                    $attempt,
+                    $sql,
+                    $bindings,
+                    $pdo,
+                    $isWrite,
+                );
+            }
+        }
     }
 
     /**
