@@ -12,6 +12,23 @@ afterEach(function (): void {
     DB::purge();
 });
 
+/** Remove only a test-owned path; never traverse directory symlinks. */
+function dblayerRemoveTestPath(string $path): void
+{
+    if (is_link($path) || is_file($path)) {
+        unlink($path);
+
+        return;
+    }
+    if (!is_dir($path)) {
+        return;
+    }
+    foreach (new FilesystemIterator($path, FilesystemIterator::SKIP_DOTS) as $entry) {
+        dblayerRemoveTestPath($entry->getPathname());
+    }
+    rmdir($path);
+}
+
 /** @return array<string,array<string,mixed>> */
 function dblayerTestConnections(): array
 {

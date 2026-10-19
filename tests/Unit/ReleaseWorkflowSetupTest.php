@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Yaml\Yaml;
 
@@ -30,7 +29,7 @@ function dblayerRunWorkflowManifestSetup(string $workflowName, string $job, stri
 
         return $prepared;
     } finally {
-        new Filesystem()->remove($directory);
+        dblayerRemoveTestPath($directory);
     }
 }
 

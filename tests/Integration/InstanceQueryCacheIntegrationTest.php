@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\CacheLayer\Cache\Cache;
+use Infocyph\CacheLayer\Cache\CacheInterface;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Connection\ConnectionConfig;
 
@@ -195,4 +196,95 @@ it('coordinates invalidation across instances that deliberately share one cache 
             unlink($database);
         }
     }
+});
+
+it('does not resolve a query cache for connection setup ordinary reads or cleanup', function (): void {
+    $calls = 0;
+    $connection = new Connection(ConnectionConfig::fromArray(['driver' => 'sqlite', 'database' => ':memory:']));
+    $connection->setQueryCacheResolver(static function () use (&$calls): CacheInterface {
+        ++$calls;
+        throw new RuntimeException('Unused query cache was initialized.');
+    });
+
+    expect($connection->isConnected())->toBeFalse()->and($calls)->toBe(0)
+        ->and($connection->hasQueryCache())->toBeTrue();
+    expect($connection->scalar('SELECT 1'))->toBe(1)->and($calls)->toBe(0);
+    expect($connection->resetRuntimeStateForReuse())->toBeTrue()->and($calls)->toBe(0);
+    $connection->disconnect();
+    expect($calls)->toBe(0);
+});
+
+it('invalidates a shared cache on writes before its first cached read', function (): void {
+    $connection = new Connection(ConnectionConfig::fromArray(['driver' => 'sqlite', 'database' => ':memory:']));
+    $connection->statement('create table items (id integer primary key, value text not null)');
+    $calls = 0;
+    $cache = Cache::memory('deferred-write-' . bin2hex(random_bytes(4)));
+    $connection->setQueryCacheResolver(static function () use (&$calls, $cache): CacheInterface {
+        ++$calls;
+        return $cache;
+    });
+    $connection->table('items')->insert(['id' => 1, 'value' => 'written']);
+    expect($calls)->toBe(1);
+    $cache->set('external-data', 'retained');
+    $connection->disconnect();
+    expect($connection->queryCache())->toBe($cache)
+        ->and($cache->get('external-data'))->toBe('retained')
+        ->and($calls)->toBe(1);
+});
+
+it('rejects invalid cache resolver results without retaining them', function (): void {
+    $connection = new Connection(ConnectionConfig::fromArray(['driver' => 'sqlite', 'database' => ':memory:']));
+    $connection->setQueryCacheResolver(static fn(): stdClass => new stdClass());
+    expect(fn() => $connection->queryCache())->toThrow(TypeError::class);
+    $connection->setQueryCache(null);
+    expect($connection->hasQueryCache())->toBeFalse()
+        ->and($connection->queryCache())->toBeInstanceOf(CacheInterface::class);
+});
+
+it('resolves and shares a configured cache for cached reads and write invalidation', function (): void {
+    $connection = new Connection(ConnectionConfig::fromArray(['driver' => 'sqlite', 'database' => ':memory:']));
+    $connection->statement('create table items (id integer primary key, value text not null)');
+    $connection->table('items')->insert(['id' => 1, 'value' => 'before']);
+    $cache = Cache::memory('deferred-query-' . bin2hex(random_bytes(4)));
+    $calls = 0;
+    $connection->setQueryCacheResolver(static function () use (&$calls, $cache): CacheInterface {
+        ++$calls;
+        return $cache;
+    });
+    expect($calls)->toBe(0);
+    $read = static fn(): ?array => $connection->table('items')->where('id', '=', 1)->cacheFor(60)->first();
+    expect($read()['value'] ?? null)->toBe('before')->and($calls)->toBe(1)
+        ->and($connection->queryCache())->toBe($cache);
+    $connection->table('items')->where('id', '=', 1)->update(['value' => 'after']);
+    expect($read()['value'] ?? null)->toBe('after')->and($calls)->toBe(1);
+});
+
+it('preserves explicit query cache replacement and clearing semantics', function (): void {
+    $connection = new Connection(ConnectionConfig::fromArray(['driver' => 'sqlite', 'database' => ':memory:']));
+    $connection->setQueryCacheResolver(static function (): CacheInterface {
+        throw new RuntimeException('Replaced cache resolver must not run.');
+    });
+    $cache = Cache::memory('deferred-explicit-' . bin2hex(random_bytes(4)));
+    $connection->setQueryCache($cache);
+    expect($connection->queryCache())->toBe($cache);
+    $connection->setQueryCache(null);
+    expect($connection->queryCache())->not->toBe($cache);
+});
+
+it('retries a failed cache resolver and rejects recursive resolution', function (): void {
+    $connection = new Connection(ConnectionConfig::fromArray(['driver' => 'sqlite', 'database' => ':memory:']));
+    $cache = Cache::memory('deferred-retry-' . bin2hex(random_bytes(4)));
+    $calls = 0;
+    $failure = new RuntimeException('cache unavailable');
+    $connection->setQueryCacheResolver(static function () use (&$calls, $cache, $failure): CacheInterface {
+        if (++$calls === 1) {
+            throw $failure;
+        }
+        return $cache;
+    });
+    expect(fn() => $connection->queryCache())->toThrow($failure)
+        ->and($connection->queryCache())->toBe($cache)
+        ->and($calls)->toBe(2);
+    $connection->setQueryCacheResolver(static fn(): CacheInterface => $connection->queryCache());
+    expect(fn() => $connection->queryCache())->toThrow(LogicException::class, 'Recursive query cache');
 });

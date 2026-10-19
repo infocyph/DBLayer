@@ -36,6 +36,11 @@ trait ConnectionInternals
      */
     private ?CacheInterface $queryCache = null;
 
+    /** @var (\Closure(): CacheInterface)|null */
+    private ?\Closure $queryCacheResolver = null;
+
+    private bool $resolvingQueryCache = false;
+
     /**
      * Fail fast at a cache/stream/runtime checkpoint.
      *
@@ -120,7 +125,7 @@ trait ConnectionInternals
      */
     public function hasQueryCache(): bool
     {
-        return $this->queryCache !== null;
+        return $this->queryCache !== null || $this->queryCacheResolver !== null;
     }
 
     /**
@@ -132,6 +137,20 @@ trait ConnectionInternals
      */
     public function queryCache(): CacheInterface
     {
+        if ($this->queryCache === null && $this->queryCacheResolver !== null) {
+            if ($this->resolvingQueryCache) {
+                throw new \LogicException('Recursive query cache resolution is not supported.');
+            }
+            $this->resolvingQueryCache = true;
+
+            try {
+                $this->queryCache = ($this->queryCacheResolver)();
+                $this->queryCacheResolver = null;
+            } finally {
+                $this->resolvingQueryCache = false;
+            }
+        }
+
         if ($this->queryCache === null) {
             $this->queryCache = new Cache(
                 new ArrayCacheAdapter('dblayer'),
@@ -150,6 +169,24 @@ trait ConnectionInternals
     public function setQueryCache(?CacheInterface $cache): self
     {
         $this->queryCache = $cache;
+        $this->queryCacheResolver = null;
+        $this->ownsQueryCache = false;
+
+        return $this;
+    }
+
+    /**
+     * Defer an externally owned cache until the first cache read or invalidation.
+     *
+     * The successful result is retained like setQueryCache(); failed resolutions
+     * can be retried. Connection setup and cleanup never invoke the resolver.
+     *
+     * @param callable(): CacheInterface $resolver
+     */
+    public function setQueryCacheResolver(callable $resolver): self
+    {
+        $this->queryCacheResolver = \Closure::fromCallable($resolver);
+        $this->queryCache = null;
         $this->ownsQueryCache = false;
 
         return $this;

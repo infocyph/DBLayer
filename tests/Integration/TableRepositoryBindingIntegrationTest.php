@@ -10,7 +10,6 @@ use Infocyph\InterMix\DI\Build\StaticRuntimeGenerator;
 use Infocyph\InterMix\DI\ContainerBuilder;
 use Infocyph\InterMix\DI\RuntimeContainerInterface;
 use Infocyph\InterMix\DI\Support\LifetimeEnum;
-use Symfony\Component\Filesystem\Filesystem;
 
 /** Exercise the published converter through each production container mode. */
 function boundRepositoryRuntime(string $mode, string $path): RuntimeContainerInterface
@@ -60,6 +59,8 @@ it('binds real InterMix constructor and invocation parameters without leaking re
         $one->resume();
         expect($one->getReturn())->toBe('Zero')->and($two->getReturn())->toBe('One');
     } finally {
-        new Filesystem()->remove([$path, $path . '.builds']);
+        dblayerRemoveTestPath($path);
+        dblayerRemoveTestPath($path . '.builds');
     }
+    expect(file_exists($path))->toBeFalse()->and(file_exists($path . '.builds'))->toBeFalse();
 })->with(['dynamic', 'compiled', 'prevalidated']);
