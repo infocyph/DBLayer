@@ -54,7 +54,7 @@ timeout after the write has already completed.
 Query Cache Ownership
 ---------------------
 
-- ``setQueryCache()``, ``queryCache()``, ``hasQueryCache()``
+- ``setQueryCache()``, ``setQueryCacheResolver()``, ``queryCache()``, ``hasQueryCache()``
 - ``invalidateQueryCacheTagsAfterCommit()``
 - ``cacheTableTag()``
 

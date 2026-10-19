@@ -41,6 +41,24 @@ connection lifecycles, attach the CacheLayer backend directly to the connection:
 ``queryCache()`` lazily creates a private in-memory backend when a direct
 ``Connection`` user opts into ``cacheFor()`` without supplying one explicitly.
 
+To keep an unused backend uninitialized, bind a resolver instead:
+
+.. code-block:: php
+
+   $connection->setQueryCacheResolver(
+       static fn () => Cache::file('dblayer-query', __DIR__ . '/../storage/cache'),
+   );
+
+The resolver runs on the first query-cache operation, including write
+invalidation, and its successful result is retained for that connection.
+Ordinary uncached reads, connection setup, reuse cleanup, and disconnect do
+not invoke it. ``hasQueryCache()`` reports a configured resolver without
+resolving it, so writes still invalidate shared entries before the first
+cached read. Failed resolutions can be retried; recursive resolution is rejected.
+``setQueryCache()`` replaces or clears a pending resolver. Resolved external
+backends retain the existing external-ownership behavior across disconnects;
+callers must keep the connection and resolver within the backend's lifetime.
+
 Facade Cache Topology
 ---------------------
 

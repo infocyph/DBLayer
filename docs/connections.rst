@@ -55,7 +55,7 @@ Runtime controls are available on ``Connection`` instances:
   ``getQueryCommentContext()``
 - execution helpers: ``setFetchMode()``, ``withoutQueryEvents()``,
   ``stream()``, ``unbufferedStream()``, ``yieldRows()``, ``readOnlyTransaction()``
-- query cache ownership: ``setQueryCache()``, ``queryCache()``, ``hasQueryCache()``
+- query cache ownership: ``setQueryCache()``, ``setQueryCacheResolver()``, ``queryCache()``, ``hasQueryCache()``
 - managed transaction callbacks: ``afterCommit()``
 
 ``stream()`` avoids ``fetchAll()`` but native client buffering remains
