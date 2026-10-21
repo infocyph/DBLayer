@@ -36,7 +36,7 @@
     "require-dev": {
         "infocyph/intermix": "^11.2",
         "infocyph/phpforge": "dev-main@dev",
-        "infocyph/runwire": "2.1.1"
+        "infocyph/runwire": "2.1.2"
     },
     "suggest": {
         "ext-pdo_mysql": "For MySQL or MariaDB database support",
