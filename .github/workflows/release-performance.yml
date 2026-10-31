@@ -1,4 +1,4 @@
-name: "DBLayer 6.0 Release Performance"
+name: "DBLayer Release Performance"
 
 on:
   pull_request:

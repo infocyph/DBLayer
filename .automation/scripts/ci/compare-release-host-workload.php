@@ -155,7 +155,7 @@ final class ReleaseHostComparator
     {
         $expected = [
             'schema_version' => 2,
-            'workload' => 'dblayer-release-host-v1',
+            'workload' => 'dblayer-release-host-v2',
             'revision' => $revision,
             'trials' => 7,
             'concurrencies' => [1, 2, 4],

@@ -105,13 +105,7 @@ final class TableQueryRepository extends Repository
             ? $query->update([$this->softDeleteColumn => $this->freshTimestamp()])
             : $query->delete();
 
-        $context['affected'] = $affected;
-        $this->dispatchOperationHook('afterBulkDelete', $context);
-        if ($affected > 0) {
-            $this->scheduleAfterCommit('bulk_delete', $context);
-        }
-
-        return $affected;
+        return $this->completeMutation($affected, 'afterBulkDelete', 'bulk_delete', $context);
     }
 
     public function disableNamedGlobalScope(string $name): static
@@ -143,14 +137,8 @@ final class TableQueryRepository extends Repository
         $this->dispatchOperationHook('beforeForceDelete', $context);
 
         $affected = parent::forceDeleteById($id);
-        $context['affected'] = $affected;
 
-        $this->dispatchOperationHook('afterForceDelete', $context);
-        if ($affected > 0) {
-            $this->scheduleAfterCommit('force_delete', $context);
-        }
-
-        return $affected;
+        return $this->completeMutation($affected, 'afterForceDelete', 'force_delete', $context);
     }
 
     /** Permanently delete rows matching a repository-aware scope. */
@@ -161,14 +149,8 @@ final class TableQueryRepository extends Repository
 
         $query = $this->applyMutationScope($this->builderWithoutSoftDeleteConstraint(), $scope);
         $affected = $query->delete();
-        $context['affected'] = $affected;
 
-        $this->dispatchOperationHook('afterForceDelete', $context);
-        if ($affected > 0) {
-            $this->scheduleAfterCommit('force_delete', $context);
-        }
-
-        return $affected;
+        return $this->completeMutation($affected, 'afterForceDelete', 'force_delete', $context);
     }
 
     /** Restore one soft-deleted row by primary key. */
@@ -179,14 +161,8 @@ final class TableQueryRepository extends Repository
         $this->dispatchOperationHook('beforeRestore', $context);
 
         $affected = parent::restoreById($id);
-        $context['affected'] = $affected;
 
-        $this->dispatchOperationHook('afterRestore', $context);
-        if ($affected > 0) {
-            $this->scheduleAfterCommit('restore', $context);
-        }
-
-        return $affected;
+        return $this->completeMutation($affected, 'afterRestore', 'restore', $context);
     }
 
     /** Restore all matching soft-deleted rows. */
@@ -203,14 +179,8 @@ final class TableQueryRepository extends Repository
             ->whereNotNull($this->softDeleteColumn);
         $query = $this->applyMutationScope($query, $scope);
         $affected = $query->update([$this->softDeleteColumn => null]);
-        $context['affected'] = $affected;
 
-        $this->dispatchOperationHook('afterRestore', $context);
-        if ($affected > 0) {
-            $this->scheduleAfterCommit('restore', $context);
-        }
-
-        return $affected;
+        return $this->completeMutation($affected, 'afterRestore', 'restore', $context);
     }
 
     /** @param array<string,string|callable(mixed):mixed|AttributeCast> $casts */
@@ -336,14 +306,8 @@ final class TableQueryRepository extends Repository
 
         $query = $this->applyMutationScope($this->builder(), $scope);
         $affected = $query->update($payload);
-        $context['affected'] = $affected;
 
-        $this->dispatchOperationHook('afterBulkUpdate', $context);
-        if ($affected > 0) {
-            $this->scheduleAfterCommit('bulk_update', $context);
-        }
-
-        return $affected;
+        return $this->completeMutation($affected, 'afterBulkUpdate', 'bulk_update', $context);
     }
 
     /**

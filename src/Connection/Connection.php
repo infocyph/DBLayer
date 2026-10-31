@@ -1115,7 +1115,7 @@ final class Connection
                 $hasMore = false;
             }
 
-            if ($hasMore !== true) {
+            if (!$hasMore) {
                 break;
             }
         }

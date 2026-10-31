@@ -66,12 +66,12 @@ final class RelationLoader
         $grouped = [];
 
         foreach ($rows as $row) {
-            $grouped[$this->key($row[$relatedKey] ?? null)][] = $row;
+            $grouped[RepositorySupport::key($row[$relatedKey] ?? null)][] = $row;
         }
 
         $result = [];
         foreach ($parents as $parent) {
-            $parent[$as] = $grouped[$this->key($parent[$parentKey] ?? null)] ?? [];
+            $parent[$as] = $grouped[RepositorySupport::key($parent[$parentKey] ?? null)] ?? [];
             $result[] = $parent;
         }
 
@@ -104,7 +104,7 @@ final class RelationLoader
         ?callable $scope = null,
     ): array {
         $this->lastQueryCount = 0;
-        $parentValues = $this->values($parents, $parentKey);
+        $parentValues = $this->uniqueValues($parents, $parentKey);
         $pivotRows = [];
 
         foreach (array_chunk($parentValues, $this->batchSize) as $values) {
@@ -130,19 +130,19 @@ final class RelationLoader
         $relatedByKey = [];
 
         foreach ($relatedRows as $row) {
-            $relatedByKey[$this->key($row[$relatedKey] ?? null)] = $row;
+            $relatedByKey[RepositorySupport::key($row[$relatedKey] ?? null)] = $row;
         }
 
         $relatedKeysByParent = [];
         foreach ($pivotRows as $pivot) {
-            $relatedKeysByParent[$this->key($pivot[$pivotParentKey] ?? null)][]
-                = $this->key($pivot[$pivotRelatedKey] ?? null);
+            $relatedKeysByParent[RepositorySupport::key($pivot[$pivotParentKey] ?? null)][]
+                = RepositorySupport::key($pivot[$pivotRelatedKey] ?? null);
         }
 
         $result = [];
         foreach ($parents as $parent) {
             $matches = [];
-            foreach ($relatedKeysByParent[$this->key($parent[$parentKey] ?? null)] ?? [] as $relatedValue) {
+            foreach ($relatedKeysByParent[RepositorySupport::key($parent[$parentKey] ?? null)] ?? [] as $relatedValue) {
                 if (isset($relatedByKey[$relatedValue])) {
                     $matches[] = $relatedByKey[$relatedValue];
                 }
@@ -179,34 +179,19 @@ final class RelationLoader
         $indexed = [];
 
         foreach ($rows as $row) {
-            $key = $this->key($row[$relatedKey] ?? null);
+            $key = RepositorySupport::key($row[$relatedKey] ?? null);
             $indexed[$key] ??= $row;
         }
 
         $result = [];
         foreach ($parents as $parent) {
-            $parent[$as] = $indexed[$this->key($parent[$parentKey] ?? null)] ?? null;
+            $parent[$as] = $indexed[RepositorySupport::key($parent[$parentKey] ?? null)] ?? null;
             $result[] = $parent;
         }
 
         $this->recordDiagnostics(count($rows));
 
         return $result;
-    }
-
-    /**
-     * @param list<string> $columns
-     * @return list<string>
-     */
-    private function ensureKeySelected(array $columns, string $key): array
-    {
-        if ($columns === ['*'] || in_array('*', $columns, true) || in_array($key, $columns, true)) {
-            return $columns;
-        }
-
-        $columns[] = $key;
-
-        return $columns;
     }
 
     /**
@@ -226,7 +211,7 @@ final class RelationLoader
             return [];
         }
 
-        $columns = $this->ensureKeySelected($columns, $key);
+        $columns = RepositorySupport::projection($columns, $key)[0];
         $rows = [];
 
         foreach (array_chunk($values, $this->batchSize) as $chunk) {
@@ -257,23 +242,12 @@ final class RelationLoader
         ?callable $scope,
     ): array {
         return $this->fetchByValues(
-            $this->values($parents, $parentKey),
+            $this->uniqueValues($parents, $parentKey),
             $table,
             $relatedKey,
             $columns,
             $scope,
         );
-    }
-
-    private function key(mixed $value): string
-    {
-        return match (true) {
-            is_int($value), is_string($value) => 'scalar:' . $value,
-            is_float($value) => 'float:' . serialize($value),
-            is_bool($value) => 'bool:' . ($value ? '1' : '0'),
-            $value === null => 'null:',
-            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
-        };
     }
 
     private function recordDiagnostics(int $rowCount): void
@@ -295,7 +269,7 @@ final class RelationLoader
                 continue;
             }
 
-            $normalized = $this->key($row[$key]);
+            $normalized = RepositorySupport::key($row[$key]);
             if (!isset($seen[$normalized])) {
                 $seen[$normalized] = true;
                 $values[] = $row[$key];
@@ -303,14 +277,5 @@ final class RelationLoader
         }
 
         return $values;
-    }
-
-    /**
-     * @param list<array<string,mixed>> $rows
-     * @return list<mixed>
-     */
-    private function values(array $rows, string $key): array
-    {
-        return $this->uniqueValues($rows, $key);
     }
 }

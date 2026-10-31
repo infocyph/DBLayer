@@ -34,7 +34,7 @@ final readonly class RepositoryOneOfManyRelation
 
         $related = $definition->related
             ?? throw new InvalidArgumentException('One-of-many relation requires a related repository.');
-        $parentValues = $this->values($parents, $definition->parentKey);
+        $parentValues = RepositorySupport::uniqueValues(array_column($parents, $definition->parentKey));
         $winners = new RepositoryOneOfManySelector($this->batchSize)->select($definition, $parentValues);
 
         if ($winners === []) {
@@ -42,7 +42,7 @@ final readonly class RepositoryOneOfManyRelation
         }
 
         $primaryKey = $related::definition()->primaryKey;
-        [$columns, $internalColumns] = $this->projection($definition->columns, $primaryKey);
+        [$columns, $internalColumns] = RepositorySupport::projection($definition->columns, $primaryKey);
         $rowsById = $this->winnerRows(
             $related,
             $primaryKey,
@@ -79,35 +79,6 @@ final readonly class RepositoryOneOfManyRelation
         unset($parent);
 
         return $parents;
-    }
-
-    /**
-     * @param list<string> $requested
-     * @return array{0:list<string>,1:list<string>}
-     */
-    private function projection(array $requested, string $primaryKey): array
-    {
-        if ($requested === ['*'] || in_array('*', $requested, true) || in_array($primaryKey, $requested, true)) {
-            return [$requested, []];
-        }
-
-        return [[...$requested, $primaryKey], [$primaryKey]];
-    }
-
-    /**
-     * @param list<array<string,mixed>> $rows
-     * @return list<mixed>
-     */
-    private function values(array $rows, string $column): array
-    {
-        $values = [];
-        foreach ($rows as $row) {
-            if (array_key_exists($column, $row) && $row[$column] !== null) {
-                $values[] = $row[$column];
-            }
-        }
-
-        return RepositorySupport::uniqueValues($values);
     }
 
     /**

@@ -456,10 +456,10 @@ Hardening controls:
 
 - PHP 8.4+
 - ext-pdo
-- `infocyph/arraykit ^5.3.1`, `infocyph/cachelayer ^4.0`,
+- `infocyph/arraykit ^5.3.2`, `infocyph/cachelayer ^4.0.2`,
   and `psr/log ^3.0.2`
-- `infocyph/runwire` 2.1.x is optional for host-runtime integration; DBLayer's integration is tested against 2.1.1
-- `infocyph/intermix` 11.2+ is optional for automatic repository parameter binding
+- `infocyph/runwire ^3.0` is optional for host-runtime integration; DBLayer's integration is tested against 3.0
+- `infocyph/intermix ^11.2.1` is optional for automatic repository parameter binding
 - ext-pdo_mysql (for MySQL and MariaDB)
 - ext-pdo_pgsql (for PostgreSQL)
 - ext-pdo_sqlsrv (for Microsoft SQL Server)

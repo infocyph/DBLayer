@@ -321,6 +321,20 @@ their CacheLayer namespace/logical connection identity deliberately.
 Benchmark Acceptance
 --------------------
 
+The release workflow runs the same host-workload harness against the baseline
+and candidate at concurrency 1, 2, and 4. It alternates seven measured pairs
+after conditioning both targets. Workload ``dblayer-release-host-v2`` includes
+point/range reads, query-cache hits and misses, transactions, streaming,
+batched relation projections, and repository mutations with operation and
+commit hooks. Repository fixtures are reused within each worker.
+
+The comparator rejects different workload versions and incomplete trial sets.
+Its existing limits cover a maximum 2% median matched-pair throughput
+regression, p95 latency, and native memory. Failed requests and worker failures
+are rejected; query counts are reported alongside the acceptance results.
+Component microbenchmarks support investigation; they do not replace this
+matched host workload or the sustained Runwire worker soak.
+
 Plan cost is evidence, not the final performance result. Compare:
 
 - equivalent result rows and semantics

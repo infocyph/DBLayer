@@ -381,7 +381,7 @@ generation ownership.
 Runwire Runtime Composition
 ---------------------------
 
-Runwire integration is optional and instance-oriented. The host lends its
+Runwire 3.0 integration is optional and instance-oriented. The host lends its
 already active runtime/request/scope to an exclusively owned connection:
 
 .. code-block:: php

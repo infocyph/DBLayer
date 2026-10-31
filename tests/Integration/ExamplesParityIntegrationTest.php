@@ -567,6 +567,7 @@ it('keeps examples and integration coverage in sync', function (): void {
         'relation_loading.php' => [
             'RelationLoaderIntegrationTest.php',
             'RelationLoaderEdgeCasesIntegrationTest.php',
+            'ReleaseRepositoryHarnessTest.php',
         ],
         'restored_modules.php' => [
             'RestoredModulesIntegrationTest.php',

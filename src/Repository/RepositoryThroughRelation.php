@@ -202,23 +202,6 @@ final readonly class RepositoryThroughRelation
     }
 
     /**
-     * @param array<array-key,mixed> $values
-     * @return list<array<string,mixed>>
-     */
-    private function normalizeRows(array $values): array
-    {
-        $rows = [];
-        foreach ($values as $value) {
-            $row = RepositorySupport::row($value);
-            if ($row !== null) {
-                $rows[] = $row;
-            }
-        }
-
-        return $rows;
-    }
-
-    /**
      * @param list<array<string,mixed>> $rows
      * @return array<string,string>
      */
@@ -237,23 +220,6 @@ final readonly class RepositoryThroughRelation
     }
 
     /**
-     * @param list<string> $requested
-     * @return array{0:list<string>,1:list<string>}
-     */
-    private function projection(array $requested, string $relatedKey): array
-    {
-        if ($requested === ['*'] || in_array('*', $requested, true)) {
-            return [$requested, []];
-        }
-
-        if (in_array($relatedKey, $requested, true)) {
-            return [$requested, []];
-        }
-
-        return [[...$requested, $relatedKey], [$relatedKey]];
-    }
-
-    /**
      * @param list<array<string,mixed>> $throughRows
      * @param null|callable(QueryBuilder):void $constraint
      * @return array{0:list<array<string,mixed>>,1:list<string>}
@@ -266,9 +232,9 @@ final readonly class RepositoryThroughRelation
     ): array {
         $related = $this->requireRelated($definition);
         $relatedKey = RepositorySupport::column($definition->relatedKey);
-        $values = $this->values($throughRows, $throughKey);
+        $values = RepositorySupport::uniqueValues(array_column($throughRows, $throughKey));
         $batchSize = max(1, $related::connection()->safeBatchSize(requested: $this->batchSize));
-        [$columns, $internalColumns] = $this->projection($definition->columns, $relatedKey);
+        [$columns, $internalColumns] = RepositorySupport::projection($definition->columns, $relatedKey);
         $rows = [];
 
         foreach (array_chunk($values, $batchSize) as $chunk) {
@@ -276,7 +242,7 @@ final readonly class RepositoryThroughRelation
                 $builder->whereIn($relatedKey, $chunk);
             });
             $this->applyRelatedScopes($query, $definition, $constraint);
-            array_push($rows, ...$this->normalizeRows($query->get($columns)->toArray()));
+            array_push($rows, ...RepositorySupport::rows($query->get($columns)->toArray()));
         }
 
         return [$rows, $internalColumns];
@@ -317,7 +283,7 @@ final readonly class RepositoryThroughRelation
         $through = $this->requireThrough($definition);
         $throughParentKey = RepositorySupport::column($this->requireThroughParentKey($definition));
         $throughKey = RepositorySupport::column($this->requireThroughKey($definition));
-        $parentValues = $this->values($parents, $definition->parentKey);
+        $parentValues = RepositorySupport::uniqueValues(array_column($parents, $definition->parentKey));
         $batchSize = max(1, $through::connection()->safeBatchSize(requested: $this->batchSize));
         $rows = [];
 
@@ -325,26 +291,10 @@ final readonly class RepositoryThroughRelation
             $query = $through::query()->apply(static function (QueryBuilder $builder) use ($throughParentKey, $chunk): void {
                 $builder->whereIn($throughParentKey, $chunk);
             });
-            array_push($rows, ...$this->normalizeRows($query->get([$throughParentKey, $throughKey])->toArray()));
+            array_push($rows, ...RepositorySupport::rows($query->get([$throughParentKey, $throughKey])->toArray()));
         }
 
         return [$rows, $throughParentKey, $throughKey];
-    }
-
-    /**
-     * @param list<array<string,mixed>> $rows
-     * @return list<int|float|string|bool>
-     */
-    private function values(array $rows, string $column): array
-    {
-        $values = [];
-        foreach ($rows as $row) {
-            if (array_key_exists($column, $row) && $row[$column] !== null) {
-                $values[] = $row[$column];
-            }
-        }
-
-        return RepositorySupport::uniqueValues($values);
     }
 
     /**

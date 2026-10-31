@@ -68,19 +68,6 @@ final readonly class RepositoryRelationLoader
     }
 
     /**
-     * @param list<string> $columns
-     * @return list<string>
-     */
-    private function ensureKeySelected(array $columns, string $key): array
-    {
-        if ($columns === ['*'] || in_array('*', $columns, true) || in_array($key, $columns, true)) {
-            return $columns;
-        }
-
-        return [...$columns, $key];
-    }
-
-    /**
      * @param list<int|float|string|bool> $values
      * @param null|callable(QueryBuilder):void $constraint
      * @return list<array<string,mixed>>
@@ -132,7 +119,7 @@ final readonly class RepositoryRelationLoader
 
         $relatedKey = RepositorySupport::column($relatedKey);
         $morphTypeColumn = $morphTypeColumn === null ? null : RepositorySupport::column($morphTypeColumn);
-        $columns = $this->ensureKeySelected($columns, $relatedKey);
+        $columns = RepositorySupport::projection($columns, $relatedKey)[0];
         $batchSize = max(1, $related::connection()->safeBatchSize(requested: $this->batchSize));
         $rows = [];
 

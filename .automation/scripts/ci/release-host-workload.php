@@ -7,6 +7,7 @@ use Infocyph\DBLayer\Connection\ConnectionConfig;
 
 require_once __DIR__ . '/ReleaseHostResources.php';
 require_once __DIR__ . '/ReleaseHostStartBarrier.php';
+require_once __DIR__ . '/ReleaseRepositoryWorkload.php';
 
 /**
  * @phpstan-type WorkerResult array{successes:int,errors:int,queries:int,reads:int,writes:int,peak_rss_bytes:int,peak_php_heap_bytes:int,pid:int,cpu_user_seconds:float,cpu_system_seconds:float,latency_ms:list<float>}
@@ -64,7 +65,7 @@ final class ReleaseHostWorkload
 
         $payload = [
             'schema_version' => 2,
-            'workload' => 'dblayer-release-host-v1',
+            'workload' => 'dblayer-release-host-v2',
             'environment' => $this->environment(),
             'project' => basename($this->project),
             'revision' => $this->revision,
@@ -128,7 +129,12 @@ final class ReleaseHostWorkload
         ]), $name);
     }
 
-    private function executeRequest(Connection $connection, int $worker, int $sequence): void
+    private function executeRequest(
+        Connection $connection,
+        int $worker,
+        int $sequence,
+        ReleaseRepositoryWorkload $repository,
+    ): void
     {
         $id = (($sequence * 17 + $worker * 29) % 2_000) + 1;
         $row = $connection->table('release_perf_items')->where('id', '=', $id)->first();
@@ -164,6 +170,7 @@ final class ReleaseHostWorkload
         });
 
         $this->verifyStream($connection, $id);
+        $repository->execute($rows, $worker, $sequence);
 
         if ($sequence % 20 === 0) {
             $ownedId = $worker + 1;
@@ -319,11 +326,13 @@ final class ReleaseHostWorkload
         }
 
         $connections = [];
+        $repositories = [];
         try {
             for ($worker = 0; $worker < $concurrency; $worker++) {
                 $connection = $this->connection('release-host-warmup-' . $worker);
                 $connection->scalar('select 1');
                 $connections[] = $connection;
+                $repositories[] = new ReleaseRepositoryWorkload($connection);
             }
 
             $endAt = microtime(true) + $this->warmupSeconds;
@@ -332,7 +341,7 @@ final class ReleaseHostWorkload
             while (microtime(true) < $endAt) {
                 foreach ($connections as $worker => $connection) {
                     $sequence++;
-                    $this->executeRequest($connection, $worker, $sequence);
+                    $this->executeRequest($connection, $worker, $sequence, $repositories[$worker]);
                 }
             }
         } finally {
@@ -448,6 +457,7 @@ final class ReleaseHostWorkload
     private function runWorker(int $worker, ReleaseHostStartBarrier $barrier): array
     {
         $connection = $this->connection('release-host-' . $worker);
+        $repository = new ReleaseRepositoryWorkload($connection);
         $successes = 0;
         $errors = 0;
         $latencies = [];
@@ -465,7 +475,7 @@ final class ReleaseHostWorkload
                 $started = hrtime(true);
 
                 try {
-                    $this->executeRequest($connection, $worker, $sequence);
+                    $this->executeRequest($connection, $worker, $sequence, $repository);
                     $successes++;
                 } catch (Throwable) {
                     $errors++;

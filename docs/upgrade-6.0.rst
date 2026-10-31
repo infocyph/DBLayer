@@ -5,6 +5,11 @@ DBLayer 6.0 tightens correctness contracts around tenancy, cache isolation,
 transactions, lazy resource ownership, and persistent runtimes. It also raises
 the direct dependency floors to ArrayKit ``^5.3`` and CacheLayer ``^4.0``.
 
+This guide records the original 6.0 migration. For the current dependency
+floors and Runwire 3.0 integration, see :doc:`installation`. Existing hosts
+upgrading from Runwire 2.1 should upgrade their host runtime alongside the
+optional integration dependencies.
+
 Dependency Changes
 ------------------
 

@@ -488,6 +488,80 @@ it('fires after-commit callbacks only after top-level commit and discards them o
         ->and(CompletionPost::query()->where('title', '=', 'Rolled back')->count())->toBe(0);
 });
 
+it('preserves counted mutation events and only commits callbacks for affected rows', function (
+    string $method,
+    string $event,
+    string $operation,
+    bool $matches,
+    bool $commit,
+): void {
+    $connection = CompletionPost::connection();
+    if (str_starts_with($method, 'restore')) {
+        $connection->table('completion_posts')->where('id', 1)->update(['deleted_at' => '2026-01-01 00:00:00']);
+    }
+
+    $repository = CompletionPost::repository();
+    expect($repository)->toBeInstanceOf(TableQueryRepository::class);
+    $events = [];
+    $afterContext = null;
+    $repository->onOperation('before' . $event, static function (array $context) use (&$events): void {
+        expect($context)->not->toHaveKey('affected');
+        $events[] = 'before';
+    });
+    $repository->onOperation('after' . $event, static function (array $context) use (&$events, &$afterContext): void {
+        $afterContext = $context;
+        $events[] = 'after';
+    });
+    $id = $matches ? 1 : 999;
+    $scope = static fn(QueryBuilder $query) => $query->where('id', $id);
+    $connection->begin();
+    $affected = match ($method) {
+        'updateWhere' => $repository->updateWhere(['status' => 'changed'], $scope),
+        'deleteWhere' => $repository->deleteWhere($scope),
+        'forceDeleteById' => $repository->forceDeleteById($id),
+        'forceDeleteWhere' => $repository->forceDeleteWhere($scope),
+        'restoreById' => $repository->restoreById($id),
+        'restoreWhere' => $repository->restoreWhere($scope),
+    };
+
+    expect($affected)->toBe((int) $matches)
+        ->and($events)->toBe(['before', 'after'])
+        ->and($afterContext['affected'])->toBe($affected)
+        ->and(CompletionPost::$commitEvents)->toBe([]);
+
+    if ($commit) {
+        $connection->commit();
+    } else {
+        $connection->rollBack();
+    }
+    expect(CompletionPost::$commitEvents)->toBe($matches && $commit ? [$operation] : []);
+})->with([
+    ['updateWhere', 'BulkUpdate', 'bulk_update'],
+    ['deleteWhere', 'BulkDelete', 'bulk_delete'],
+    ['forceDeleteById', 'ForceDelete', 'force_delete'],
+    ['forceDeleteWhere', 'ForceDelete', 'force_delete'],
+    ['restoreById', 'Restore', 'restore'],
+    ['restoreWhere', 'Restore', 'restore'],
+])->with([true, false])->with([true, false]);
+
+it('does not schedule a commit callback when a mutation after-hook throws', function (): void {
+    $repository = CompletionPost::repository();
+    $repository->afterBulkUpdate(static function (): void {
+        throw new \RuntimeException('after-hook sentinel');
+    });
+    $connection = CompletionPost::connection();
+    $connection->begin();
+    try {
+        expect(fn() => $repository->updateWhere(['status' => 'changed']))
+            ->toThrow(\RuntimeException::class, 'after-hook sentinel');
+        expect(CompletionPost::$commitEvents)->toBe([]);
+    } finally {
+        $connection->rollBack();
+    }
+    expect(CompletionPost::query()->where('status', 'changed')->count())->toBe(0)
+        ->and(CompletionPost::$commitEvents)->toBe([]);
+});
+
 it('promotes after-commit callbacks through nested savepoints to the top-level commit', function (): void {
     $connection = CompletionPost::connection();
 

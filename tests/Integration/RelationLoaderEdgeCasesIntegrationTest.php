@@ -109,6 +109,23 @@ it('deduplicates lookup keys while preserving duplicate parent projections', fun
         ->and($loaded[4]['posts'])->toBe([]);
 });
 
+it('retains the first binding representation when equivalent parent identifiers repeat', function (): void {
+    $loader = relationEdgeLoader(2);
+    $bindings = [];
+    DB::enableQueryLog();
+    $loaded = $loader->many([['id' => '1'], ['id' => 1], ['id' => null], []], 'id', 'edge_posts', 'user_id', 'posts', ['title']);
+    foreach (DB::getQueryLog() as $query) {
+        array_push($bindings, ...$query['bindings']);
+    }
+
+    expect($bindings)->toBe(['1'])
+        ->and($loader->lastQueryCount())->toBe(1)
+        ->and($loaded[0]['posts'])->toBe($loaded[1]['posts'])
+        ->and($loaded[0]['posts'][0])->toHaveKeys(['title', 'user_id'])
+        ->and($loaded[2]['posts'])->toBe([])
+        ->and($loaded[3]['posts'])->toBe([]);
+});
+
 it('applies scopes once per batch and makes one-relation ordering deterministic', function (): void {
     $loader = relationEdgeLoader(2);
     $scopeCalls = 0;
