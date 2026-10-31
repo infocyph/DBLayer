@@ -6,6 +6,7 @@ namespace Infocyph\DBLayer\Repository;
 
 use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Support\Numeric;
 use InvalidArgumentException;
 
 /** Aggregate through relations without hydrating final relation graphs. */
@@ -63,8 +64,8 @@ final readonly class RepositoryThroughRelationAggregator
             }
 
             $state = $states[$parent] ?? ['sum' => 0.0, 'count' => 0];
-            $state['sum'] += $this->numericFloat($row['aggregate_sum'] ?? null);
-            $state['count'] += $this->numericInt($row['aggregate_count'] ?? null);
+            $state['sum'] += Numeric::toFloat($row['aggregate_sum'] ?? null);
+            $state['count'] += Numeric::toInt($row['aggregate_count'] ?? null);
             $states[$parent] = $state;
         }
 
@@ -169,38 +170,15 @@ final readonly class RepositoryThroughRelationAggregator
         }
     }
 
-    private function compare(mixed $left, mixed $right): int
-    {
-        if (is_numeric($left) && is_numeric($right)) {
-            return (float) $left <=> (float) $right;
-        }
-
-        if (is_scalar($left) && is_scalar($right)) {
-            return (string) $left <=> (string) $right;
-        }
-
-        return 0;
-    }
-
     private function mergeScalar(string $function, mixed $current, mixed $value): mixed
     {
         return match ($function) {
-            'count' => $this->numericInt($current) + $this->numericInt($value),
-            'sum' => $this->numericFloat($current) + $this->numericFloat($value),
-            'min' => $current === null || $this->compare($value, $current) < 0 ? $value : $current,
-            'max' => $current === null || $this->compare($value, $current) > 0 ? $value : $current,
+            'count' => Numeric::toInt($current) + Numeric::toInt($value),
+            'sum' => Numeric::toFloat($current) + Numeric::toFloat($value),
+            'min' => $current === null || RepositorySupport::compare($value, $current) < 0 ? $value : $current,
+            'max' => $current === null || RepositorySupport::compare($value, $current) > 0 ? $value : $current,
             default => $current,
         };
-    }
-
-    private function numericFloat(mixed $value): float
-    {
-        return is_numeric($value) ? (float) $value : 0.0;
-    }
-
-    private function numericInt(mixed $value): int
-    {
-        return is_numeric($value) ? (int) $value : 0;
     }
 
     /**

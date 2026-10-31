@@ -146,6 +146,18 @@ trait RepositoryOperationLifecycle
     }
 
     /** @param array<string,mixed> $context */
+    private function completeMutation(int $affected, string $event, string $operation, array $context): int
+    {
+        $context['affected'] = $affected;
+        $this->dispatchOperationHook($event, $context);
+        if ($affected > 0) {
+            $this->scheduleAfterCommit($operation, $context);
+        }
+
+        return $affected;
+    }
+
+    /** @param array<string,mixed> $context */
     private function dispatchOperationHook(string $event, array $context): void
     {
         foreach ($this->operationHooks[$event] ?? [] as $callback) {

@@ -22,16 +22,43 @@ final class RepositorySupport
         return $column;
     }
 
+    public static function compare(mixed $left, mixed $right): int
+    {
+        if (is_numeric($left) && is_numeric($right)) {
+            return (float) $left <=> (float) $right;
+        }
+
+        if (is_scalar($left) && is_scalar($right)) {
+            return (string) $left <=> (string) $right;
+        }
+
+        return 0;
+    }
+
     public static function key(mixed $value): string
     {
-        $value = self::value($value);
-
         return match (true) {
             is_int($value), is_string($value) => 'scalar:' . $value,
             is_float($value) => 'float:' . serialize($value),
             is_bool($value) => 'bool:' . ($value ? '1' : '0'),
             $value === null => 'null:',
+            default => throw new InvalidArgumentException('Relation keys must be scalar or null.'),
         };
+    }
+
+    /**
+     * Retain a mapping key for relation matching and identify it for later removal.
+     *
+     * @param list<string> $requested
+     * @return array{0:list<string>,1:list<string>}
+     */
+    public static function projection(array $requested, string $key): array
+    {
+        if (in_array('*', $requested, true) || in_array($key, $requested, true)) {
+            return [$requested, []];
+        }
+
+        return [[...$requested, $key], [$key]];
     }
 
     /**

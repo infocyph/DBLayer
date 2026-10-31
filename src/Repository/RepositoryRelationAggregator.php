@@ -7,6 +7,7 @@ namespace Infocyph\DBLayer\Repository;
 use Infocyph\DBLayer\Connection\Connection;
 use Infocyph\DBLayer\Query\Expression;
 use Infocyph\DBLayer\Query\QueryBuilder;
+use Infocyph\DBLayer\Support\Numeric;
 use InvalidArgumentException;
 
 /** Compute relation aggregates in bounded batches without hydrating full graphs. */
@@ -82,11 +83,11 @@ final readonly class RepositoryRelationAggregator
     private function accumulate(mixed $state, string $function, mixed $value): mixed
     {
         return match ($function) {
-            'count' => $this->numericInt($state) + 1,
-            'sum' => $this->numericFloat($state) + $this->numericFloat($value),
+            'count' => Numeric::toInt($state) + 1,
+            'sum' => Numeric::toFloat($state) + Numeric::toFloat($value),
             'avg' => $this->accumulateAverage($state, $value),
-            'min' => $state === null || $this->compare($value, $state) < 0 ? $value : $state,
-            'max' => $state === null || $this->compare($value, $state) > 0 ? $value : $state,
+            'min' => $state === null || RepositorySupport::compare($value, $state) < 0 ? $value : $state,
+            'max' => $state === null || RepositorySupport::compare($value, $state) > 0 ? $value : $state,
             default => $state,
         };
     }
@@ -95,10 +96,10 @@ final readonly class RepositoryRelationAggregator
     private function accumulateAverage(mixed $state, mixed $value): array
     {
         $current = is_array($state) ? $state : [];
-        $sum = $this->numericFloat($current['sum'] ?? null);
-        $count = $this->numericInt($current['count'] ?? null);
+        $sum = Numeric::toFloat($current['sum'] ?? null);
+        $count = Numeric::toInt($current['count'] ?? null);
 
-        return ['sum' => $sum + $this->numericFloat($value), 'count' => $count + 1];
+        return ['sum' => $sum + Numeric::toFloat($value), 'count' => $count + 1];
     }
 
     /**
@@ -304,27 +305,15 @@ final readonly class RepositoryRelationAggregator
         }
     }
 
-    private function compare(mixed $left, mixed $right): int
-    {
-        if (is_numeric($left) && is_numeric($right)) {
-            return (float) $left <=> (float) $right;
-        }
-        if (is_scalar($left) && is_scalar($right)) {
-            return (string) $left <=> (string) $right;
-        }
-
-        return 0;
-    }
-
     private function finalize(mixed $state, string $function): mixed
     {
         if ($function !== 'avg' || !is_array($state)) {
             return $function === 'avg' ? null : $state;
         }
 
-        $count = $this->numericInt($state['count'] ?? null);
+        $count = Numeric::toInt($state['count'] ?? null);
 
-        return $count > 0 ? $this->numericFloat($state['sum'] ?? null) / $count : null;
+        return $count > 0 ? Numeric::toFloat($state['sum'] ?? null) / $count : null;
     }
 
     /**
@@ -352,16 +341,6 @@ final readonly class RepositoryRelationAggregator
         }
 
         return $groups;
-    }
-
-    private function numericFloat(mixed $value): float
-    {
-        return is_numeric($value) ? (float) $value : 0.0;
-    }
-
-    private function numericInt(mixed $value): int
-    {
-        return is_numeric($value) ? (int) $value : 0;
     }
 
     /**
@@ -463,7 +442,7 @@ final readonly class RepositoryRelationAggregator
     private function singleValueAggregate(string $function, mixed $value): mixed
     {
         return match ($function) {
-            'sum', 'avg' => $this->numericFloat($value),
+            'sum', 'avg' => Numeric::toFloat($value),
             'min', 'max' => $value,
             default => $value,
         };

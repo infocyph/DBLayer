@@ -21,7 +21,7 @@ function dblayerValidReleaseEvidence(): array
     }
 
     return [
-        'schema_version' => 2, 'workload' => 'dblayer-release-host-v1',
+        'schema_version' => 2, 'workload' => 'dblayer-release-host-v2',
         'revision' => str_repeat('a', 40), 'duration_seconds' => 8,
         'warmup_seconds' => 1, 'trials' => 7, 'concurrencies' => [1, 2, 4],
         'environment' => array_fill_keys(['php', 'extensions', 'os', 'architecture', 'cpu', 'database', 'dataset'], 'same'),
