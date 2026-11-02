@@ -72,6 +72,11 @@ When retries are enabled, write logic must be idempotent or safely repeatable.
 Prefer transaction-level retry for deadlocks/serialization failures over
 retrying standalone non-idempotent statements.
 
+Failed prepared statements are reset before query retry or transaction recovery,
+including when exception traces retain their arguments. Cursor cleanup preserves
+an execution failure as the primary exception. This does not make ambiguous
+writes safe to retry; use idempotency and the appropriate transaction boundary.
+
 After-Commit Callbacks
 ----------------------
 

@@ -301,6 +301,15 @@ trait ConnectionInternals
         $this->statementCachePdoIds['read'] = null;
     }
 
+    private function closeFailedStatement(PDOStatement $statement): void
+    {
+        try {
+            $statement->closeCursor();
+        } catch (Throwable) {
+            // Preserve the execution failure if cursor cleanup also fails.
+        }
+    }
+
     /**
      * Establish write database connection via the driver.
      */
@@ -570,7 +579,15 @@ trait ConnectionInternals
             $statement->bindValue($parameter, $value, $this->getParameterType($value));
         }
 
-        $statement->execute();
+        try {
+            $statement->execute();
+        } catch (Throwable $failure) {
+            // Exception traces can retain failed statements past rollback or retry.
+            // Reset native state before either path reuses the connection.
+            $this->closeFailedStatement($statement);
+
+            throw $failure;
+        }
 
         return $statement;
     }

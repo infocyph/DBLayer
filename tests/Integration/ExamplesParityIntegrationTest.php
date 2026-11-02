@@ -579,7 +579,7 @@ it('keeps examples and integration coverage in sync', function (): void {
             'MigrationEdgeCasesIntegrationTest.php',
             'SeedRunnerEdgeCasesIntegrationTest.php',
         ],
-        'transactions.php' => ['TransactionIntegrationTest.php'],
+        'transactions.php' => ['TransactionIntegrationTest.php', 'StatementFailureCleanupTest.php'],
     ];
 
     $mappedExamples = array_keys($coverageMap);
